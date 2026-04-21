@@ -2,7 +2,7 @@
   "schema_version": "0.1-example",
   "profile_id": "hrv_counterflow_erv_v1",
   "display_name": "HRV / energy-recovery ventilator — supply + exhaust, current-switch fan proof",
-  "description": "Illustrative fragment: two airstreams, no electric heat. One BI (current switch) on the fan motor circuit: first balance measured supply and exhaust each to half design L/s, reduce fan commands ~15%, then field-adjust the current switch so BI just picks up. Airflow manually verified with tool assistance.",
+  "description": "Illustrative fragment: two airstreams, no electric heat. One BI (current switch) on the fan motor circuit: first balance measured supply and exhaust each to half design L/s, reduce fan commands by a relative fraction (default 20%), then field-adjust the current switch so BI just picks up. Airflow manually verified with tool assistance.",
   "bacnet_device": {
     "device_instance": 22001,
     "address": {
@@ -18,8 +18,8 @@
     "design_return_to_core_airflow_L_s": 45.0,
     "comment": "No heater on this profile. Naming of streams should match shop drawings.",
     "current_switch_commissioning": {
-      "reduce_fan_command_after_measured_half_percent": 15,
-      "comment": "Tune per site; 'about 15%' from field practice"
+      "reduce_fan_command_relative_percent_after_measured_half": 20,
+      "comment": "Relative reduction: new_command = old_command * (1 - percent/100). Example 40% -> 32% at 20% relative. Tune per site (15% relative was discussed)."
     }
   },
   "objects": [
@@ -126,13 +126,14 @@
     },
     {
       "step_id": "hrv_reduce_fan_commands_after_half",
-      "label": "Reduce both fan commands ~15% from that operating point",
-      "description": "From the half-design measured point, reduce supply and exhaust fan AVs by unit_specs.current_switch_commissioning.reduce_fan_command_after_measured_half_percent (default 15%).",
+      "label": "Reduce both fan commands (relative %) from that operating point",
+      "description": "From the half-design measured point, multiply each fan AV by (1 - P/100) where P = unit_specs.current_switch_commissioning.reduce_fan_command_relative_percent_after_measured_half (default 20 = 20% relative reduction).",
       "arms_test_mode_state_key": "airflow_verify_supply",
       "actions": [
         {
-          "type": "reduce_fan_speed_commands_by_percent",
-          "percent": 15,
+          "type": "reduce_fan_speed_commands_by_relative_percent",
+          "relative_percent": 20,
+          "formula": "new_value = present_value * (1 - relative_percent/100)",
           "relative_to": "commands_at_measured_half_design",
           "object_ids": ["av_supply_fan_command", "av_exhaust_fan_command"]
         }
@@ -214,7 +215,7 @@
       }
     ],
     "assisted_balancing": {
-      "description": "Predictable order: measured half-design on supply and exhaust → reduce fan commands ~15% → adjust current switch for BI pickup → assisted manual L/s verification per branch."
+      "description": "Predictable order: measured half-design on supply and exhaust → reduce fan commands (relative %, default 20%) → adjust current switch for BI pickup → assisted manual L/s verification per branch."
     }
   },
   "tests": [

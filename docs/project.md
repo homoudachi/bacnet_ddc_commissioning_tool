@@ -37,7 +37,8 @@ Windows **portable executable** that acts as a **commissioning assistant** for *
 3. **Manual verification of airflow** — technician confirms measured or inferred airflow against design after the automatic modulation / estimation pass.
 4. **Assisted airflow balancing** — same job data should support **guided balancing** (which branch to adjust, target vs measured, instrument choice)—see [Import schema (direction)](#import-schema-direction).
 5. **Tests** — **Automatic** by default; each must be **skippable** or **manually passable** (override automatic fail or skip when the job demands it).
-6. **Cooling valve stroke verify (no plant)** — For units with a **cooling valve**, you always want this **without chilled water** connected: command the valve **to 100%**, have the technician **confirm** travel / end position (or other evidence) via **prompt**, then command **to 0%** and **confirm again**. This proves stroke and direction independent of CHW availability. Full **CHW performance** tests remain separate when the plant is ready.
+6. **Cooling valve stroke verify (no plant)** — For units with a **cooling valve**, you always want this **without chilled water** connected: command the valve **to 100%**, have the technician **confirm** travel / end position (or other evidence) via **prompt**, then command **to 0%** and **confirm again**. This proves stroke and direction independent of CHW availability.
+7. **Proper cooling test (CHW)** — When the plant is ready, run a **full cooling / CHW performance** test (valve, SAT or other success criteria per profile—define in import). If **chilled water is not available yet**, the technician must be able to **skip** this test (with reason recorded) and complete the rest of commissioning; return when CHW is ready to clear the skip or re-run.
 
 ## Commissioning UX: predictable, seamless steps per unit
 
@@ -82,7 +83,7 @@ Document per **equipment profile** which source is valid and required uncertaint
 ### Example — HRV (no electric heat in profile)
 
 - **Two streams, measured first:** Adjust **supply** and **exhaust (return-side)** fan **AV commands (0–100%)** using **measured** airflow on each branch until each stream is at **half of its design flow (L/s)** (not half of command—**half of design as verified by measurement** in the assisted tool).
-- **Then reduce speed:** From that proven operating point, **reduce both fan commands by about 15%** (exact percentage is a **profile parameter**, e.g. 15%, not hard-coded in the app).
+- **Then reduce speed:** From that proven operating point, **reduce both fan commands by a relative percentage** of their values at half-flow—e.g. **20% relative** means each command becomes **× (1 − 0.20) = 0.80** of what it was at measured half-design (not “minus 20 percentage points” on the AV scale). The **exact percentage is a profile parameter** (15% relative was discussed; **20% relative** is a reasonable default to try in the field).
 - **Current switch pickup:** **Adjust the current switch** (field setpoint / sensitivity) so it **just comes on** at this reduced-flow operating point—so the **BI** reliably indicates “fan running” without nuisance trips at idle. The technician confirms **BI active** after the adjustment.
 - **No heater** on these units: **no heat-rise test**; **airflow is manually verified** with **tool-assisted balancing** before/after as defined in the import.
 
@@ -97,6 +98,7 @@ Schema is still being designed; it must carry **everything needed to commission 
 - **Test mode MSVs** — one MSV (or clear MSV set) per **test category**; **state list** ↔ human-readable test name; safe transitions (e.g. leaving heating test).
 - **Airflow verification** — which **measurement tool** applies (pitot traverse rules, balometer, grid, hot-wire, etc.) and how readings map to **pass/fail** or **balancing targets** for **assisted airflow balancing**.
 - **Cooling valve (no CHW)** — valve **command object**, **100% then 0%** sequence, and **prompt text** (or checklist) for what the technician must confirm at each end.
+- **CHW cooling test (plant)** — pass/fail criteria when CHW is on; **`skippable`** with **recorded reason** when plant is not ready.
 - **Interlocks and limits** — thresholds (e.g. 50% design), min/max fan during tests, points that must not be written in certain modes.
 
 Exact file format (JSON, YAML, SQLite job DB, etc.) is TBD; the above is the **information model** the first schema version must implement.
@@ -107,8 +109,8 @@ These files are **starting sketches** (`schema_version: "0.1-example"`). They ar
 
 | File | Intent |
 |------|--------|
-| [examples/unit-profile-fcu.example.json](examples/unit-profile-fcu.example.json) | FCU: MSV modes, **tachometer value AV**, fan **AV 0–100%**, heat **AV 0–100%**, CHW valve **stroke verify without plant** (100% prompt → 0% prompt), RAT manual/Bluetooth, **commissioning_flow** (half-flow chain → heating), interlock uses **stored** half-flow tacho reference. |
-| [examples/unit-profile-hrv.example.json](examples/unit-profile-hrv.example.json) | HRV: dual streams, **tachometer value** AVs, fan **AVs 0–100%**; **measured** half-design L/s on supply and exhaust, then **~15% fan command reduction**, then **field-adjust current switch** so **BI just picks up**; **no heat**, assisted + manual airflow. |
+| [examples/unit-profile-fcu.example.json](examples/unit-profile-fcu.example.json) | FCU: MSV modes, **tachometer value AV**, fan **AV 0–100%**, heat **AV 0–100%**, CHW valve **stroke without plant**; **proper CHW cooling test** when plant ready (**skippable** with reason if not), RAT manual/Bluetooth, **commissioning_flow** (half-flow chain → heating), interlock uses **stored** half-flow tacho reference. |
+| [examples/unit-profile-hrv.example.json](examples/unit-profile-hrv.example.json) | HRV: dual streams, **tachometer value** AVs, fan **AVs 0–100%**; **measured** half-design L/s on supply and exhaust, then **~20% relative** fan command reduction (profile-tunable), then **field-adjust current switch** so **BI just picks up**; **no heat**, assisted + manual airflow. |
 
 ## Job model
 

@@ -164,6 +164,21 @@
       ]
     },
     {
+      "step_id": "proper_cooling_chw_test",
+      "label": "Proper cooling test (CHW plant required)",
+      "description": "Full cooling performance when chilled water is available (criteria per profile—SAT, valve, flow, etc.). If CHW is not ready, technician skips with recorded reason; re-run later when plant is on.",
+      "arms_test_mode_state_key": "chw_test",
+      "skippable": true,
+      "skip_when": ["chilled_water_not_ready", "plant_not_commissioned"],
+      "skip_requires_operator_reason": true,
+      "actions": [
+        {
+          "type": "run_cooling_performance_test",
+          "comment": "Define pass criteria in profile when you lock SAT/valve setpoints for CHW test"
+        }
+      ]
+    },
+    {
       "step_id": "heating_test",
       "label": "Heating test (modulating heat AV)",
       "description": "Only offered after half-flow tachometer reference is stored and manual airflow step acknowledged per UI rules.",
@@ -248,6 +263,30 @@
           "description": "Tool drives av_supply_fan_command and av_electric_heat_command within limits; SAT/RAT per session/manual/Bluetooth.",
           "actuator_object_ids": ["av_supply_fan_command", "av_electric_heat_command"],
           "target": "approach_design_delta_t_and_flow"
+        }
+      ],
+      "manual_verification_required": true
+    },
+    {
+      "id": "chw_cooling_performance_test",
+      "test_mode_state_key": "chw_test",
+      "skippable": true,
+      "skip_requires_operator_reason": true,
+      "skip_hint": "Use when chilled water plant is not ready; complete valve stroke test without CHW first.",
+      "steps": [
+        {
+          "action": "write_msv_state",
+          "object_id": "msv_test_mode",
+          "state_key": "chw_test"
+        },
+        {
+          "action": "operator_confirm_prerequisite",
+          "prompt_id": "chw_plant_ready",
+          "prompt_text": "Confirm chilled water is available and safe to demand cooling on this unit (flow, temperature, interlocks)."
+        },
+        {
+          "action": "run_cooling_performance_per_profile",
+          "comment": "Placeholder: modulate ao_chw_valve and/or fan per program; verify SAT or other criteria from import"
         }
       ],
       "manual_verification_required": true
