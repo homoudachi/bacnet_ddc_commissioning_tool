@@ -1,8 +1,8 @@
 {
   "schema_version": "0.1-example",
   "profile_id": "hrv_counterflow_erv_v1",
-  "display_name": "HRV / energy-recovery ventilator — supply + exhaust flows",
-  "description": "Illustrative import fragment for a unit with two airstreams (supply outdoor→space, exhaust space→outdoor). Object numbers are placeholders.",
+  "display_name": "HRV / energy-recovery ventilator — supply + exhaust, current-switch fan proof",
+  "description": "Illustrative fragment: two airstreams, no electric heat. One BI (current switch) on the fan motor circuit; fans run just below half design speed to satisfy prove. Airflow is manually verified with tool assistance.",
   "bacnet_device": {
     "device_instance": 22001,
     "address": {
@@ -16,7 +16,7 @@
     "design_exhaust_airflow_L_s": 45.0,
     "design_outdoor_airflow_L_s": 47.2,
     "design_return_to_core_airflow_L_s": 45.0,
-    "comment": "Label 'exhaust' here is the airstream leaving the occupied zone toward the recovery device; align naming with your drawings."
+    "comment": "No heater on this profile. Naming of streams should match shop drawings."
   },
   "objects": [
     {
@@ -31,28 +31,38 @@
         { "number": 3, "key": "fan_tacho_exhaust", "label": "Exhaust fan tachometer verification" },
         { "number": 4, "key": "airflow_verify_supply", "label": "Supply airflow verification" },
         { "number": 5, "key": "airflow_verify_exhaust", "label": "Exhaust (return) airflow verification" },
-        { "number": 6, "key": "heat_recovery_balance", "label": "Heat-recovery performance / balance check" },
+        { "number": 6, "key": "heat_recovery_balance", "label": "Heat-recovery balance / flow ratio check" },
         { "number": 7, "key": "defrost_or_frost_test", "label": "Defrost / frost protection test (if applicable)" }
       ]
     },
     {
-      "id": "av_supply_fan_tacho_rpm",
-      "role": "supply_fan_tachometer_engineering",
+      "id": "bi_fan_motor_current_switch",
+      "role": "fan_motor_current_switch_single_circuit",
+      "description": "One current switch on the fan circuit; proves both fans when wired per your panel.",
+      "bacnet": { "object_type": "binaryInput", "instance": 9 },
+      "writable": false,
+      "polarity": "active_on_current_detected"
+    },
+    {
+      "id": "av_supply_fan_tacho_value",
+      "role": "supply_fan_tachometer_value",
       "bacnet": { "object_type": "analogValue", "instance": 10 },
       "writable": false,
       "signal": {
         "kind": "pulse_train_conditioned_by_controller",
-        "engineering_units": "rpm"
+        "engineering_units": "noSpecificUnits",
+        "ui_label": "Supply tachometer value"
       }
     },
     {
-      "id": "av_exhaust_fan_tacho_rpm",
-      "role": "exhaust_fan_tachometer_engineering",
+      "id": "av_exhaust_fan_tacho_value",
+      "role": "exhaust_fan_tachometer_value",
       "bacnet": { "object_type": "analogValue", "instance": 11 },
       "writable": false,
       "signal": {
         "kind": "pulse_train_conditioned_by_controller",
-        "engineering_units": "rpm"
+        "engineering_units": "noSpecificUnits",
+        "ui_label": "Exhaust tachometer value"
       }
     },
     {
@@ -93,15 +103,63 @@
       "engineering_units": "degreesCelsius"
     }
   ],
-  "temperature_inputs_for_heat_rise": {
-    "comment": "HRV may not use electric heat-rise airflow estimation; section included so one schema serves FCU and HRV profiles.",
-    "sat_ref": { "object_id": "ai_supply_air_temperature" },
-    "rat_equivalent": {
-      "description": "Return-to-core or recirc path temperature may be missing on BACnet; allow manual / Bluetooth.",
-      "allowed_sources": ["manual_entry", "bluetooth_probe"],
-      "bacnet_object_id": "ai_exhaust_air_temperature"
+  "commissioning_flow": [
+    {
+      "step_id": "current_switch_prove_just_below_half",
+      "label": "Set fans just below half design speed; verify current switch BI",
+      "description": "Single BI for the fan circuit: modulate av_supply_fan_command and av_exhaust_fan_command to slightly under 0.5 × design on each stream (per your program’s mapping), then technician confirms BI = RUN/current detected.",
+      "arms_test_mode_state_key": "airflow_verify_supply",
+      "actions": [
+        {
+          "type": "automatic_airflow_adjustment_dual_fan",
+          "target_flow_ratio_of_design_each_stream": 0.48,
+          "comment": "Just below half—tune ratio (e.g. 0.48–0.49) per controller program",
+          "supply_fan_object_id": "av_supply_fan_command",
+          "exhaust_fan_object_id": "av_exhaust_fan_command",
+          "supply_measurement_branch_id": "outdoor_supply_main",
+          "exhaust_measurement_branch_id": "exhaust_return_main"
+        },
+        {
+          "type": "operator_confirm_binary_input",
+          "object_id": "bi_fan_motor_current_switch",
+          "expected_state": "active"
+        }
+      ]
+    },
+    {
+      "step_id": "manual_airflow_assisted_supply",
+      "label": "Manual supply airflow verification (assisted)",
+      "arms_test_mode_state_key": "airflow_verify_supply",
+      "actions": [
+        {
+          "type": "manual_airflow_verification_assisted",
+          "branch_ids": ["outdoor_supply_main"]
+        }
+      ]
+    },
+    {
+      "step_id": "manual_airflow_assisted_exhaust",
+      "label": "Manual exhaust airflow verification (assisted)",
+      "arms_test_mode_state_key": "airflow_verify_exhaust",
+      "actions": [
+        {
+          "type": "manual_airflow_verification_assisted",
+          "branch_ids": ["exhaust_return_main"]
+        }
+      ]
+    },
+    {
+      "step_id": "optional_recovery_balance",
+      "label": "Optional: heat-recovery balance check",
+      "arms_test_mode_state_key": "heat_recovery_balance",
+      "actions": [
+        {
+          "type": "prompt_measure_both_streams",
+          "branch_ids": ["outdoor_supply_main", "exhaust_return_main"]
+        }
+      ]
     }
-  },
+  ],
   "airflow_verification": {
     "branches": [
       {
@@ -126,12 +184,12 @@
       }
     ],
     "assisted_balancing": {
-      "description": "UI targets each branch independently; may link readings to av_supply_fan_command vs av_exhaust_fan_command tuning rules in a later schema revision."
+      "description": "Same predictable step order for every HRV of this profile: prove BI near half flow, then assisted manual L/s on each stream."
     }
   },
   "tests": [
     {
-      "id": "supply_fan_tacho",
+      "id": "supply_fan_tachometer_read",
       "test_mode_state_key": "fan_tacho_supply",
       "steps": [
         {
@@ -139,12 +197,20 @@
           "object_id": "msv_test_mode",
           "state_key": "fan_tacho_supply"
         },
-        { "action": "read_until_stable", "object_id": "av_supply_fan_tacho_rpm", "stable_seconds": 5 }
+        {
+          "action": "read_until_stable",
+          "object_id": "av_supply_fan_tacho_value",
+          "stable_seconds": 5
+        }
       ],
-      "pass_criteria": { "type": "rpm_greater_than", "value": 100 }
+      "pass_criteria": {
+        "type": "tachometer_value_threshold",
+        "comparison": "greater_than",
+        "value": 0
+      }
     },
     {
-      "id": "exhaust_fan_tacho",
+      "id": "exhaust_fan_tachometer_read",
       "test_mode_state_key": "fan_tacho_exhaust",
       "steps": [
         {
@@ -152,12 +218,20 @@
           "object_id": "msv_test_mode",
           "state_key": "fan_tacho_exhaust"
         },
-        { "action": "read_until_stable", "object_id": "av_exhaust_fan_tacho_rpm", "stable_seconds": 5 }
+        {
+          "action": "read_until_stable",
+          "object_id": "av_exhaust_fan_tacho_value",
+          "stable_seconds": 5
+        }
       ],
-      "pass_criteria": { "type": "rpm_greater_than", "value": 100 }
+      "pass_criteria": {
+        "type": "tachometer_value_threshold",
+        "comparison": "greater_than",
+        "value": 0
+      }
     },
     {
-      "id": "cross_flow_balance_coarse",
+      "id": "dual_stream_flow_within_tolerance",
       "test_mode_state_key": "heat_recovery_balance",
       "steps": [
         {

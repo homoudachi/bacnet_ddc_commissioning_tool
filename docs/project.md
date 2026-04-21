@@ -38,6 +38,26 @@ Windows **portable executable** that acts as a **commissioning assistant** for *
 4. **Assisted airflow balancing** — same job data should support **guided balancing** (which branch to adjust, target vs measured, instrument choice)—see [Import schema (direction)](#import-schema-direction).
 5. **Tests** — **Automatic** by default; each must be **skippable** or **manually passable** (override automatic fail or skip when the job demands it).
 
+## Commissioning UX: predictable, seamless steps per unit
+
+Each **equipment profile** defines an ordered **commissioning flow** (same steps in the same order for every unit of that type) so technicians always know what comes next. Where **half-design airflow** matters (for example before enabling electric heat), the flow is **one continuous path**, not disconnected screens:
+
+1. **Automatic airflow adjustment** — tool drives the **fan speed AV (0–100%)** (and any other declared actuators) toward the **0.5 × design** airflow target using the profile’s measurement rules.
+2. **Confirm tachometer reference at that operating point** — when flow is correct per the tool, the technician **confirms** the **tachometer value** read from BACnet (see [Tachometer value](#tachometer-value-not-rpm)); that value is **stored for the session** as the reference for interlocks and checks.
+3. **Manual airflow verification** — technician performs the real-world measurement (L/s); assisted balancing UI stays in the same narrative.
+4. **Downstream tests** (e.g. heating) only proceed when prior steps are satisfied, using the **confirmed** half-flow tachometer reference—not a guessed RPM curve.
+
+Steps, targets, and which MSV state arms each segment live in the **import**.
+
+## Tachometer value (not “RPM”)
+
+The field device is often a **pulse** train; the controller exposes an **Analog Value** (or similar) we call the **tachometer value** (informally **tacho value**). It may **correlate** with speed but **engineering units are not assumed to be RPM**—scaling and meaning are **profile-defined**. Interlocks and “half flow” references compare **this BACnet value**, not a hard-coded RPM.
+
+## Analog commands (0–100%)
+
+- **Supply (and exhaust, if applicable) fan speed:** written as **AV 0–100%** (not only binary fan).
+- **Variable electric heat:** **0–100% on an AV** (modulating heat), not modeled here as simple on/off stages unless a profile explicitly uses discrete stages.
+
 ## Return air temperature (RAT) sources
 
 Many units **do not have a RAT BACnet point**. The tool must accept **return-side temperature** from one of:
@@ -51,13 +71,19 @@ Document per **equipment profile** which source is valid and required uncertaint
 
 **Variation across unit types:** Different units have different I/O, interlocks, and **MSV** test modes. Each **equipment profile** in the import is authoritative—avoid hard-coding one rooftop’s logic into the core app.
 
-### Example — electric heat enable interlock (one program family)
+### Example — electric heat enable interlock (FCU-style family)
 
-- **Fan tachometer:** Physical signal is a **pulse train**; the **controller conditions it** and exposes a **BACnet Analog Value (AV)** (or equivalent analog) representing **fan speed / RPM** (scaling and units per import).
-- **Interlock:** Electric heat is only allowed when **fan proof / speed** is **above 50% of design airflow** (or equivalent scaled signal per import). Implement as: tach-derived signal must exceed **0.5 × design airflow** before heat is permitted or before the tool marks the heat test as “allowed.”
-- **SAT:** Supply air temperature point as defined in the import.
+- **Tachometer value:** Pulse at the field; controller exposes an **AV** as **tachometer value** (units per import—not assumed RPM).
+- **Half-design airflow gate:** Heat is allowed only after the **seamless workflow** in [Commissioning UX](#commissioning-ux-predictable-seamless-steps-per-unit): automatic adjustment to **~0.5 × design** flow, **operator confirmation** of the tachometer value at that point, and **manual airflow verification**. Thereafter the interlock compares **current tachometer value** to the **stored confirmed reference** (with optional hysteresis in the profile).
+- **Heat command:** **AV 0–100%** modulating electric heat per program.
+- **SAT:** As defined in the import.
 
-_(Add more profiles: CHW-only, heat recovery with **supply + return design flows**, gas heat, etc.)_
+### Example — HRV (no electric heat in profile)
+
+- **Single motor current / run proof:** One **Binary Input (BI)** for the **fan circuit** (e.g. current switch). Commissioning sets fan speed(s) to **just below half of design-flow speed** (per profile: which AV(s), target command or inferred flow band) so the **BI state** matches the program’s expectation for “fan proven at reduced speed.”
+- **No heater** on these units: **no heat-rise test**; **airflow is manually verified** with **tool-assisted balancing** (targets, instruments, step order in the import).
+
+_(Add more profiles: CHW-only, other recovery layouts, gas heat, etc.)_
 
 ## Import schema (direction)
 
@@ -77,8 +103,8 @@ These files are **starting sketches** (`schema_version: "0.1-example"`). They ar
 
 | File | Intent |
 |------|--------|
-| [examples/unit-profile-fcu.example.json](examples/unit-profile-fcu.example.json) | FCU-style unit: MSV test modes, pulse→**AV** fan tach, SAT, CHW valve, electric heat stage, fan speed command, RAT via manual/Bluetooth, assisted balancing on one supply branch, sample heat interlock vs **50% design flow**. |
-| [examples/unit-profile-hrv.example.json](examples/unit-profile-hrv.example.json) | HRV / ERV: **supply and exhaust** design flows (L/s), separate fan tachs and commands, multi-branch airflow verification with **per-branch measurement tool**, MSV modes for each stream and recovery/balance. |
+| [examples/unit-profile-fcu.example.json](examples/unit-profile-fcu.example.json) | FCU: MSV modes, **tachometer value AV**, fan **AV 0–100%**, heat **AV 0–100%**, CHW valve, RAT manual/Bluetooth, **commissioning_flow** (auto half-flow → confirm tacho ref → manual verify → heating), interlock uses **stored** half-flow tacho reference. |
+| [examples/unit-profile-hrv.example.json](examples/unit-profile-hrv.example.json) | HRV: dual streams, **tachometer value** AVs, fan **AVs 0–100%**, **single BI** current switch for fan circuit, **just below half design speed** step for BI prove, **no heat**, assisted + manual airflow only. |
 
 ## Job model
 
@@ -130,7 +156,7 @@ _(Fill in after the first runnable build.)_
 - **Heat-rise → airflow:** confirm exact **formula variant** (sensible only vs mixed, latent ignored?), **staging** of electric heat (kW per step), and **minimum fan / maximum SAT** limits during auto modulation.
 - **RAT workflow:** default to **manual entry** until Bluetooth (or other) device support exists; define **where** in the job file optional `rat_source: manual | bluetooth | bacnet_object` lives.
 - **MSV contracts:** canonical **state numbers** per test type across profiles, or fully profile-local only?
-- **50% threshold:** confirm comparison signal (**RPM**, **estimated airflow**, **dedicated flow AV**) per profile.
+- **Half-design reference:** optional hysteresis when comparing **live tachometer value** to the **session-stored** value captured after auto-adjust + operator confirm.
 - **Bluetooth / external sensors:** pairing, calibration, audit trail (who accepted which reading).
 - **PDF / XLSX stack:** libraries acceptable for FOSS + Windows portable build.
 - **Log format:** binary, JSON lines, CSV, or rotating text; retention on disk.
