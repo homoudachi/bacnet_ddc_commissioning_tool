@@ -4,13 +4,13 @@ Audience: future you. Update when intent, behavior, or exports change.
 
 ## Goal
 
-Windows **portable executable** that acts as a **commissioning assistant** for BACnet-enabled controllers: command devices, run **automatic tests**, monitor results, and combine **automatic judgment** with **technician verification** (notes + name). Supports **many controllers** per job via an **imported target list**.
+Windows **portable executable** that acts as a **commissioning assistant** for **BACnet-capable** controllers: command devices, run **automatic tests**, monitor results, and combine **automatic judgment** with **technician verification** (notes + name). Supports **many controllers** per job via an **imported target list**.
 
 ## Controllers and configuration
 
-- **Hardware:** Innatech controllers.
-- **Application logic:** Custom configurations **authored by you**; the tool assumes familiarity with those programs but does not embed vendor-secret protocols—**BACnet objects** expose **inputs and outputs** as seen on the network.
-- **Test / override mode:** Controllers support a **test mode** that can **override automatic logic** so commissioning can drive outputs and observe behavior safely within that mode (exact BACnet representation: document per program when you lock the import schema).
+- **Hardware:** Any **BACnet-capable** controller that matches the imported object map (no vendor lock-in in the product description).
+- **Application logic:** Configurations **authored by you** (or your team); the tool talks **standard BACnet**—inputs and outputs appear as **BACnet objects** on the network.
+- **Test / override mode:** For each **class of test**, the controller exposes a **Multi-state Value (MSV)** that selects that test mode (examples: **fan tachometer verification**, **airflow verification**, **heating test**, **chilled-water (CHW) test**, and additional types as you add them). Writing the MSV is how the assistant arms the controller logic for that commissioning scenario; exact **state numbers ↔ meanings** live in the **import** per unit profile.
 
 ## Non-goals (current intent)
 
@@ -33,21 +33,43 @@ Windows **portable executable** that acts as a **commissioning assistant** for B
 ## Commissioning scope (v1 capabilities described so far)
 
 1. **Point checkout** — read / command / verify per imported standard-object definitions.
-2. **Airflow estimation (electric heat)** — use the **standard heat-rise / sensible-heat** relationship (same family of formula used in field airflow estimation from kW and ΔT). **Inputs:** **heater command** (on/off or staged as your programs expose), **heater capacity**, **supply air temperature (SAT)**, **return air temperature (RAT)**. **Supply airflow** is **automatically modulated** (e.g. fan speed / VFD command within safe limits) to **approach design** conditions; then **manual verification** of real airflow (L/s) remains the commissioning record.
+2. **Airflow estimation (electric heat)** — use the **standard heat-rise / sensible-heat** relationship (kW and ΔT family). **Inputs:** **heater command**, **heater capacity**, **supply air temperature (SAT)**, and a **return-air-side temperature** for ΔT. **There is often no BACnet RAT sensor** on site; see [Return air temperature (RAT) sources](#return-air-temperature-rat-sources). **Supply airflow** is **automatically modulated** (e.g. fan speed / VFD within limits in the import) to **approach design**; then **manual verification** of real airflow (L/s) remains the commissioning record.
 3. **Manual verification of airflow** — technician confirms measured or inferred airflow against design after the automatic modulation / estimation pass.
-4. **Tests** — **Automatic** by default; each must be **skippable** or **manually passable** (override automatic fail or skip when the job demands it).
+4. **Assisted airflow balancing** — same job data should support **guided balancing** (which branch to adjust, target vs measured, instrument choice)—see [Import schema (direction)](#import-schema-direction).
+5. **Tests** — **Automatic** by default; each must be **skippable** or **manually passable** (override automatic fail or skip when the job demands it).
+
+## Return air temperature (RAT) sources
+
+Many units **do not have a RAT BACnet point**. The tool must accept **return-side temperature** from one of:
+
+- **Operator-entered value** for the session or step (typed in when commissioning), and/or
+- **External measurement** merged into the workflow—e.g. a **Bluetooth temperature sensor** (or any other handheld) with a defined pairing/read path in software **later**; until implemented, **manual entry** is the fallback.
+
+Document per **equipment profile** which source is valid and required uncertainty (if any).
 
 ## Site-specific requirements
 
-**Variation across unit types:** There are **other unit types with different I/O and interlocks** than the template below. Treat each **equipment profile** (or import bundle) as authoritative for which analogs, thresholds, and test-mode behavior apply—avoid hard-coding one rooftop’s logic into the core app.
+**Variation across unit types:** Different units have different I/O, interlocks, and **MSV** test modes. Each **equipment profile** in the import is authoritative—avoid hard-coding one rooftop’s logic into the core app.
 
 ### Example — electric heat enable interlock (one program family)
 
-- **Fan tachometer:** **Analog input (AI)**, **2–20 mA** in normal operation, engineering value represents **fan RPM** (scale per job in import).
-- **Interlock:** Electric heat is only allowed when the inferred or scaled **fan airflow / speed** is **above 50% of design airflow** (same threshold concept as “design” used elsewhere in the job). Implement as: tach / RPM or converted airflow must exceed **0.5 × design airflow** before heat stages are permitted or before the tool marks the heat test as “allowed.”
-- **SAT:** **Supply air temperature** as an **analog input** (object details per import).
+- **Fan tachometer:** Physical signal is a **pulse train**; the **controller conditions it** and exposes a **BACnet Analog Value (AV)** (or equivalent analog) representing **fan speed / RPM** (scaling and units per import).
+- **Interlock:** Electric heat is only allowed when **fan proof / speed** is **above 50% of design airflow** (or equivalent scaled signal per import). Implement as: tach-derived signal must exceed **0.5 × design airflow** before heat is permitted or before the tool marks the heat test as “allowed.”
+- **SAT:** Supply air temperature point as defined in the import.
 
-_(Add more profiles: cooling-only, gas heat, different fan proof, etc., as separate bullets or linked profile names.)_
+_(Add more profiles: CHW-only, heat recovery with **supply + return design flows**, gas heat, etc.)_
+
+## Import schema (direction)
+
+Schema is still being designed; it must carry **everything needed to commission one unit type** without hard-coded site knowledge in code:
+
+- **BACnet object map** — instances, types (AI/AV/AO/BI/BV/MSV/…), properties used, COV vs polled, units.
+- **Per-unit specifications** — **heater size** (capacity per stage if applicable), **design airflow** (L/s), and for **heat recovery** and similar layouts: **return / exhaust / outdoor** flows as required by that profile.
+- **Test mode MSVs** — one MSV (or clear MSV set) per **test category**; **state list** ↔ human-readable test name; safe transitions (e.g. leaving heating test).
+- **Airflow verification** — which **measurement tool** applies (pitot traverse rules, balometer, grid, hot-wire, etc.) and how readings map to **pass/fail** or **balancing targets** for **assisted airflow balancing**.
+- **Interlocks and limits** — thresholds (e.g. 50% design), min/max fan during tests, points that must not be written in certain modes.
+
+Exact file format (JSON, YAML, SQLite job DB, etc.) is TBD; the above is the **information model** the first schema version must implement.
 
 ## Job model
 
@@ -69,15 +91,15 @@ _(Add more profiles: cooling-only, gas heat, different fan proof, etc., as separ
 
 ## Reference hardware (what question 11 meant)
 
-“Reference hardware” = **what physical BACnet controllers** you use on the bench for development and regression.
+“Reference hardware” = **BACnet controllers** and **field instruments** you use on the bench and on site for development and regression.
 
 | Item | Notes |
 |------|--------|
-| Vendor | Innatech |
-| Application | Your custom configurations (document model/firmware revision when you lock a test matrix) |
+| Controllers | BACnet/IP devices running your configurations |
+| Instruments | TBD: reference balometer / anemometer / Bluetooth temp device for RAT substitute trials |
 | Network | BACnet/IP; device identity as supplied in import |
 
-Add **specific model numbers, firmware, and one B/IP address + Device ID** per bench controller when available.
+Add **model, firmware, B/IP address + Device ID** per bench controller when you lock a regression set.
 
 ## How to run / verify
 
@@ -97,8 +119,9 @@ _(Fill in after the first runnable build.)_
 ## Open questions
 
 - **Heat-rise → airflow:** confirm exact **formula variant** (sensible only vs mixed, latent ignored?), **staging** of electric heat (kW per step), and **minimum fan / maximum SAT** limits during auto modulation.
-- **Import file format:** still **undefined** — needs schema for: controller list, **equipment profile** (unit type), BACnet object instances for SAT/RAT/heater command/capacity/fan tach, **mA→RPM→airflow** scaling, **design airflow (L/s)**, test definitions, and **test mode** invocation (which object/property to write).
-- **50% threshold:** confirm whether the interlock compares **RPM**, **estimated airflow from heat rise**, or a **dedicated airflow AI** when present on other profiles.
-- **“RAT” wording:** confirm **return air temperature** (for ΔT with SAT) vs any profile that uses **return fan speed** or other return-side signals—modulation target is assumed to be **supply fan / airflow** unless the import says otherwise.
-- **PDF / XLSX stack:** libraries acceptable for FOSS + Windows portable build (XLSX often pulls in a spreadsheet dependency).
+- **RAT workflow:** default to **manual entry** until Bluetooth (or other) device support exists; define **where** in the job file optional `rat_source: manual | bluetooth | bacnet_object` lives.
+- **MSV contracts:** canonical **state numbers** per test type across profiles, or fully profile-local only?
+- **50% threshold:** confirm comparison signal (**RPM**, **estimated airflow**, **dedicated flow AV**) per profile.
+- **Bluetooth / external sensors:** pairing, calibration, audit trail (who accepted which reading).
+- **PDF / XLSX stack:** libraries acceptable for FOSS + Windows portable build.
 - **Log format:** binary, JSON lines, CSV, or rotating text; retention on disk.
