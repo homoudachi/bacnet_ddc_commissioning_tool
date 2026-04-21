@@ -71,6 +71,15 @@ Schema is still being designed; it must carry **everything needed to commission 
 
 Exact file format (JSON, YAML, SQLite job DB, etc.) is TBD; the above is the **information model** the first schema version must implement.
 
+### Example profiles (illustrative JSON)
+
+These files are **starting sketches** (`schema_version: "0.1-example"`). They are not a frozen contract—adjust object types, instance numbers, MSV state maps, and formulas to match your controller programs.
+
+| File | Intent |
+|------|--------|
+| [examples/unit-profile-fcu.example.json](examples/unit-profile-fcu.example.json) | FCU-style unit: MSV test modes, pulse→**AV** fan tach, SAT, CHW valve, electric heat stage, fan speed command, RAT via manual/Bluetooth, assisted balancing on one supply branch, sample heat interlock vs **50% design flow**. |
+| [examples/unit-profile-hrv.example.json](examples/unit-profile-hrv.example.json) | HRV / ERV: **supply and exhaust** design flows (L/s), separate fan tachs and commands, multi-branch airflow verification with **per-branch measurement tool**, MSV modes for each stream and recovery/balance. |
+
 ## Job model
 
 - **Many controllers** per job (single job spans multiple devices from the import).

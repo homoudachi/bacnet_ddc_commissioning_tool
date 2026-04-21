@@ -1,0 +1,160 @@
+{
+  "schema_version": "0.1-example",
+  "profile_id": "fcu_2pipe_chw_electric_heat_v1",
+  "display_name": "FCU — 2-pipe CHW cooling + electric heat + modulating supply fan",
+  "description": "Illustrative import fragment. BACnet types/instances are placeholders; align with your controller program.",
+  "bacnet_device": {
+    "device_instance": 21001,
+    "address": {
+      "type": "ipv4",
+      "host": "192.168.1.50",
+      "port": 47808
+    }
+  },
+  "unit_specs": {
+    "design_supply_airflow_L_s": 0.85,
+    "design_return_airflow_L_s": null,
+    "heater": {
+      "type": "electric",
+      "stages_kw": [2.0],
+      "comment": "Single stage for example; add array entries for multi-stage"
+    },
+    "chw": {
+      "type": "two_pipe",
+      "valve_is_cooling_only": true
+    }
+  },
+  "objects": [
+    {
+      "id": "msv_test_mode",
+      "role": "commissioning_test_mode",
+      "bacnet": { "object_type": "multiStateValue", "instance": 50 },
+      "writable": true,
+      "relinquish_default": 1,
+      "states": [
+        { "number": 1, "key": "normal", "label": "Normal operation" },
+        { "number": 2, "key": "fan_tacho_verify", "label": "Fan tachometer verification" },
+        { "number": 3, "key": "airflow_verify", "label": "Airflow verification" },
+        { "number": 4, "key": "heating_test", "label": "Electric heating test" },
+        { "number": 5, "key": "chw_test", "label": "Chilled-water cooling test" }
+      ]
+    },
+    {
+      "id": "av_fan_tacho_rpm",
+      "role": "fan_tachometer_engineering",
+      "bacnet": { "object_type": "analogValue", "instance": 1 },
+      "writable": false,
+      "signal": {
+        "kind": "pulse_train_conditioned_by_controller",
+        "engineering_units": "rpm"
+      }
+    },
+    {
+      "id": "ai_sat",
+      "role": "supply_air_temperature",
+      "bacnet": { "object_type": "analogInput", "instance": 2 },
+      "writable": false,
+      "engineering_units": "degreesCelsius"
+    },
+    {
+      "id": "av_supply_fan_command",
+      "role": "supply_fan_speed_command",
+      "bacnet": { "object_type": "analogValue", "instance": 3 },
+      "writable": true,
+      "engineering_units": "percent",
+      "limits": { "min_write": 0, "max_write": 100 }
+    },
+    {
+      "id": "bo_heater_stage_1",
+      "role": "electric_heat_stage_1_command",
+      "bacnet": { "object_type": "binaryOutput", "instance": 4 },
+      "writable": true
+    },
+    {
+      "id": "ao_chw_valve",
+      "role": "chilled_water_valve_command",
+      "bacnet": { "object_type": "analogOutput", "instance": 5 },
+      "writable": true,
+      "engineering_units": "percent",
+      "limits": { "min_write": 0, "max_write": 100 }
+    }
+  ],
+  "temperature_inputs_for_heat_rise": {
+    "sat_ref": { "object_id": "ai_sat" },
+    "rat_equivalent": {
+      "description": "No BACnet RAT on this FCU; use operator or external probe for return-side air temperature.",
+      "allowed_sources": ["manual_entry", "bluetooth_probe"],
+      "bacnet_object_id": null
+    }
+  },
+  "interlocks": [
+    {
+      "id": "heat_allowed_above_half_design_airflow",
+      "applies_when_test_modes": ["heating_test"],
+      "expression": "fan_airflow_est_L_s >= 0.5 * unit_specs.design_supply_airflow_L_s",
+      "fan_airflow_est_L_s": {
+        "description": "Either direct flow AV, or RPM converted via fan_curve in import (placeholder below).",
+        "from_object_id": "av_fan_tacho_rpm",
+        "convert_to_L_s": {
+          "method": "rpm_to_flow_linear",
+          "rpm_at_design_flow": 1450,
+          "design_supply_airflow_L_s": 0.85
+        }
+      }
+    }
+  ],
+  "airflow_verification": {
+    "design_reference_flow_L_s": 0.85,
+    "branches": [
+      {
+        "id": "supply_terminal_main",
+        "label": "Primary supply outlet / grille",
+        "design_flow_L_s": 0.85,
+        "measurement": {
+          "default_tool": "balometer",
+          "allowed_tools": ["balometer", "pitot_traverse", "hot_wire_grid"],
+          "tolerance_percent": 10,
+          "notes": "Assisted balancing: UI walks tech through measure vs target and damper/fan adjustments."
+        }
+      }
+    ]
+  },
+  "tests": [
+    {
+      "id": "fan_tacho_sanity",
+      "test_mode_state_key": "fan_tacho_verify",
+      "steps": [
+        {
+          "action": "write_msv_state",
+          "object_id": "msv_test_mode",
+          "state_key": "fan_tacho_verify"
+        },
+        {
+          "action": "read_until_stable",
+          "object_id": "av_fan_tacho_rpm",
+          "stable_seconds": 5
+        }
+      ],
+      "pass_criteria": { "type": "rpm_greater_than", "value": 50 }
+    },
+    {
+      "id": "heating_heat_rise",
+      "test_mode_state_key": "heating_test",
+      "depends_on_interlocks": ["heat_allowed_above_half_design_airflow"],
+      "steps": [
+        {
+          "action": "write_msv_state",
+          "object_id": "msv_test_mode",
+          "state_key": "heating_test"
+        },
+        {
+          "action": "modulate_to_target",
+          "description": "Tool drives av_supply_fan_command within limits while monitoring SAT/RAT substitute per session input.",
+          "actuator_object_id": "av_supply_fan_command",
+          "target": "approach_design_delta_t_and_flow"
+        }
+      ],
+      "manual_verification_required": true
+    }
+  ]
+}

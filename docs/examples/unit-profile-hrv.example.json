@@ -1,0 +1,180 @@
+{
+  "schema_version": "0.1-example",
+  "profile_id": "hrv_counterflow_erv_v1",
+  "display_name": "HRV / energy-recovery ventilator — supply + exhaust flows",
+  "description": "Illustrative import fragment for a unit with two airstreams (supply outdoor→space, exhaust space→outdoor). Object numbers are placeholders.",
+  "bacnet_device": {
+    "device_instance": 22001,
+    "address": {
+      "type": "ipv4",
+      "host": "192.168.1.60",
+      "port": 47808
+    }
+  },
+  "unit_specs": {
+    "design_supply_airflow_L_s": 47.2,
+    "design_exhaust_airflow_L_s": 45.0,
+    "design_outdoor_airflow_L_s": 47.2,
+    "design_return_to_core_airflow_L_s": 45.0,
+    "comment": "Label 'exhaust' here is the airstream leaving the occupied zone toward the recovery device; align naming with your drawings."
+  },
+  "objects": [
+    {
+      "id": "msv_test_mode",
+      "role": "commissioning_test_mode",
+      "bacnet": { "object_type": "multiStateValue", "instance": 60 },
+      "writable": true,
+      "relinquish_default": 1,
+      "states": [
+        { "number": 1, "key": "normal", "label": "Normal operation" },
+        { "number": 2, "key": "fan_tacho_supply", "label": "Supply fan tachometer verification" },
+        { "number": 3, "key": "fan_tacho_exhaust", "label": "Exhaust fan tachometer verification" },
+        { "number": 4, "key": "airflow_verify_supply", "label": "Supply airflow verification" },
+        { "number": 5, "key": "airflow_verify_exhaust", "label": "Exhaust (return) airflow verification" },
+        { "number": 6, "key": "heat_recovery_balance", "label": "Heat-recovery performance / balance check" },
+        { "number": 7, "key": "defrost_or_frost_test", "label": "Defrost / frost protection test (if applicable)" }
+      ]
+    },
+    {
+      "id": "av_supply_fan_tacho_rpm",
+      "role": "supply_fan_tachometer_engineering",
+      "bacnet": { "object_type": "analogValue", "instance": 10 },
+      "writable": false,
+      "signal": {
+        "kind": "pulse_train_conditioned_by_controller",
+        "engineering_units": "rpm"
+      }
+    },
+    {
+      "id": "av_exhaust_fan_tacho_rpm",
+      "role": "exhaust_fan_tachometer_engineering",
+      "bacnet": { "object_type": "analogValue", "instance": 11 },
+      "writable": false,
+      "signal": {
+        "kind": "pulse_train_conditioned_by_controller",
+        "engineering_units": "rpm"
+      }
+    },
+    {
+      "id": "av_supply_fan_command",
+      "role": "supply_fan_speed_command",
+      "bacnet": { "object_type": "analogValue", "instance": 12 },
+      "writable": true,
+      "engineering_units": "percent",
+      "limits": { "min_write": 0, "max_write": 100 }
+    },
+    {
+      "id": "av_exhaust_fan_command",
+      "role": "exhaust_fan_speed_command",
+      "bacnet": { "object_type": "analogValue", "instance": 13 },
+      "writable": true,
+      "engineering_units": "percent",
+      "limits": { "min_write": 0, "max_write": 100 }
+    },
+    {
+      "id": "ai_oa_temperature",
+      "role": "outdoor_air_temperature",
+      "bacnet": { "object_type": "analogInput", "instance": 14 },
+      "writable": false,
+      "engineering_units": "degreesCelsius"
+    },
+    {
+      "id": "ai_supply_air_temperature",
+      "role": "supply_air_temperature_downstream_of_core",
+      "bacnet": { "object_type": "analogInput", "instance": 15 },
+      "writable": false,
+      "engineering_units": "degreesCelsius"
+    },
+    {
+      "id": "ai_exhaust_air_temperature",
+      "role": "exhaust_air_temperature_upstream_or_downstream_per_program",
+      "bacnet": { "object_type": "analogInput", "instance": 16 },
+      "writable": false,
+      "engineering_units": "degreesCelsius"
+    }
+  ],
+  "temperature_inputs_for_heat_rise": {
+    "comment": "HRV may not use electric heat-rise airflow estimation; section included so one schema serves FCU and HRV profiles.",
+    "sat_ref": { "object_id": "ai_supply_air_temperature" },
+    "rat_equivalent": {
+      "description": "Return-to-core or recirc path temperature may be missing on BACnet; allow manual / Bluetooth.",
+      "allowed_sources": ["manual_entry", "bluetooth_probe"],
+      "bacnet_object_id": "ai_exhaust_air_temperature"
+    }
+  },
+  "airflow_verification": {
+    "branches": [
+      {
+        "id": "outdoor_supply_main",
+        "label": "Outdoor-air / supply side — main duct",
+        "design_flow_L_s": 47.2,
+        "measurement": {
+          "default_tool": "pitot_traverse",
+          "allowed_tools": ["pitot_traverse", "balometer", "hot_wire_grid"],
+          "tolerance_percent": 10
+        }
+      },
+      {
+        "id": "exhaust_return_main",
+        "label": "Exhaust (return) side — main duct",
+        "design_flow_L_s": 45.0,
+        "measurement": {
+          "default_tool": "pitot_traverse",
+          "allowed_tools": ["pitot_traverse", "balometer", "hot_wire_grid"],
+          "tolerance_percent": 10
+        }
+      }
+    ],
+    "assisted_balancing": {
+      "description": "UI targets each branch independently; may link readings to av_supply_fan_command vs av_exhaust_fan_command tuning rules in a later schema revision."
+    }
+  },
+  "tests": [
+    {
+      "id": "supply_fan_tacho",
+      "test_mode_state_key": "fan_tacho_supply",
+      "steps": [
+        {
+          "action": "write_msv_state",
+          "object_id": "msv_test_mode",
+          "state_key": "fan_tacho_supply"
+        },
+        { "action": "read_until_stable", "object_id": "av_supply_fan_tacho_rpm", "stable_seconds": 5 }
+      ],
+      "pass_criteria": { "type": "rpm_greater_than", "value": 100 }
+    },
+    {
+      "id": "exhaust_fan_tacho",
+      "test_mode_state_key": "fan_tacho_exhaust",
+      "steps": [
+        {
+          "action": "write_msv_state",
+          "object_id": "msv_test_mode",
+          "state_key": "fan_tacho_exhaust"
+        },
+        { "action": "read_until_stable", "object_id": "av_exhaust_fan_tacho_rpm", "stable_seconds": 5 }
+      ],
+      "pass_criteria": { "type": "rpm_greater_than", "value": 100 }
+    },
+    {
+      "id": "cross_flow_balance_coarse",
+      "test_mode_state_key": "heat_recovery_balance",
+      "steps": [
+        {
+          "action": "write_msv_state",
+          "object_id": "msv_test_mode",
+          "state_key": "heat_recovery_balance"
+        },
+        {
+          "action": "prompt_measure_both_streams",
+          "branch_ids": ["outdoor_supply_main", "exhaust_return_main"]
+        }
+      ],
+      "pass_criteria": {
+        "type": "both_streams_within_tolerance_percent_of_design",
+        "tolerance_percent": 10
+      },
+      "manual_verification_required": true
+    }
+  ]
+}
