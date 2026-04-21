@@ -36,7 +36,8 @@
         { "number": 4, "key": "airflow_verify_supply", "label": "Supply airflow verification" },
         { "number": 5, "key": "airflow_verify_exhaust", "label": "Exhaust (return) airflow verification" },
         { "number": 6, "key": "heat_recovery_balance", "label": "Heat-recovery balance / flow ratio check" },
-        { "number": 7, "key": "defrost_or_frost_test", "label": "Defrost / frost protection test (if applicable)" }
+        { "number": 7, "key": "defrost_or_frost_test", "label": "Defrost / frost protection test (if applicable)" },
+        { "number": 8, "key": "heat_recovery_sensors_test", "label": "Heat recovery — OAT/RAT/SAT logging at multiple fan speeds" }
       ]
     },
     {
@@ -105,8 +106,45 @@
       "bacnet": { "object_type": "analogInput", "instance": 16 },
       "writable": false,
       "engineering_units": "degreesCelsius"
+    },
+    {
+      "id": "ai_return_air_temperature",
+      "role": "return_air_temperature_space_or_return_duct",
+      "bacnet": { "object_type": "analogInput", "instance": 17 },
+      "writable": false,
+      "engineering_units": "degreesCelsius"
     }
   ],
+  "heat_recovery_testing": {
+    "description": "OAT, RAT, SAT available on BACnet — log at multiple paired fan speeds; optional sensible effectiveness check.",
+    "sensors": {
+      "outdoor_air_temp_object_id": "ai_oa_temperature",
+      "return_air_temp_object_id": "ai_return_air_temperature",
+      "supply_air_temp_object_id": "ai_supply_air_temperature",
+      "exhaust_air_temp_object_id": "ai_exhaust_air_temperature"
+    },
+    "fan_speed_matrix_percent": [
+      { "supply_percent": 40, "exhaust_percent": 40, "label": "Low" },
+      { "supply_percent": 70, "exhaust_percent": 70, "label": "Mid" },
+      { "supply_percent": 100, "exhaust_percent": 100, "label": "Design" }
+    ],
+    "dwell_seconds_per_speed": 180,
+    "optional_calculated_effectiveness": {
+      "enabled": true,
+      "comment": "Sensible effectiveness-style check is only valid when sensor locations match the formula assumptions — treat as advisory; see pass-fail-defaults.recommended.md",
+      "formula_hint": "Compare temperature cross against (T_exhaust_in - T_oa_in) using ai_exhaust_air_temperature vs ai_oa_temperature and supply side SAT; refine equation per your core geometry in profile v2."
+    },
+    "report_table_columns": [
+      { "key": "timestamp", "label": "Time" },
+      { "key": "supply_fan_percent", "object_id": "av_supply_fan_command" },
+      { "key": "exhaust_fan_percent", "object_id": "av_exhaust_fan_command" },
+      { "key": "oat_c", "object_id": "ai_oa_temperature" },
+      { "key": "rat_c", "object_id": "ai_return_air_temperature" },
+      { "key": "sat_c", "object_id": "ai_supply_air_temperature" },
+      { "key": "exhaust_air_c", "object_id": "ai_exhaust_air_temperature" },
+      { "key": "effectiveness_calc_advisory", "source": "optional_calculated_effectiveness" }
+    ]
+  },
   "commissioning_flow": [
     {
       "step_id": "hrv_balance_measured_flow_to_half_design_each_stream",
@@ -189,6 +227,18 @@
           "branch_ids": ["outdoor_supply_main", "exhaust_return_main"]
         }
       ]
+    },
+    {
+      "step_id": "hrv_heat_recovery_sensor_matrix",
+      "label": "Heat recovery — OAT, RAT, SAT at multiple fan speeds",
+      "description": "Step through heat_recovery_testing.fan_speed_matrix_percent; dwell; log OAT/RAT/SAT/exhaust temps; run optional calculated effectiveness when enabled.",
+      "arms_test_mode_state_key": "heat_recovery_sensors_test",
+      "actions": [
+        {
+          "type": "set_fan_speeds_and_log_recovery_sensors",
+          "ref": "heat_recovery_testing"
+        }
+      ]
     }
   ],
   "airflow_verification": {
@@ -259,6 +309,26 @@
         "type": "tachometer_value_threshold",
         "comparison": "greater_than",
         "value": 0
+      }
+    },
+    {
+      "id": "hrv_heat_recovery_oat_rat_sat_matrix",
+      "test_mode_state_key": "heat_recovery_sensors_test",
+      "steps": [
+        {
+          "action": "write_msv_state",
+          "object_id": "msv_test_mode",
+          "state_key": "heat_recovery_sensors_test"
+        },
+        {
+          "action": "set_fan_speeds_and_log_recovery_sensors",
+          "ref": "heat_recovery_testing"
+        }
+      ],
+      "manual_verification_required": false,
+      "pass_criteria": {
+        "type": "advisory_effectiveness_within_band_if_calculated",
+        "comment": "See docs/examples/pass-fail-defaults.recommended.md HRV section"
       }
     },
     {

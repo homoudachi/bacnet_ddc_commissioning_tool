@@ -1,0 +1,398 @@
+{
+  "schema_version": "0.1-example",
+  "profile_id": "fcu_2pipe_no_bacnet_rat_v1",
+  "display_name": "FCU — same as fcu_2pipe_chw_electric_heat_v1 but no BACnet RAT (manual session RAT only)",
+  "description": "Variant profile: no ai_rat on the controller. RAT for heat-rise and thermal reports comes only from session rat_degC (manual entry each step or sweep). Bluetooth is not implemented; column still present for future.",
+  "bacnet_device": {
+    "device_instance": 21001,
+    "address": {
+      "type": "ipv4",
+      "host": "192.168.1.50",
+      "port": 47808
+    }
+  },
+  "unit_specs": {
+    "design_supply_airflow_L_s": 0.85,
+    "design_return_airflow_L_s": null,
+    "heater": {
+      "type": "electric_modulating",
+      "max_kw_at_100_percent": 2.0,
+      "command_object_note": "Single AV 0–100% for heat output / staging demand as programmed"
+    },
+    "chw": {
+      "type": "two_pipe",
+      "valve_is_cooling_only": true,
+      "valve_stroke_verify_without_plant": {
+        "description": "Always run without chilled water: command valve 100%, technician confirms via prompt; command 0%, confirm again.",
+        "valve_object_id": "ao_chw_valve"
+      }
+    }
+  },
+  "objects": [
+    {
+      "id": "msv_test_mode",
+      "role": "commissioning_test_mode",
+      "bacnet": { "object_type": "multiStateValue", "instance": 50 },
+      "writable": true,
+      "relinquish_default": 1,
+      "states": [
+        { "number": 1, "key": "normal", "label": "Normal operation" },
+        { "number": 2, "key": "fan_tacho_verify", "label": "Fan tachometer verification" },
+        { "number": 3, "key": "airflow_verify", "label": "Airflow verification" },
+        { "number": 4, "key": "heating_test", "label": "Electric heating test" },
+        { "number": 5, "key": "chw_test", "label": "Chilled-water cooling test (requires plant)" },
+        { "number": 6, "key": "chw_valve_stroke_no_plant", "label": "Cooling valve stroke verify — no CHW" }
+      ]
+    },
+    {
+      "id": "av_supply_fan_tacho_value",
+      "role": "supply_fan_tachometer_value",
+      "bacnet": { "object_type": "analogValue", "instance": 1 },
+      "writable": false,
+      "signal": {
+        "kind": "pulse_train_conditioned_by_controller",
+        "engineering_units": "noSpecificUnits",
+        "ui_label": "Tachometer value (not necessarily RPM)"
+      }
+    },
+    {
+      "id": "ai_sat",
+      "role": "supply_air_temperature",
+      "bacnet": { "object_type": "analogInput", "instance": 2 },
+      "writable": false,
+      "engineering_units": "degreesCelsius"
+    },
+    {
+      "id": "av_supply_fan_command",
+      "role": "supply_fan_speed_command",
+      "bacnet": { "object_type": "analogValue", "instance": 3 },
+      "writable": true,
+      "engineering_units": "percent",
+      "limits": { "min_write": 0, "max_write": 100 }
+    },
+    {
+      "id": "av_electric_heat_command",
+      "role": "electric_heat_modulating_command",
+      "bacnet": { "object_type": "analogValue", "instance": 4 },
+      "writable": true,
+      "engineering_units": "percent",
+      "limits": { "min_write": 0, "max_write": 100 }
+    },
+    {
+      "id": "ao_chw_valve",
+      "role": "chilled_water_valve_command",
+      "bacnet": { "object_type": "analogOutput", "instance": 5 },
+      "writable": true,
+      "engineering_units": "percent",
+      "limits": { "min_write": 0, "max_write": 100 }
+    }
+  ],
+  "temperature_inputs_for_heat_rise": {
+    "sat_ref": { "object_id": "ai_sat" },
+    "rat_equivalent": {
+      "description": "No BACnet return-air point on this controller — operator enters RAT (°C) into the session for each relevant step.",
+      "allowed_sources": ["manual_entry"],
+      "bluetooth_probe": "reserved_not_implemented",
+      "bacnet_object_id": null
+    }
+  },
+  "commissioning_flow": [
+    {
+      "step_id": "half_design_airflow_auto",
+      "label": "Automatic airflow adjustment to ~50% design",
+      "description": "Tool modulates av_supply_fan_command using assisted balancing / measurement until measured flow is ~0.5 × design_supply_airflow_L_s.",
+      "arms_test_mode_state_key": "airflow_verify",
+      "actions": [
+        {
+          "type": "automatic_airflow_adjustment",
+          "actuator_object_id": "av_supply_fan_command",
+          "target_flow_ratio_of_design": 0.5,
+          "measurement_branch_id": "supply_terminal_main",
+          "tolerance_ratio": 0.05
+        }
+      ]
+    },
+    {
+      "step_id": "confirm_tachometer_reference_half_flow",
+      "label": "Confirm tachometer value at this operating point",
+      "description": "Technician confirms the BACnet tachometer value read while at ~half design flow; stored as reference for heat interlock.",
+      "actions": [
+        {
+          "type": "operator_confirm_tachometer_reference",
+          "read_object_id": "av_supply_fan_tacho_value",
+          "session_key": "fan_tachometer_reference_at_half_design_flow"
+        }
+      ]
+    },
+    {
+      "step_id": "manual_airflow_verify_half_then_design",
+      "label": "Manual airflow verification (same workflow)",
+      "description": "Assisted measurement vs design (L/s); continues seamlessly from prior steps.",
+      "arms_test_mode_state_key": "airflow_verify",
+      "actions": [
+        {
+          "type": "manual_airflow_verification_assisted",
+          "branch_ids": ["supply_terminal_main"]
+        }
+      ]
+    },
+    {
+      "step_id": "cooling_valve_stroke_no_chw",
+      "label": "Cooling valve stroke — no CHW (100% then 0%)",
+      "description": "No chilled-water plant required. Command ao_chw_valve to 100%; technician confirms full stroke / end travel via prompt. Then command to 0%; confirm closed / zero via prompt.",
+      "arms_test_mode_state_key": "chw_valve_stroke_no_plant",
+      "actions": [
+        {
+          "type": "write_analog_percent",
+          "object_id": "ao_chw_valve",
+          "value": 100
+        },
+        {
+          "type": "operator_prompt_confirm",
+          "prompt_id": "chw_valve_at_100",
+          "prompt_text": "Confirm the cooling valve has driven to the full open (100%) position — travel, mechanical stop, or local indicator as applicable."
+        },
+        {
+          "type": "write_analog_percent",
+          "object_id": "ao_chw_valve",
+          "value": 0
+        },
+        {
+          "type": "operator_prompt_confirm",
+          "prompt_id": "chw_valve_at_0",
+          "prompt_text": "Confirm the cooling valve has returned to fully closed (0%) — no cooling demand at stem / indicator as applicable."
+        }
+      ]
+    },
+    {
+      "step_id": "proper_cooling_chw_test",
+      "label": "Proper cooling test (CHW plant required)",
+      "description": "Modulate cooling valve over a profile sweep; log valve %, SAT, and RAT for the commissioning report. If CHW is not ready, skip with recorded reason.",
+      "arms_test_mode_state_key": "chw_test",
+      "skippable": true,
+      "skip_when": ["chilled_water_not_ready", "plant_not_commissioned"],
+      "skip_requires_operator_reason": true,
+      "report_ref": "thermal_tests_for_report.cooling",
+      "actions": [
+        {
+          "type": "modulate_actuator_log_sat_for_report",
+          "command_object_id": "ao_chw_valve",
+          "result_supply_temperature_object_id": "ai_sat",
+          "result_return_temperature_object_id": null,
+          "session_return_air_temperature_key": "rat_degC",
+          "optional_context_object_ids": ["av_supply_fan_command"],
+          "comment": "Engine samples command, SAT, RAT (BACnet or session) during modulation; emits table rows for PDF/CSV/XLSX"
+        }
+      ]
+    },
+    {
+      "step_id": "heating_test",
+      "label": "Heating test (modulating heat AV)",
+      "description": "Modulate heat AV and log SAT and RAT for the same report layout as cooling. Only after half-flow tachometer reference and manual airflow per UI rules.",
+      "arms_test_mode_state_key": "heating_test",
+      "requires_session_keys": ["fan_tachometer_reference_at_half_design_flow"],
+      "report_ref": "thermal_tests_for_report.heating",
+      "actions": [
+        {
+          "type": "modulate_actuator_log_sat_for_report",
+          "command_object_id": "av_electric_heat_command",
+          "result_supply_temperature_object_id": "ai_sat",
+          "result_return_temperature_object_id": null,
+          "session_return_air_temperature_key": "rat_degC",
+          "optional_context_object_ids": ["av_supply_fan_command"],
+          "comment": "Same reporting columns as cooling: time, command %, SAT °C, RAT °C"
+        }
+      ]
+    }
+  ],
+  "interlocks": [
+    {
+      "id": "heat_allowed_when_tachometer_proves_half_flow",
+      "applies_when_test_modes": ["heating_test"],
+      "requires_session_keys": ["fan_tachometer_reference_at_half_design_flow"],
+      "description": "Live tachometer value must stay at or above the stored reference (captured after auto half-flow + confirm), not a guessed RPM curve.",
+      "expression": "presentValue(av_supply_fan_tacho_value) >= session.fan_tachometer_reference_at_half_design_flow - hysteresis",
+      "hysteresis_tachometer_value": 0
+    }
+  ],
+  "thermal_tests_for_report": {
+    "description": "Heating and cooling tests share one reporting shape: modulated command vs SAT and RAT over time.",
+    "return_air_temperature": {
+      "bacnet_object_id": null,
+      "session_fallback_key": "rat_degC",
+      "note": "Session-only RAT: prompt at each modulation step or carry forward last manual value per UX rules."
+    },
+    "included_in_exports": ["pdf", "csv", "xlsx", "structured_log"],
+    "cooling": {
+      "test_id": "chw_cooling_performance_test",
+      "commissioning_step_id": "proper_cooling_chw_test",
+      "command_object_id": "ao_chw_valve",
+      "command_label": "Cooling valve command (%)",
+      "result_supply_temperature_object_id": "ai_sat",
+      "result_return_temperature_object_id": null,
+      "result_label": "Supply air temperature (°C)",
+      "result_return_label": "Return air temperature (°C) — manual",
+      "table_columns": [
+        { "key": "timestamp", "label": "Time" },
+        { "key": "cooling_valve_percent", "object_id": "ao_chw_valve", "property": "presentValue" },
+        { "key": "supply_air_temp_c", "object_id": "ai_sat", "property": "presentValue" },
+        {
+          "key": "return_air_temp_c",
+          "session_fallback_key": "rat_degC"
+        },
+        { "key": "fan_speed_percent", "object_id": "av_supply_fan_command", "property": "presentValue" }
+      ]
+    },
+    "heating": {
+      "test_id": "heating_after_prerequisites",
+      "commissioning_step_id": "heating_test",
+      "command_object_id": "av_electric_heat_command",
+      "command_label": "Electric heat command (%)",
+      "result_supply_temperature_object_id": "ai_sat",
+      "result_return_temperature_object_id": null,
+      "result_label": "Supply air temperature (°C)",
+      "result_return_label": "Return air temperature (°C) — manual",
+      "table_columns": [
+        { "key": "timestamp", "label": "Time" },
+        { "key": "heat_command_percent", "object_id": "av_electric_heat_command", "property": "presentValue" },
+        { "key": "supply_air_temp_c", "object_id": "ai_sat", "property": "presentValue" },
+        {
+          "key": "return_air_temp_c",
+          "session_fallback_key": "rat_degC"
+        },
+        { "key": "fan_speed_percent", "object_id": "av_supply_fan_command", "property": "presentValue" }
+      ]
+    }
+  },
+  "airflow_verification": {
+    "design_reference_flow_L_s": 0.85,
+    "branches": [
+      {
+        "id": "supply_terminal_main",
+        "label": "Primary supply outlet / grille",
+        "design_flow_L_s": 0.85,
+        "measurement": {
+          "default_tool": "balometer",
+          "allowed_tools": ["balometer", "pitot_traverse", "hot_wire_grid"],
+          "tolerance_percent": 10,
+          "notes": "Assisted balancing: predictable steps—adjust fan command, compare to target L/s, repeat until within tolerance."
+        }
+      }
+    ]
+  },
+  "tests": [
+    {
+      "id": "fan_tachometer_sanity",
+      "test_mode_state_key": "fan_tacho_verify",
+      "steps": [
+        {
+          "action": "write_msv_state",
+          "object_id": "msv_test_mode",
+          "state_key": "fan_tacho_verify"
+        },
+        {
+          "action": "read_until_stable",
+          "object_id": "av_supply_fan_tacho_value",
+          "stable_seconds": 5
+        }
+      ],
+      "pass_criteria": {
+        "type": "tachometer_value_threshold",
+        "comparison": "greater_than",
+        "value": 0,
+        "comment": "Replace with profile-specific floor when you know controller scaling"
+      }
+    },
+    {
+      "id": "heating_after_prerequisites",
+      "test_mode_state_key": "heating_test",
+      "depends_on_interlocks": ["heat_allowed_when_tachometer_proves_half_flow"],
+      "depends_on_commissioning_steps_completed": [
+        "half_design_airflow_auto",
+        "confirm_tachometer_reference_half_flow",
+        "manual_airflow_verify_half_then_design"
+      ],
+      "report_ref": "thermal_tests_for_report.heating",
+      "steps": [
+        {
+          "action": "write_msv_state",
+          "object_id": "msv_test_mode",
+          "state_key": "heating_test"
+        },
+        {
+          "action": "modulate_actuator_log_sat_for_report",
+          "command_object_id": "av_electric_heat_command",
+          "result_supply_temperature_object_id": "ai_sat",
+          "result_return_temperature_object_id": null,
+          "session_return_air_temperature_key": "rat_degC",
+          "optional_co_actuators": ["av_supply_fan_command"],
+          "description": "Modulate heat (and fan if profile requires); record time series for report: heat %, SAT °C, RAT °C from session only."
+        }
+      ],
+      "manual_verification_required": true
+    },
+    {
+      "id": "chw_cooling_performance_test",
+      "test_mode_state_key": "chw_test",
+      "skippable": true,
+      "skip_requires_operator_reason": true,
+      "skip_hint": "Use when chilled water plant is not ready; complete valve stroke test without CHW first.",
+      "report_ref": "thermal_tests_for_report.cooling",
+      "steps": [
+        {
+          "action": "write_msv_state",
+          "object_id": "msv_test_mode",
+          "state_key": "chw_test"
+        },
+        {
+          "action": "operator_confirm_prerequisite",
+          "prompt_id": "chw_plant_ready",
+          "prompt_text": "Confirm chilled water is available and safe to demand cooling on this unit (flow, temperature, interlocks)."
+        },
+        {
+          "action": "modulate_actuator_log_sat_for_report",
+          "command_object_id": "ao_chw_valve",
+          "result_supply_temperature_object_id": "ai_sat",
+          "result_return_temperature_object_id": null,
+          "session_return_air_temperature_key": "rat_degC",
+          "optional_co_actuators": ["av_supply_fan_command"],
+          "description": "Modulate cooling valve; log valve %, SAT, RAT for report (same table shape as heating test)."
+        }
+      ],
+      "manual_verification_required": true
+    },
+    {
+      "id": "cooling_valve_stroke_no_plant_test",
+      "test_mode_state_key": "chw_valve_stroke_no_plant",
+      "description": "Standalone test card matching commissioning_flow cooling_valve_stroke_no_chw.",
+      "steps": [
+        {
+          "action": "write_msv_state",
+          "object_id": "msv_test_mode",
+          "state_key": "chw_valve_stroke_no_plant"
+        },
+        {
+          "action": "write_analog_percent",
+          "object_id": "ao_chw_valve",
+          "value": 100
+        },
+        {
+          "action": "operator_prompt_confirm",
+          "prompt_id": "chw_valve_at_100",
+          "prompt_text": "Confirm cooling valve at 100% (full open / stroke verified)."
+        },
+        {
+          "action": "write_analog_percent",
+          "object_id": "ao_chw_valve",
+          "value": 0
+        },
+        {
+          "action": "operator_prompt_confirm",
+          "prompt_id": "chw_valve_at_0",
+          "prompt_text": "Confirm cooling valve at 0% (fully closed)."
+        }
+      ],
+      "manual_verification_required": true
+    }
+  ]
+}

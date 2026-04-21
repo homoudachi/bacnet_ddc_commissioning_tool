@@ -65,8 +65,10 @@ The field device is often a **pulse** train; the controller exposes an **Analog 
 
 Many units **do not have a RAT BACnet point**. The tool must accept **return-side temperature** from one of:
 
-- **Operator-entered value** for the session or step (typed in when commissioning), and/or
-- **External measurement** merged into the workflow—e.g. a **Bluetooth temperature sensor** (or any other handheld) with a defined pairing/read path in software **later**; until implemented, **manual entry** is the fallback.
+- **Operator-entered value** for the session or step (typed in when commissioning) — **this is v1** for FCUs without BACnet RAT.
+- **BACnet RAT** when the controller exposes it (see [example profiles](examples/unit-profile-fcu.example.json)).
+- **Bluetooth** (or other external probes) — **optional in the product roadmap only; not implemented in v1** (no pairing, no drivers). Keep a **reserved** source in the schema so profiles stay forward-compatible.
+- **Cross-unit proxy (idea):** If **HRV commissioning runs first** on a site, an **HRV’s return-air BACnet point** might be used as a **proxy** for space return temperature for nearby FCUs **only** when you explicitly wire that relationship in the job file (same air path / open plan). Treat as **advanced** and easy to get wrong—default remains **manual RAT** unless the import declares the proxy with warnings.
 
 Document per **equipment profile** which source is valid and required uncertainty (if any).
 
@@ -87,6 +89,7 @@ Document per **equipment profile** which source is valid and required uncertaint
 - **Then reduce speed:** From that proven operating point, **reduce both fan commands by a relative percentage** of their values at half-flow—e.g. **20% relative** means each command becomes **× (1 − 0.20) = 0.80** of what it was at measured half-design (not “minus 20 percentage points” on the AV scale). The **exact percentage is a profile parameter** (15% relative was discussed; **20% relative** is a reasonable default to try in the field).
 - **Current switch pickup:** **Adjust the current switch** (field setpoint / sensitivity) so it **just comes on** at this reduced-flow operating point—so the **BI** reliably indicates “fan running” without nuisance trips at idle. The technician confirms **BI active** after the adjustment.
 - **No heater** on these units: **no heat-rise test**; **airflow is manually verified** with **tool-assisted balancing** before/after as defined in the import.
+- **Heat recovery testing:** HRVs expose **OAT**, **RAT**, **SAT** (and exhaust-side air temp per program). The tool should run **additional tests**: log those sensors at **several paired supply/exhaust fan speeds** (matrix in the import), with optional **calculated effectiveness** when the sensor layout makes a formula **viable**—treat calculations as **advisory** until validated against your core geometry. See [examples/unit-profile-hrv.example.json](examples/unit-profile-hrv.example.json) `heat_recovery_testing`.
 
 _(Add more profiles: CHW-only, other recovery layouts, gas heat, etc.)_
 
@@ -105,14 +108,38 @@ Schema is still being designed; it must carry **everything needed to commission 
 
 Exact file format (JSON, YAML, SQLite job DB, etc.) is TBD; the above is the **information model** the first schema version must implement.
 
+### Site data at scale (~120 controllers) — spreadsheet-first
+
+- **Ideal authoring surface:** one **editable spreadsheet** (CSV or XLSX) with **all columns needed per controller row** (BACnet IP, device instance, `profile_id`, floor/zone labels, object overrides if any, notes). Large sites stay maintainable in Excel/LibreOffice and diff better than hand-edited JSON.
+- **Import pipeline:** **spreadsheet → validated internal model** (JSON or DB blob generated on load). The app ships or references **profile JSON** files for unit *types*; the sheet is mostly **instances and addressing**.
+- **Config checker and helper:** validate **required columns**, **IP/Device ID uniqueness**, **profile_id exists**, **reachable** (optional ping), **read a small object set** before full job run, and surface **human-readable fixes** (wrong column name, missing port, duplicate row). A **helper** can suggest column headers from a chosen profile template.
+
+### Modulation and pass/fail defaults (refine in one place)
+
+- **Modulation recipes (recommended defaults):** [examples/modulation-recipes.recommended.md](examples/modulation-recipes.recommended.md) — stepped valve and heat sweeps, dwell, stabilization, safety aborts. Profiles may override via `modulation_recipe` when the schema is locked.
+- **Pass / fail criteria (recommended defaults):** [examples/pass-fail-defaults.recommended.md](examples/pass-fail-defaults.recommended.md) — cooling/heating direction checks, HRV advisory rules. Profiles override with numeric limits per site.
+
+### BACnet simulation and CI
+
+- **Goal:** heavy **automated simulation and regression** before relying on field panels alone.
+- **Approach (planned):** **Docker** network hosting one or more **BACnet device simulators** with **independent logic** (simple state machines / physics-lite) that respond to reads/writes like real devices. The commissioning tool (or test harness) runs against that network in CI or locally. Exact stack (e.g. BACpypes, custom stack, or commercial sim in container) is **TBD** when implementation starts.
+
+### Build and signing (Windows portable exe)
+
+**TBD** — toolchain (e.g. Rust, Go, .NET Native AOT, or Python+frozen bundle), **code signing** for fewer SmartScreen warnings, and **AV false-positive** mitigation. Document choices here when decided.
+
 ### Example profiles (illustrative JSON)
 
 These files are **starting sketches** (`schema_version: "0.1-example"`). They are not a frozen contract—adjust object types, instance numbers, MSV state maps, and formulas to match your controller programs.
 
 | File | Intent |
 |------|--------|
-| [examples/unit-profile-fcu.example.json](examples/unit-profile-fcu.example.json) | FCU: as before; **thermal_tests_for_report** defines **cooling** (valve modulate + SAT) and **heating** (heat AV modulate + SAT) for PDF/CSV/XLSX. |
-| [examples/unit-profile-hrv.example.json](examples/unit-profile-hrv.example.json) | HRV: dual streams, **tachometer value** AVs, fan **AVs 0–100%**; **measured** half-design L/s on supply and exhaust, then **~20% relative** fan command reduction (profile-tunable), then **field-adjust current switch** so **BI just picks up**; **no heat**, assisted + manual airflow. |
+| [examples/unit-profile-fcu.example.json](examples/unit-profile-fcu.example.json) | FCU with optional BACnet **ai_rat**; thermal reports SAT+RAT. |
+| [examples/unit-profile-fcu-no-bacnet-rat.example.json](examples/unit-profile-fcu-no-bacnet-rat.example.json) | FCU variant: **no BACnet RAT** — **session-only** `rat_degC` (manual); Bluetooth reserved not implemented. |
+| [examples/unit-profile-hrv.example.json](examples/unit-profile-hrv.example.json) | HRV: airflow + current switch; **heat_recovery_testing** (OAT/RAT/SAT at **multiple fan speeds**, optional calculated effectiveness). |
+| [examples/site-controllers.template.csv](examples/site-controllers.template.csv) | Minimal **one-row-per-controller** columns for large sites; expand with profile-specific columns as the checker matures. |
+| [examples/modulation-recipes.recommended.md](examples/modulation-recipes.recommended.md) | Default **modulation** sweeps and dwells — **edit here first**. |
+| [examples/pass-fail-defaults.recommended.md](examples/pass-fail-defaults.recommended.md) | Default **pass/fail** thresholds — **edit here first**. |
 
 ## Job model
 
@@ -167,21 +194,22 @@ _(Fill in after the first runnable build.)_
 
 These are the main gaps once requirements feel “complete enough” to start coding:
 
-- **Job / import file format** — single JSON job vs SQLite vs split files; how multiple controllers reference shared profiles.
-- **Modulation recipes** — exact **sweep** for cooling valve and heat (steps, ramp rate, dwell at each step, max SAT/SAT rate of change for safety).
-- **Pass / fail rules** — numeric thresholds on SAT (and ΔT vs RAT) for cooling and heating tests; what constitutes **fail** vs **manual override**.
+- **Spreadsheet column spec** — frozen header row for **120+ controllers**, which columns are **required vs optional** per `profile_id`, and how **object overrides** (if any) serialize from sheet cells.
+- **Sheet → runtime compiler** — validation rules, error messages, and optional **generated JSON** for debugging.
+- **HRV effectiveness equation** — lock **sensor placement** vs math for each program version; until then keep **advisory** only.
+- **RAT proxy rules** — if using **HRV return** for **FCU** commissioning, document **eligibility** and UI warnings.
 - **Report layout** — PDF section order, logo/branding, one table vs multiple charts; **CSV vs XLSX** column order frozen for integrators.
 - **Structured log** — schema (JSON lines?), rotation, path on disk for portable exe.
-- **Bluetooth RAT** — device support, pairing UX, how readings align to **timestamps** in the thermal table.
+- **Docker BACnet sim** — which simulator images/libraries, how many virtual devices, scripted scenarios for CI.
 - **BACnet stack** — library choice for Windows portable build; read/write batching and timeouts during sweeps.
-- **Build and signing** — toolchain for single exe, code signing, AV false-positive mitigation.
+- **Build and signing** — still **TBD** (toolchain, certificate, release channel).
 
 ## Open questions
 
 - **Heat-rise → airflow:** confirm exact **formula variant** (sensible only vs mixed, latent ignored?), **staging** of electric heat (kW per step), and **minimum fan / maximum SAT** limits during auto modulation.
-- **RAT workflow:** default to **manual entry** until Bluetooth (or other) device support exists; define **where** in the job file optional `rat_source: manual | bluetooth | bacnet_object` lives; for **reports**, how often to prompt for RAT during a long modulation sweep (each step vs start/end only).
+- **RAT workflow:** **manual entry** for v1 on FCUs without BACnet RAT; **Bluetooth** schema slot only — no implementation; **HRV RAT proxy** for FCUs — only if explicitly declared in job; for **reports**, how often to prompt for RAT during a long modulation sweep (each step vs start/end only).
 - **MSV contracts:** canonical **state numbers** per test type across profiles, or fully profile-local only?
 - **Half-design reference:** optional hysteresis when comparing **live tachometer value** to the **session-stored** value captured after auto-adjust + operator confirm.
-- **Bluetooth / external sensors:** pairing, calibration, audit trail (who accepted which reading).
+- **Bluetooth / external sensors:** deferred — pairing, calibration, audit trail (who accepted which reading).
 - **PDF / XLSX stack:** libraries acceptable for FOSS + Windows portable build.
 - **Log format:** binary, JSON lines, CSV, or rotating text; retention on disk.

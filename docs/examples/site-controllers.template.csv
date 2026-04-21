@@ -1,0 +1,4 @@
+controller_label,profile_id,bacnet_device_instance,bacnet_ip,bacnet_port,building_floor,notes
+FCU-01A,fcu_2pipe_chw_electric_heat_v1,21001,192.168.1.50,47808,L01,example row
+FCU-01B,fcu_2pipe_chw_electric_heat_v1,21002,192.168.1.51,47808,L01,duplicate profile different IP
+HRV-01,hrv_counterflow_erv_v1,22001,192.168.1.60,47808,Roof,example row
