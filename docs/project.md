@@ -38,7 +38,8 @@ Windows **portable executable** that acts as a **commissioning assistant** for *
 4. **Assisted airflow balancing** — same job data should support **guided balancing** (which branch to adjust, target vs measured, instrument choice)—see [Import schema (direction)](#import-schema-direction).
 5. **Tests** — **Automatic** by default; each must be **skippable** or **manually passable** (override automatic fail or skip when the job demands it).
 6. **Cooling valve stroke verify (no plant)** — For units with a **cooling valve**, you always want this **without chilled water** connected: command the valve **to 100%**, have the technician **confirm** travel / end position (or other evidence) via **prompt**, then command **to 0%** and **confirm again**. This proves stroke and direction independent of CHW availability.
-7. **Proper cooling test (CHW)** — When the plant is ready, run a **full cooling / CHW performance** test (valve, SAT or other success criteria per profile—define in import). If **chilled water is not available yet**, the technician must be able to **skip** this test (with reason recorded) and complete the rest of commissioning; return when CHW is ready to clear the skip or re-run.
+7. **Proper cooling test (CHW)** — When the plant is ready, run a **full cooling / CHW performance** test: **modulate** the **cooling valve** (or profile-defined cooling demand), log **command vs time**, and log **supply air temperature (SAT)** as the **result** signal. If **chilled water is not available yet**, the technician must be able to **skip** this test (with reason recorded) and complete the rest of commissioning; return when CHW is ready to clear the skip or re-run.
+8. **Proper heating test** — Same reporting shape as cooling: **modulate** the **heat command** (e.g. **AV 0–100%**), log command over time, and log **SAT** (and any other profile-defined result points) so cause and effect appear together in the **commissioning report** (PDF / CSV / XLSX / logs).
 
 ## Commissioning UX: predictable, seamless steps per unit
 
@@ -98,7 +99,8 @@ Schema is still being designed; it must carry **everything needed to commission 
 - **Test mode MSVs** — one MSV (or clear MSV set) per **test category**; **state list** ↔ human-readable test name; safe transitions (e.g. leaving heating test).
 - **Airflow verification** — which **measurement tool** applies (pitot traverse rules, balometer, grid, hot-wire, etc.) and how readings map to **pass/fail** or **balancing targets** for **assisted airflow balancing**.
 - **Cooling valve (no CHW)** — valve **command object**, **100% then 0%** sequence, and **prompt text** (or checklist) for what the technician must confirm at each end.
-- **CHW cooling test (plant)** — pass/fail criteria when CHW is on; **`skippable`** with **recorded reason** when plant is not ready.
+- **CHW cooling test (plant)** — pass/fail criteria when CHW is on; **`skippable`** with **recorded reason** when plant is not ready; **report series**: modulated **valve %** + **SAT** vs time (or per step).
+- **Heating test** — **report series**: modulated **heat %** + **SAT** vs time (or per step); align columns with cooling for comparable PDF/CSV tables.
 - **Interlocks and limits** — thresholds (e.g. 50% design), min/max fan during tests, points that must not be written in certain modes.
 
 Exact file format (JSON, YAML, SQLite job DB, etc.) is TBD; the above is the **information model** the first schema version must implement.
@@ -109,7 +111,7 @@ These files are **starting sketches** (`schema_version: "0.1-example"`). They ar
 
 | File | Intent |
 |------|--------|
-| [examples/unit-profile-fcu.example.json](examples/unit-profile-fcu.example.json) | FCU: MSV modes, **tachometer value AV**, fan **AV 0–100%**, heat **AV 0–100%**, CHW valve **stroke without plant**; **proper CHW cooling test** when plant ready (**skippable** with reason if not), RAT manual/Bluetooth, **commissioning_flow** (half-flow chain → heating), interlock uses **stored** half-flow tacho reference. |
+| [examples/unit-profile-fcu.example.json](examples/unit-profile-fcu.example.json) | FCU: as before; **thermal_tests_for_report** defines **cooling** (valve modulate + SAT) and **heating** (heat AV modulate + SAT) for PDF/CSV/XLSX. |
 | [examples/unit-profile-hrv.example.json](examples/unit-profile-hrv.example.json) | HRV: dual streams, **tachometer value** AVs, fan **AVs 0–100%**; **measured** half-design L/s on supply and exhaust, then **~20% relative** fan command reduction (profile-tunable), then **field-adjust current switch** so **BI just picks up**; **no heat**, assisted + manual airflow. |
 
 ## Job model
@@ -120,6 +122,10 @@ These files are **starting sketches** (`schema_version: "0.1-example"`). They ar
 
 - **Notes + name** (per step, per test, or per job — refine when you design the UI).
 - **Exports for records**: **PDF**, **CSV or XLSX**, and **log data** (raw or structured — define format when implementing).
+
+### Reports — heating and cooling tests
+
+**Cooling** and **heating** performance tests must appear **in the report** with the same idea: what was **commanded** (valve or heat **modulated** over a profile-defined sweep or steps) and what happened to **supply air temperature (SAT)** as the primary **result**. Include timestamps (or step index), actuator **%**, and **SAT** (°C); add secondary columns from the import if needed (fan %, outdoor air, etc.). The valve **stroke-without-CHW** check remains a separate line item (end stops only); the **modulation + SAT** block is the substantive **cooling test** / **heating test** for the customer record.
 
 ## Localization and units
 

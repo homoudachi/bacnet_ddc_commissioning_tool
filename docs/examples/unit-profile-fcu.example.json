@@ -166,30 +166,36 @@
     {
       "step_id": "proper_cooling_chw_test",
       "label": "Proper cooling test (CHW plant required)",
-      "description": "Full cooling performance when chilled water is available (criteria per profile—SAT, valve, flow, etc.). If CHW is not ready, technician skips with recorded reason; re-run later when plant is on.",
+      "description": "Modulate cooling valve over a profile sweep; log valve % and SAT for the commissioning report. If CHW is not ready, skip with recorded reason.",
       "arms_test_mode_state_key": "chw_test",
       "skippable": true,
       "skip_when": ["chilled_water_not_ready", "plant_not_commissioned"],
       "skip_requires_operator_reason": true,
+      "report_ref": "thermal_tests_for_report.cooling",
       "actions": [
         {
-          "type": "run_cooling_performance_test",
-          "comment": "Define pass criteria in profile when you lock SAT/valve setpoints for CHW test"
+          "type": "modulate_actuator_log_sat_for_report",
+          "command_object_id": "ao_chw_valve",
+          "result_supply_temperature_object_id": "ai_sat",
+          "optional_context_object_ids": ["av_supply_fan_command"],
+          "comment": "Engine samples presentValue on command object and SAT during modulation; emits table rows for PDF/CSV/XLSX"
         }
       ]
     },
     {
       "step_id": "heating_test",
       "label": "Heating test (modulating heat AV)",
-      "description": "Only offered after half-flow tachometer reference is stored and manual airflow step acknowledged per UI rules.",
+      "description": "Modulate heat AV and log SAT for the same report layout as cooling. Only after half-flow tachometer reference and manual airflow per UI rules.",
       "arms_test_mode_state_key": "heating_test",
       "requires_session_keys": ["fan_tachometer_reference_at_half_design_flow"],
+      "report_ref": "thermal_tests_for_report.heating",
       "actions": [
         {
-          "type": "modulate_heat_and_fan_per_program",
-          "heat_object_id": "av_electric_heat_command",
-          "fan_object_id": "av_supply_fan_command",
-          "target": "approach_design_delta_t_and_flow"
+          "type": "modulate_actuator_log_sat_for_report",
+          "command_object_id": "av_electric_heat_command",
+          "result_supply_temperature_object_id": "ai_sat",
+          "optional_context_object_ids": ["av_supply_fan_command"],
+          "comment": "Same reporting columns as cooling: time, command %, SAT °C"
         }
       ]
     }
@@ -204,6 +210,38 @@
       "hysteresis_tachometer_value": 0
     }
   ],
+  "thermal_tests_for_report": {
+    "description": "Heating and cooling tests share one reporting shape: modulated command vs supply air temperature over time.",
+    "included_in_exports": ["pdf", "csv", "xlsx", "structured_log"],
+    "cooling": {
+      "test_id": "chw_cooling_performance_test",
+      "commissioning_step_id": "proper_cooling_chw_test",
+      "command_object_id": "ao_chw_valve",
+      "command_label": "Cooling valve command (%)",
+      "result_supply_temperature_object_id": "ai_sat",
+      "result_label": "Supply air temperature (°C)",
+      "table_columns": [
+        { "key": "timestamp", "label": "Time" },
+        { "key": "cooling_valve_percent", "object_id": "ao_chw_valve", "property": "presentValue" },
+        { "key": "supply_air_temp_c", "object_id": "ai_sat", "property": "presentValue" },
+        { "key": "fan_speed_percent", "object_id": "av_supply_fan_command", "property": "presentValue" }
+      ]
+    },
+    "heating": {
+      "test_id": "heating_after_prerequisites",
+      "commissioning_step_id": "heating_test",
+      "command_object_id": "av_electric_heat_command",
+      "command_label": "Electric heat command (%)",
+      "result_supply_temperature_object_id": "ai_sat",
+      "result_label": "Supply air temperature (°C)",
+      "table_columns": [
+        { "key": "timestamp", "label": "Time" },
+        { "key": "heat_command_percent", "object_id": "av_electric_heat_command", "property": "presentValue" },
+        { "key": "supply_air_temp_c", "object_id": "ai_sat", "property": "presentValue" },
+        { "key": "fan_speed_percent", "object_id": "av_supply_fan_command", "property": "presentValue" }
+      ]
+    }
+  },
   "airflow_verification": {
     "design_reference_flow_L_s": 0.85,
     "branches": [
@@ -252,6 +290,7 @@
         "confirm_tachometer_reference_half_flow",
         "manual_airflow_verify_half_then_design"
       ],
+      "report_ref": "thermal_tests_for_report.heating",
       "steps": [
         {
           "action": "write_msv_state",
@@ -259,10 +298,11 @@
           "state_key": "heating_test"
         },
         {
-          "action": "modulate_to_target",
-          "description": "Tool drives av_supply_fan_command and av_electric_heat_command within limits; SAT/RAT per session/manual/Bluetooth.",
-          "actuator_object_ids": ["av_supply_fan_command", "av_electric_heat_command"],
-          "target": "approach_design_delta_t_and_flow"
+          "action": "modulate_actuator_log_sat_for_report",
+          "command_object_id": "av_electric_heat_command",
+          "result_supply_temperature_object_id": "ai_sat",
+          "optional_co_actuators": ["av_supply_fan_command"],
+          "description": "Modulate heat (and fan if profile requires); record time series for report: heat %, SAT °C."
         }
       ],
       "manual_verification_required": true
@@ -273,6 +313,7 @@
       "skippable": true,
       "skip_requires_operator_reason": true,
       "skip_hint": "Use when chilled water plant is not ready; complete valve stroke test without CHW first.",
+      "report_ref": "thermal_tests_for_report.cooling",
       "steps": [
         {
           "action": "write_msv_state",
@@ -285,8 +326,11 @@
           "prompt_text": "Confirm chilled water is available and safe to demand cooling on this unit (flow, temperature, interlocks)."
         },
         {
-          "action": "run_cooling_performance_per_profile",
-          "comment": "Placeholder: modulate ao_chw_valve and/or fan per program; verify SAT or other criteria from import"
+          "action": "modulate_actuator_log_sat_for_report",
+          "command_object_id": "ao_chw_valve",
+          "result_supply_temperature_object_id": "ai_sat",
+          "optional_co_actuators": ["av_supply_fan_command"],
+          "description": "Modulate cooling valve; log valve % and SAT for report (same table shape as heating test)."
         }
       ],
       "manual_verification_required": true
