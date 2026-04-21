@@ -11,3 +11,4 @@
 
 - Start with the active foundation plan: **[docs/plans/2026-04-21-v1-foundation-plan.md](docs/plans/2026-04-21-v1-foundation-plan.md)**.
 - Track cross-cutting decisions in **[Remaining to plan (before implementation)](docs/project.md#remaining-to-plan-before-implementation)** and **[Open questions](docs/project.md#open-questions)**.
+- For BACnet simulation architecture and networking, use **[docs/simulator/README.md](docs/simulator/README.md)** and **[docs/plans/2026-04-21-bacnet-simulator-plan.md](docs/plans/2026-04-21-bacnet-simulator-plan.md)**.

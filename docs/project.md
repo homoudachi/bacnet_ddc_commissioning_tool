@@ -128,7 +128,13 @@ Exact file format (JSON, YAML, SQLite job DB, etc.) is TBD; the above is the **i
 ### BACnet simulation and CI
 
 - **Goal:** heavy **automated simulation and regression** before relying on field panels alone.
-- **Approach (planned):** **Docker** network hosting one or more **BACnet device simulators** with **independent logic** (simple state machines / physics-lite) that respond to reads/writes like real devices. The commissioning tool (or test harness) runs against that network in CI or locally. Exact stack (e.g. BACpypes, custom stack, or commercial sim in container) is **TBD** when implementation starts.
+- **Approach (approved baseline):** Docker-based simulator lab with one compose topology and multiple profiles:
+  - `ci`: deterministic bridge network with static IPs
+  - `lab`: macvlan bench-network parity
+  - `multisubnet`: two subnets + BBMD validation
+- **Discovery and verification mode:** list-first, verify-all. The system attempts every imported controller row and emits a terminal status for each row (no silent skip).
+- **Strict CI gate:** fail CI when required rows are unresolved, identity mismatched, or missing required points.
+- **Design references:** [docs/simulator/README.md](simulator/README.md), [docs/plans/2026-04-21-bacnet-simulator-plan.md](plans/2026-04-21-bacnet-simulator-plan.md), and [docker/simulator/docker-compose.yml](../docker/simulator/docker-compose.yml).
 
 ### Build and signing (Windows portable exe)
 
