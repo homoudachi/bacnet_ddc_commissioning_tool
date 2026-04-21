@@ -10,7 +10,7 @@ Windows **portable executable** that acts as a **commissioning assistant** for *
 
 - **Hardware:** Any **BACnet-capable** controller that matches the imported object map (no vendor lock-in in the product description).
 - **Application logic:** Configurations **authored by you** (or your team); the tool talks **standard BACnet**—inputs and outputs appear as **BACnet objects** on the network.
-- **Test / override mode:** For each **class of test**, the controller exposes a **Multi-state Value (MSV)** that selects that test mode (examples: **fan tachometer verification**, **airflow verification**, **heating test**, **chilled-water (CHW) test**, and additional types as you add them). Writing the MSV is how the assistant arms the controller logic for that commissioning scenario; exact **state numbers ↔ meanings** live in the **import** per unit profile.
+- **Test / override mode:** For each **class of test**, the controller exposes a **Multi-state Value (MSV)** that selects that test mode (examples: **fan tachometer verification**, **airflow verification**, **heating test**, **chilled-water (CHW) test** when plant is available, **cooling valve stroke without CHW**, and additional types as you add them). Writing the MSV is how the assistant arms the controller logic for that commissioning scenario; exact **state numbers ↔ meanings** live in the **import** per unit profile.
 
 ## Non-goals (current intent)
 
@@ -37,6 +37,7 @@ Windows **portable executable** that acts as a **commissioning assistant** for *
 3. **Manual verification of airflow** — technician confirms measured or inferred airflow against design after the automatic modulation / estimation pass.
 4. **Assisted airflow balancing** — same job data should support **guided balancing** (which branch to adjust, target vs measured, instrument choice)—see [Import schema (direction)](#import-schema-direction).
 5. **Tests** — **Automatic** by default; each must be **skippable** or **manually passable** (override automatic fail or skip when the job demands it).
+6. **Cooling valve stroke verify (no plant)** — For units with a **cooling valve**, you always want this **without chilled water** connected: command the valve **to 100%**, have the technician **confirm** travel / end position (or other evidence) via **prompt**, then command **to 0%** and **confirm again**. This proves stroke and direction independent of CHW availability. Full **CHW performance** tests remain separate when the plant is ready.
 
 ## Commissioning UX: predictable, seamless steps per unit
 
@@ -95,6 +96,7 @@ Schema is still being designed; it must carry **everything needed to commission 
 - **Per-unit specifications** — **heater size** (capacity per stage if applicable), **design airflow** (L/s), and for **heat recovery** and similar layouts: **return / exhaust / outdoor** flows as required by that profile.
 - **Test mode MSVs** — one MSV (or clear MSV set) per **test category**; **state list** ↔ human-readable test name; safe transitions (e.g. leaving heating test).
 - **Airflow verification** — which **measurement tool** applies (pitot traverse rules, balometer, grid, hot-wire, etc.) and how readings map to **pass/fail** or **balancing targets** for **assisted airflow balancing**.
+- **Cooling valve (no CHW)** — valve **command object**, **100% then 0%** sequence, and **prompt text** (or checklist) for what the technician must confirm at each end.
 - **Interlocks and limits** — thresholds (e.g. 50% design), min/max fan during tests, points that must not be written in certain modes.
 
 Exact file format (JSON, YAML, SQLite job DB, etc.) is TBD; the above is the **information model** the first schema version must implement.
@@ -105,7 +107,7 @@ These files are **starting sketches** (`schema_version: "0.1-example"`). They ar
 
 | File | Intent |
 |------|--------|
-| [examples/unit-profile-fcu.example.json](examples/unit-profile-fcu.example.json) | FCU: MSV modes, **tachometer value AV**, fan **AV 0–100%**, heat **AV 0–100%**, CHW valve, RAT manual/Bluetooth, **commissioning_flow** (auto half-flow → confirm tacho ref → manual verify → heating), interlock uses **stored** half-flow tacho reference. |
+| [examples/unit-profile-fcu.example.json](examples/unit-profile-fcu.example.json) | FCU: MSV modes, **tachometer value AV**, fan **AV 0–100%**, heat **AV 0–100%**, CHW valve **stroke verify without plant** (100% prompt → 0% prompt), RAT manual/Bluetooth, **commissioning_flow** (half-flow chain → heating), interlock uses **stored** half-flow tacho reference. |
 | [examples/unit-profile-hrv.example.json](examples/unit-profile-hrv.example.json) | HRV: dual streams, **tachometer value** AVs, fan **AVs 0–100%**; **measured** half-design L/s on supply and exhaust, then **~15% fan command reduction**, then **field-adjust current switch** so **BI just picks up**; **no heat**, assisted + manual airflow. |
 
 ## Job model

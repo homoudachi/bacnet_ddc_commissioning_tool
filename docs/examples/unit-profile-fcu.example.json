@@ -21,7 +21,11 @@
     },
     "chw": {
       "type": "two_pipe",
-      "valve_is_cooling_only": true
+      "valve_is_cooling_only": true,
+      "valve_stroke_verify_without_plant": {
+        "description": "Always run without chilled water: command valve 100%, technician confirms via prompt; command 0%, confirm again.",
+        "valve_object_id": "ao_chw_valve"
+      }
     }
   },
   "objects": [
@@ -36,7 +40,8 @@
         { "number": 2, "key": "fan_tacho_verify", "label": "Fan tachometer verification" },
         { "number": 3, "key": "airflow_verify", "label": "Airflow verification" },
         { "number": 4, "key": "heating_test", "label": "Electric heating test" },
-        { "number": 5, "key": "chw_test", "label": "Chilled-water cooling test" }
+        { "number": 5, "key": "chw_test", "label": "Chilled-water cooling test (requires plant)" },
+        { "number": 6, "key": "chw_valve_stroke_no_plant", "label": "Cooling valve stroke verify — no CHW" }
       ]
     },
     {
@@ -131,6 +136,34 @@
       ]
     },
     {
+      "step_id": "cooling_valve_stroke_no_chw",
+      "label": "Cooling valve stroke — no CHW (100% then 0%)",
+      "description": "No chilled-water plant required. Command ao_chw_valve to 100%; technician confirms full stroke / end travel via prompt. Then command to 0%; confirm closed / zero via prompt.",
+      "arms_test_mode_state_key": "chw_valve_stroke_no_plant",
+      "actions": [
+        {
+          "type": "write_analog_percent",
+          "object_id": "ao_chw_valve",
+          "value": 100
+        },
+        {
+          "type": "operator_prompt_confirm",
+          "prompt_id": "chw_valve_at_100",
+          "prompt_text": "Confirm the cooling valve has driven to the full open (100%) position — travel, mechanical stop, or local indicator as applicable."
+        },
+        {
+          "type": "write_analog_percent",
+          "object_id": "ao_chw_valve",
+          "value": 0
+        },
+        {
+          "type": "operator_prompt_confirm",
+          "prompt_id": "chw_valve_at_0",
+          "prompt_text": "Confirm the cooling valve has returned to fully closed (0%) — no cooling demand at stem / indicator as applicable."
+        }
+      ]
+    },
+    {
       "step_id": "heating_test",
       "label": "Heating test (modulating heat AV)",
       "description": "Only offered after half-flow tachometer reference is stored and manual airflow step acknowledged per UI rules.",
@@ -215,6 +248,39 @@
           "description": "Tool drives av_supply_fan_command and av_electric_heat_command within limits; SAT/RAT per session/manual/Bluetooth.",
           "actuator_object_ids": ["av_supply_fan_command", "av_electric_heat_command"],
           "target": "approach_design_delta_t_and_flow"
+        }
+      ],
+      "manual_verification_required": true
+    },
+    {
+      "id": "cooling_valve_stroke_no_plant_test",
+      "test_mode_state_key": "chw_valve_stroke_no_plant",
+      "description": "Standalone test card matching commissioning_flow cooling_valve_stroke_no_chw.",
+      "steps": [
+        {
+          "action": "write_msv_state",
+          "object_id": "msv_test_mode",
+          "state_key": "chw_valve_stroke_no_plant"
+        },
+        {
+          "action": "write_analog_percent",
+          "object_id": "ao_chw_valve",
+          "value": 100
+        },
+        {
+          "action": "operator_prompt_confirm",
+          "prompt_id": "chw_valve_at_100",
+          "prompt_text": "Confirm cooling valve at 100% (full open / stroke verified)."
+        },
+        {
+          "action": "write_analog_percent",
+          "object_id": "ao_chw_valve",
+          "value": 0
+        },
+        {
+          "action": "operator_prompt_confirm",
+          "prompt_id": "chw_valve_at_0",
+          "prompt_text": "Confirm cooling valve at 0% (fully closed)."
         }
       ],
       "manual_verification_required": true
