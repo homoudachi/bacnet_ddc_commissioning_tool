@@ -99,8 +99,8 @@ Schema is still being designed; it must carry **everything needed to commission 
 - **Test mode MSVs** — one MSV (or clear MSV set) per **test category**; **state list** ↔ human-readable test name; safe transitions (e.g. leaving heating test).
 - **Airflow verification** — which **measurement tool** applies (pitot traverse rules, balometer, grid, hot-wire, etc.) and how readings map to **pass/fail** or **balancing targets** for **assisted airflow balancing**.
 - **Cooling valve (no CHW)** — valve **command object**, **100% then 0%** sequence, and **prompt text** (or checklist) for what the technician must confirm at each end.
-- **CHW cooling test (plant)** — pass/fail criteria when CHW is on; **`skippable`** with **recorded reason** when plant is not ready; **report series**: modulated **valve %** + **SAT** vs time (or per step).
-- **Heating test** — **report series**: modulated **heat %** + **SAT** vs time (or per step); align columns with cooling for comparable PDF/CSV tables.
+- **CHW cooling test (plant)** — pass/fail criteria when CHW is on; **`skippable`** with **recorded reason** when plant is not ready; **report series**: modulated **valve %** + **SAT** + **RAT** vs time (or per step).
+- **Heating test** — **report series**: modulated **heat %** + **SAT** + **RAT** vs time (or per step); align columns with cooling for comparable PDF/CSV tables.
 - **Interlocks and limits** — thresholds (e.g. 50% design), min/max fan during tests, points that must not be written in certain modes.
 
 Exact file format (JSON, YAML, SQLite job DB, etc.) is TBD; the above is the **information model** the first schema version must implement.
@@ -125,7 +125,7 @@ These files are **starting sketches** (`schema_version: "0.1-example"`). They ar
 
 ### Reports — heating and cooling tests
 
-**Cooling** and **heating** performance tests must appear **in the report** with the same idea: what was **commanded** (valve or heat **modulated** over a profile-defined sweep or steps) and what happened to **supply air temperature (SAT)** as the primary **result**. Include timestamps (or step index), actuator **%**, and **SAT** (°C); add secondary columns from the import if needed (fan %, outdoor air, etc.). The valve **stroke-without-CHW** check remains a separate line item (end stops only); the **modulation + SAT** block is the substantive **cooling test** / **heating test** for the customer record.
+**Cooling** and **heating** performance tests must appear **in the report** with the same idea: what was **commanded** (valve or heat **modulated** over a profile-defined sweep or steps) and what happened to **supply air temperature (SAT)** as the primary **result**. Include **return air temperature (RAT)** in the **same time- or step-series** when available: **BACnet RAT** object in the profile, or **manual / Bluetooth** values carried in the session and written into the same table rows (so every row has SAT and RAT columns even if RAT is operator-entered). Also allow timestamps (or step index), actuator **%**, and secondary columns from the import (fan %, outdoor air, etc.). The valve **stroke-without-CHW** check remains a separate line item (end stops only); the **modulation + SAT (+ RAT)** block is the substantive **cooling test** / **heating test** for the customer record.
 
 ## Localization and units
 
@@ -163,10 +163,23 @@ _(Fill in after the first runnable build.)_
 - [ ] This doc updated if exports, BACnet assumptions, test rules, or sign-off changed.
 - [ ] Commit message states the behavioral change.
 
+## Remaining to plan (before implementation)
+
+These are the main gaps once requirements feel “complete enough” to start coding:
+
+- **Job / import file format** — single JSON job vs SQLite vs split files; how multiple controllers reference shared profiles.
+- **Modulation recipes** — exact **sweep** for cooling valve and heat (steps, ramp rate, dwell at each step, max SAT/SAT rate of change for safety).
+- **Pass / fail rules** — numeric thresholds on SAT (and ΔT vs RAT) for cooling and heating tests; what constitutes **fail** vs **manual override**.
+- **Report layout** — PDF section order, logo/branding, one table vs multiple charts; **CSV vs XLSX** column order frozen for integrators.
+- **Structured log** — schema (JSON lines?), rotation, path on disk for portable exe.
+- **Bluetooth RAT** — device support, pairing UX, how readings align to **timestamps** in the thermal table.
+- **BACnet stack** — library choice for Windows portable build; read/write batching and timeouts during sweeps.
+- **Build and signing** — toolchain for single exe, code signing, AV false-positive mitigation.
+
 ## Open questions
 
 - **Heat-rise → airflow:** confirm exact **formula variant** (sensible only vs mixed, latent ignored?), **staging** of electric heat (kW per step), and **minimum fan / maximum SAT** limits during auto modulation.
-- **RAT workflow:** default to **manual entry** until Bluetooth (or other) device support exists; define **where** in the job file optional `rat_source: manual | bluetooth | bacnet_object` lives.
+- **RAT workflow:** default to **manual entry** until Bluetooth (or other) device support exists; define **where** in the job file optional `rat_source: manual | bluetooth | bacnet_object` lives; for **reports**, how often to prompt for RAT during a long modulation sweep (each step vs start/end only).
 - **MSV contracts:** canonical **state numbers** per test type across profiles, or fully profile-local only?
 - **Half-design reference:** optional hysteresis when comparing **live tachometer value** to the **session-stored** value captured after auto-adjust + operator confirm.
 - **Bluetooth / external sensors:** pairing, calibration, audit trail (who accepted which reading).

@@ -63,6 +63,14 @@
       "engineering_units": "degreesCelsius"
     },
     {
+      "id": "ai_rat",
+      "role": "return_air_temperature",
+      "description": "Omit this object from the live job / profile variant when the unit has no BACnet RAT; report then uses session RAT only.",
+      "bacnet": { "object_type": "analogInput", "instance": 6 },
+      "writable": false,
+      "engineering_units": "degreesCelsius"
+    },
+    {
       "id": "av_supply_fan_command",
       "role": "supply_fan_speed_command",
       "bacnet": { "object_type": "analogValue", "instance": 3 },
@@ -90,9 +98,9 @@
   "temperature_inputs_for_heat_rise": {
     "sat_ref": { "object_id": "ai_sat" },
     "rat_equivalent": {
-      "description": "No BACnet RAT on this FCU; use operator or external probe for return-side air temperature.",
-      "allowed_sources": ["manual_entry", "bluetooth_probe"],
-      "bacnet_object_id": null
+      "description": "When ai_rat exists on the device, read it; otherwise operator or Bluetooth for return-side air temperature.",
+      "allowed_sources": ["bacnet_object", "manual_entry", "bluetooth_probe"],
+      "bacnet_object_id": "ai_rat"
     }
   },
   "commissioning_flow": [
@@ -166,7 +174,7 @@
     {
       "step_id": "proper_cooling_chw_test",
       "label": "Proper cooling test (CHW plant required)",
-      "description": "Modulate cooling valve over a profile sweep; log valve % and SAT for the commissioning report. If CHW is not ready, skip with recorded reason.",
+      "description": "Modulate cooling valve over a profile sweep; log valve %, SAT, and RAT for the commissioning report. If CHW is not ready, skip with recorded reason.",
       "arms_test_mode_state_key": "chw_test",
       "skippable": true,
       "skip_when": ["chilled_water_not_ready", "plant_not_commissioned"],
@@ -177,15 +185,17 @@
           "type": "modulate_actuator_log_sat_for_report",
           "command_object_id": "ao_chw_valve",
           "result_supply_temperature_object_id": "ai_sat",
+          "result_return_temperature_object_id": "ai_rat",
+          "session_return_air_temperature_key": "rat_degC",
           "optional_context_object_ids": ["av_supply_fan_command"],
-          "comment": "Engine samples presentValue on command object and SAT during modulation; emits table rows for PDF/CSV/XLSX"
+          "comment": "Engine samples command, SAT, RAT (BACnet or session) during modulation; emits table rows for PDF/CSV/XLSX"
         }
       ]
     },
     {
       "step_id": "heating_test",
       "label": "Heating test (modulating heat AV)",
-      "description": "Modulate heat AV and log SAT for the same report layout as cooling. Only after half-flow tachometer reference and manual airflow per UI rules.",
+      "description": "Modulate heat AV and log SAT and RAT for the same report layout as cooling. Only after half-flow tachometer reference and manual airflow per UI rules.",
       "arms_test_mode_state_key": "heating_test",
       "requires_session_keys": ["fan_tachometer_reference_at_half_design_flow"],
       "report_ref": "thermal_tests_for_report.heating",
@@ -194,8 +204,10 @@
           "type": "modulate_actuator_log_sat_for_report",
           "command_object_id": "av_electric_heat_command",
           "result_supply_temperature_object_id": "ai_sat",
+          "result_return_temperature_object_id": "ai_rat",
+          "session_return_air_temperature_key": "rat_degC",
           "optional_context_object_ids": ["av_supply_fan_command"],
-          "comment": "Same reporting columns as cooling: time, command %, SAT °C"
+          "comment": "Same reporting columns as cooling: time, command %, SAT °C, RAT °C"
         }
       ]
     }
@@ -211,7 +223,12 @@
     }
   ],
   "thermal_tests_for_report": {
-    "description": "Heating and cooling tests share one reporting shape: modulated command vs supply air temperature over time.",
+    "description": "Heating and cooling tests share one reporting shape: modulated command vs SAT and RAT over time.",
+    "return_air_temperature": {
+      "bacnet_object_id": "ai_rat",
+      "session_fallback_key": "rat_degC",
+      "note": "Each report row: use BACnet presentValue when object exists and is bound; else use session value (manual/Bluetooth) captured for that step or interpolated between prompts."
+    },
     "included_in_exports": ["pdf", "csv", "xlsx", "structured_log"],
     "cooling": {
       "test_id": "chw_cooling_performance_test",
@@ -219,11 +236,19 @@
       "command_object_id": "ao_chw_valve",
       "command_label": "Cooling valve command (%)",
       "result_supply_temperature_object_id": "ai_sat",
+      "result_return_temperature_object_id": "ai_rat",
       "result_label": "Supply air temperature (°C)",
+      "result_return_label": "Return air temperature (°C)",
       "table_columns": [
         { "key": "timestamp", "label": "Time" },
         { "key": "cooling_valve_percent", "object_id": "ao_chw_valve", "property": "presentValue" },
         { "key": "supply_air_temp_c", "object_id": "ai_sat", "property": "presentValue" },
+        {
+          "key": "return_air_temp_c",
+          "object_id": "ai_rat",
+          "property": "presentValue",
+          "session_fallback_key": "rat_degC"
+        },
         { "key": "fan_speed_percent", "object_id": "av_supply_fan_command", "property": "presentValue" }
       ]
     },
@@ -233,11 +258,19 @@
       "command_object_id": "av_electric_heat_command",
       "command_label": "Electric heat command (%)",
       "result_supply_temperature_object_id": "ai_sat",
+      "result_return_temperature_object_id": "ai_rat",
       "result_label": "Supply air temperature (°C)",
+      "result_return_label": "Return air temperature (°C)",
       "table_columns": [
         { "key": "timestamp", "label": "Time" },
         { "key": "heat_command_percent", "object_id": "av_electric_heat_command", "property": "presentValue" },
         { "key": "supply_air_temp_c", "object_id": "ai_sat", "property": "presentValue" },
+        {
+          "key": "return_air_temp_c",
+          "object_id": "ai_rat",
+          "property": "presentValue",
+          "session_fallback_key": "rat_degC"
+        },
         { "key": "fan_speed_percent", "object_id": "av_supply_fan_command", "property": "presentValue" }
       ]
     }
@@ -301,8 +334,10 @@
           "action": "modulate_actuator_log_sat_for_report",
           "command_object_id": "av_electric_heat_command",
           "result_supply_temperature_object_id": "ai_sat",
+          "result_return_temperature_object_id": "ai_rat",
+          "session_return_air_temperature_key": "rat_degC",
           "optional_co_actuators": ["av_supply_fan_command"],
-          "description": "Modulate heat (and fan if profile requires); record time series for report: heat %, SAT °C."
+          "description": "Modulate heat (and fan if profile requires); record time series for report: heat %, SAT °C, RAT °C (BACnet or session)."
         }
       ],
       "manual_verification_required": true
@@ -329,8 +364,10 @@
           "action": "modulate_actuator_log_sat_for_report",
           "command_object_id": "ao_chw_valve",
           "result_supply_temperature_object_id": "ai_sat",
+          "result_return_temperature_object_id": "ai_rat",
+          "session_return_air_temperature_key": "rat_degC",
           "optional_co_actuators": ["av_supply_fan_command"],
-          "description": "Modulate cooling valve; log valve % and SAT for report (same table shape as heating test)."
+          "description": "Modulate cooling valve; log valve %, SAT, RAT for report (same table shape as heating test)."
         }
       ],
       "manual_verification_required": true
