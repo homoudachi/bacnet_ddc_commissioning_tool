@@ -80,8 +80,10 @@ Document per **equipment profile** which source is valid and required uncertaint
 
 ### Example — HRV (no electric heat in profile)
 
-- **Single motor current / run proof:** One **Binary Input (BI)** for the **fan circuit** (e.g. current switch). Commissioning sets fan speed(s) to **just below half of design-flow speed** (per profile: which AV(s), target command or inferred flow band) so the **BI state** matches the program’s expectation for “fan proven at reduced speed.”
-- **No heater** on these units: **no heat-rise test**; **airflow is manually verified** with **tool-assisted balancing** (targets, instruments, step order in the import).
+- **Two streams, measured first:** Adjust **supply** and **exhaust (return-side)** fan **AV commands (0–100%)** using **measured** airflow on each branch until each stream is at **half of its design flow (L/s)** (not half of command—**half of design as verified by measurement** in the assisted tool).
+- **Then reduce speed:** From that proven operating point, **reduce both fan commands by about 15%** (exact percentage is a **profile parameter**, e.g. 15%, not hard-coded in the app).
+- **Current switch pickup:** **Adjust the current switch** (field setpoint / sensitivity) so it **just comes on** at this reduced-flow operating point—so the **BI** reliably indicates “fan running” without nuisance trips at idle. The technician confirms **BI active** after the adjustment.
+- **No heater** on these units: **no heat-rise test**; **airflow is manually verified** with **tool-assisted balancing** before/after as defined in the import.
 
 _(Add more profiles: CHW-only, other recovery layouts, gas heat, etc.)_
 
@@ -104,7 +106,7 @@ These files are **starting sketches** (`schema_version: "0.1-example"`). They ar
 | File | Intent |
 |------|--------|
 | [examples/unit-profile-fcu.example.json](examples/unit-profile-fcu.example.json) | FCU: MSV modes, **tachometer value AV**, fan **AV 0–100%**, heat **AV 0–100%**, CHW valve, RAT manual/Bluetooth, **commissioning_flow** (auto half-flow → confirm tacho ref → manual verify → heating), interlock uses **stored** half-flow tacho reference. |
-| [examples/unit-profile-hrv.example.json](examples/unit-profile-hrv.example.json) | HRV: dual streams, **tachometer value** AVs, fan **AVs 0–100%**, **single BI** current switch for fan circuit, **just below half design speed** step for BI prove, **no heat**, assisted + manual airflow only. |
+| [examples/unit-profile-hrv.example.json](examples/unit-profile-hrv.example.json) | HRV: dual streams, **tachometer value** AVs, fan **AVs 0–100%**; **measured** half-design L/s on supply and exhaust, then **~15% fan command reduction**, then **field-adjust current switch** so **BI just picks up**; **no heat**, assisted + manual airflow. |
 
 ## Job model
 

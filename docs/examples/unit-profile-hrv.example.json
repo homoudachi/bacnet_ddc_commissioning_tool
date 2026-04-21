@@ -2,7 +2,7 @@
   "schema_version": "0.1-example",
   "profile_id": "hrv_counterflow_erv_v1",
   "display_name": "HRV / energy-recovery ventilator — supply + exhaust, current-switch fan proof",
-  "description": "Illustrative fragment: two airstreams, no electric heat. One BI (current switch) on the fan motor circuit; fans run just below half design speed to satisfy prove. Airflow is manually verified with tool assistance.",
+  "description": "Illustrative fragment: two airstreams, no electric heat. One BI (current switch) on the fan motor circuit: first balance measured supply and exhaust each to half design L/s, reduce fan commands ~15%, then field-adjust the current switch so BI just picks up. Airflow manually verified with tool assistance.",
   "bacnet_device": {
     "device_instance": 22001,
     "address": {
@@ -16,7 +16,11 @@
     "design_exhaust_airflow_L_s": 45.0,
     "design_outdoor_airflow_L_s": 47.2,
     "design_return_to_core_airflow_L_s": 45.0,
-    "comment": "No heater on this profile. Naming of streams should match shop drawings."
+    "comment": "No heater on this profile. Naming of streams should match shop drawings.",
+    "current_switch_commissioning": {
+      "reduce_fan_command_after_measured_half_percent": 15,
+      "comment": "Tune per site; 'about 15%' from field practice"
+    }
   },
   "objects": [
     {
@@ -105,19 +109,45 @@
   ],
   "commissioning_flow": [
     {
-      "step_id": "current_switch_prove_just_below_half",
-      "label": "Set fans just below half design speed; verify current switch BI",
-      "description": "Single BI for the fan circuit: modulate av_supply_fan_command and av_exhaust_fan_command to slightly under 0.5 × design on each stream (per your program’s mapping), then technician confirms BI = RUN/current detected.",
+      "step_id": "hrv_balance_measured_flow_to_half_design_each_stream",
+      "label": "HRV — balance supply and exhaust to half of design (measured L/s)",
+      "description": "Adjust av_supply_fan_command and av_exhaust_fan_command until assisted measurements show each stream at ~0.5 × its design_flow_L_s (supply and return/exhaust branches independently).",
       "arms_test_mode_state_key": "airflow_verify_supply",
       "actions": [
         {
           "type": "automatic_airflow_adjustment_dual_fan",
-          "target_flow_ratio_of_design_each_stream": 0.48,
-          "comment": "Just below half—tune ratio (e.g. 0.48–0.49) per controller program",
+          "target_measured_flow_ratio_of_design_each_stream": 0.5,
           "supply_fan_object_id": "av_supply_fan_command",
           "exhaust_fan_object_id": "av_exhaust_fan_command",
           "supply_measurement_branch_id": "outdoor_supply_main",
           "exhaust_measurement_branch_id": "exhaust_return_main"
+        }
+      ]
+    },
+    {
+      "step_id": "hrv_reduce_fan_commands_after_half",
+      "label": "Reduce both fan commands ~15% from that operating point",
+      "description": "From the half-design measured point, reduce supply and exhaust fan AVs by unit_specs.current_switch_commissioning.reduce_fan_command_after_measured_half_percent (default 15%).",
+      "arms_test_mode_state_key": "airflow_verify_supply",
+      "actions": [
+        {
+          "type": "reduce_fan_speed_commands_by_percent",
+          "percent": 15,
+          "relative_to": "commands_at_measured_half_design",
+          "object_ids": ["av_supply_fan_command", "av_exhaust_fan_command"]
+        }
+      ]
+    },
+    {
+      "step_id": "hrv_field_set_current_switch_pickup",
+      "label": "Field-adjust current switch so BI just comes on at this speed",
+      "description": "Technician adjusts the physical current switch setpoint so the BI transitions to active at this reduced-flow operating point (just picks up).",
+      "arms_test_mode_state_key": "airflow_verify_supply",
+      "actions": [
+        {
+          "type": "field_adjust_current_switch_until_bi_active",
+          "bi_object_id": "bi_fan_motor_current_switch",
+          "instruction": "Adjust current switch until BI reads ON/current detected at this fan speed; avoid tripping at idle."
         },
         {
           "type": "operator_confirm_binary_input",
@@ -184,7 +214,7 @@
       }
     ],
     "assisted_balancing": {
-      "description": "Same predictable step order for every HRV of this profile: prove BI near half flow, then assisted manual L/s on each stream."
+      "description": "Predictable order: measured half-design on supply and exhaust → reduce fan commands ~15% → adjust current switch for BI pickup → assisted manual L/s verification per branch."
     }
   },
   "tests": [
