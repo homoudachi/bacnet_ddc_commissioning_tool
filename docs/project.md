@@ -2,6 +2,12 @@
 
 Audience: future you. Update when intent, behavior, or exports change.
 
+## Project maturity snapshot (2026-04-21)
+
+- Repository state: **documentation and examples only** (no runnable app, build script, or CI pipeline yet).
+- This document is the source of truth for product intent until implementation starts.
+- Active implementation roadmap lives in: [`docs/plans/2026-04-21-v1-foundation-plan.md`](plans/2026-04-21-v1-foundation-plan.md).
+
 ## Goal
 
 Windows **portable executable** that acts as a **commissioning assistant** for **BACnet-capable** controllers: command devices, run **automatic tests**, monitor results, and combine **automatic judgment** with **technician verification** (notes + name). Supports **many controllers** per job via an **imported target list**.

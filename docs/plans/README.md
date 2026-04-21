@@ -2,6 +2,11 @@
 
 One file per **bounded slice** of work (a milestone, a week, a feature chunk)—not an eternal master spec.
 
+## Current status
+
+- Active plan: [`2026-04-21-v1-foundation-plan.md`](2026-04-21-v1-foundation-plan.md)
+- Repository is currently docs-first (no runtime code yet), so plan files are the execution contract.
+
 ## When to add a plan
 
 - The slice touches several files or subsystems, or

@@ -12,4 +12,4 @@ Use when a choice is **non-obvious** or you will forget **why** you chose it.
 
 | ADR | Title | Status |
 |-----|-------|--------|
-| — | _(add rows as you create ADRs)_ | — |
+| — | _(none yet; Phase 0 of [v1 foundation plan](../plans/2026-04-21-v1-foundation-plan.md) should add the first ADRs)_ | — |
