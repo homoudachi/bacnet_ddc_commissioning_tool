@@ -298,6 +298,45 @@ class RuntimeCliTests(unittest.TestCase):
         self.assertGreater(len(flow_state["steps"]), 0)
         self.assertEqual("pending", flow_state["steps"][0]["status"])
 
+    def test_init_flow_persists_step_policy_and_history_fields(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-flow-init-policy",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+
+        result = _run_runtime(
+            "init-flow",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+        )
+        self.assertEqual(0, result.returncode)
+
+        flow_state_path = self.run_dir / "state" / "flows" / "FCU-01A.json"
+        flow_state = json.loads(flow_state_path.read_text(encoding="utf-8"))
+        target_step = [s for s in flow_state["steps"] if s["step_id"] == "half_design_airflow_auto"][
+            0
+        ]
+        self.assertIn("skippable", target_step)
+        self.assertIsInstance(target_step["skippable"], bool)
+        self.assertIn("requires_step_ids", target_step)
+        self.assertIsInstance(target_step["requires_step_ids"], list)
+        self.assertIn("history", target_step)
+        self.assertEqual([], target_step["history"])
+
     def test_record_step_updates_status_and_captures_technician_signoff(self) -> None:
         init_result = _run_runtime(
             "init-run",
@@ -542,3 +581,199 @@ class RuntimeCliTests(unittest.TestCase):
         rejection_events = [entry for entry in parsed_events if entry["event"] == "flow_step_rejected"]
         self.assertGreaterEqual(len(rejection_events), 1)
         self.assertEqual("DEPENDENCY_UNSATISFIED", rejection_events[-1]["reason_code"])
+
+    def test_record_step_rejection_appends_history_and_preserves_status(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-flow-rejection-history",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+        init_flow_result = _run_runtime(
+            "init-flow",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+        )
+        self.assertEqual(0, init_flow_result.returncode)
+
+        result = _run_runtime(
+            "record-step",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+            "--step-id",
+            "confirm_tachometer_reference_half_flow",
+            "--status",
+            "passed",
+            "--technician-name",
+            "Alex Tech",
+            "--note",
+            "Attempting out-of-order transition",
+        )
+        self.assertEqual(2, result.returncode)
+
+        flow_state_path = self.run_dir / "state" / "flows" / "FCU-01A.json"
+        flow_state = json.loads(flow_state_path.read_text(encoding="utf-8"))
+        step = [
+            s for s in flow_state["steps"] if s["step_id"] == "confirm_tachometer_reference_half_flow"
+        ][0]
+        self.assertEqual("pending", step["status"])
+        self.assertIn("history", step)
+        self.assertGreaterEqual(len(step["history"]), 1)
+        rejection_entry = step["history"][-1]
+        self.assertTrue(rejection_entry["rejected"])
+        self.assertEqual("pending", rejection_entry["previous_status"])
+        self.assertEqual("passed", rejection_entry["attempted_status"])
+        self.assertEqual("pending", rejection_entry["new_status"])
+        self.assertEqual("PREREQ_ORDER", rejection_entry["reason_code"])
+        self.assertEqual("PREREQ_ORDER", rejection_entry["rejection_reason_code"])
+
+    def test_record_step_rejects_when_dependency_id_missing_from_flow(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-flow-missing-dependency",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+        init_flow_result = _run_runtime(
+            "init-flow",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+        )
+        self.assertEqual(0, init_flow_result.returncode)
+
+        flow_state_path = self.run_dir / "state" / "flows" / "FCU-01A.json"
+        flow_state = json.loads(flow_state_path.read_text(encoding="utf-8"))
+        for step in flow_state["steps"]:
+            if step["step_id"] == "half_design_airflow_auto":
+                step["requires_step_ids"] = ["missing-step-id"]
+                break
+        flow_state_path.write_text(json.dumps(flow_state, indent=2), encoding="utf-8")
+
+        result = _run_runtime(
+            "record-step",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+            "--step-id",
+            "half_design_airflow_auto",
+            "--status",
+            "passed",
+            "--technician-name",
+            "Alex Tech",
+            "--note",
+            "Attempting transition with missing dependency id",
+        )
+        self.assertEqual(2, result.returncode)
+        self.assertIn("not present in flow", result.stdout)
+
+        lines = (
+            self.run_dir / "logs" / "events.jsonl"
+        ).read_text(encoding="utf-8").strip().splitlines()
+        parsed_events = [json.loads(line) for line in lines]
+        rejection_events = [entry for entry in parsed_events if entry["event"] == "flow_step_rejected"]
+        self.assertGreaterEqual(len(rejection_events), 1)
+        self.assertEqual("DEPENDENCY_UNSATISFIED", rejection_events[-1]["reason_code"])
+
+    def test_record_step_appends_history_for_multiple_updates(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-flow-history-multi",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+        init_flow_result = _run_runtime(
+            "init-flow",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+        )
+        self.assertEqual(0, init_flow_result.returncode)
+
+        first_result = _run_runtime(
+            "record-step",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+            "--step-id",
+            "half_design_airflow_auto",
+            "--status",
+            "passed",
+            "--technician-name",
+            "Alex Tech",
+            "--note",
+            "First transition",
+        )
+        self.assertEqual(0, first_result.returncode)
+
+        second_result = _run_runtime(
+            "record-step",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+            "--step-id",
+            "half_design_airflow_auto",
+            "--status",
+            "manual_passed",
+            "--technician-name",
+            "Alex Tech",
+            "--note",
+            "Second transition",
+        )
+        self.assertEqual(0, second_result.returncode)
+
+        flow_state_path = self.run_dir / "state" / "flows" / "FCU-01A.json"
+        flow_state = json.loads(flow_state_path.read_text(encoding="utf-8"))
+        step = [s for s in flow_state["steps"] if s["step_id"] == "half_design_airflow_auto"][
+            0
+        ]
+        self.assertEqual("manual_passed", step["status"])
+        self.assertGreaterEqual(len(step["records"]), 2)
+        self.assertGreaterEqual(len(step["history"]), 2)
+        first_history = step["history"][-2]
+        second_history = step["history"][-1]
+        self.assertEqual("pending", first_history["previous_status"])
+        self.assertEqual("passed", first_history["new_status"])
+        self.assertEqual("passed", second_history["previous_status"])
+        self.assertEqual("manual_passed", second_history["new_status"])
+        self.assertEqual("status_update", first_history["reason_code"])
+        self.assertEqual("status_update", second_history["reason_code"])
