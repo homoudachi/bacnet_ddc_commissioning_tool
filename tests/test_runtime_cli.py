@@ -127,6 +127,49 @@ class RuntimeCliTests(unittest.TestCase):
         events = [json.loads(line)["event"] for line in lines]
         self.assertIn("simulator_verified", events)
 
+    def test_probe_bip_writes_artifact_and_logs_event(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-bip-probe",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+
+        result = _run_runtime(
+            "probe-bip",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+            "--timeout-seconds",
+            "0.1",
+            "--retries",
+            "1",
+        )
+
+        self.assertIn(result.returncode, (0, 2))
+        artifact = self.run_dir / "artifacts" / "bip" / "FCU-01A.json"
+        self.assertTrue(artifact.exists())
+        summary = json.loads(artifact.read_text(encoding="utf-8"))
+        self.assertEqual("FCU-01A", summary["controller_label"])
+        self.assertIn(summary["status"], {"reachable_verified", "identity_mismatch", "unreachable_timeout"})
+
+        lines = (
+            self.run_dir / "logs" / "events.jsonl"
+        ).read_text(encoding="utf-8").strip().splitlines()
+        events = [json.loads(line)["event"] for line in lines]
+        self.assertIn("bip_probed", events)
+
     def test_init_flow_creates_controller_flow_state(self) -> None:
         init_result = _run_runtime(
             "init-run",

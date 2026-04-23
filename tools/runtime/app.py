@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import importlib.util
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -14,6 +15,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 IMPORT_COMPILER = ROOT / "tools" / "import" / "compile_job.py"
 SIMULATOR_ORCH = ROOT / "tools" / "simulator" / "orchestrator.py"
+BIP_ADAPTER = ROOT / "tools" / "bacnet" / "bip_adapter.py"
+
+
+def _load_bip_adapter():
+    spec = importlib.util.spec_from_file_location("runtime_bip_adapter", BIP_ADAPTER)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"unable to load B/IP adapter module: {BIP_ADAPTER}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def _utc_timestamp() -> str:
@@ -31,6 +43,23 @@ def _append_event(log_path: Path, event: str, payload: dict | None = None) -> No
 def _parse_run_config(run_dir: Path) -> dict:
     config_path = run_dir / "config" / "runtime-config.json"
     return json.loads(config_path.read_text(encoding="utf-8"))
+
+
+def _probe_bip(
+    host: str,
+    port: int,
+    expected_device_instance: int,
+    timeout_seconds: float,
+    retries: int,
+) -> dict:
+    bip_adapter = _load_bip_adapter()
+    return bip_adapter.probe_device(
+        host=host,
+        port=port,
+        expected_device_instance=expected_device_instance,
+        timeout_seconds=timeout_seconds,
+        retries=retries,
+    )
 
 
 def _flows_dir(run_dir: Path) -> Path:
@@ -254,6 +283,56 @@ def cmd_record_step(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_probe_bip(args: argparse.Namespace) -> int:
+    run_dir = args.run_dir
+    logs_path = run_dir / "logs" / "events.jsonl"
+    artifacts_path = run_dir / "artifacts" / "bip"
+
+    runtime_job_path = run_dir / "state" / "runtime-job.json"
+    runtime_job = json.loads(runtime_job_path.read_text(encoding="utf-8"))
+    target = None
+    for controller in runtime_job.get("controllers", []):
+        if controller.get("controller_label") == args.controller_label:
+            target = controller
+            break
+    if target is None:
+        print(f"error: controller not found in runtime job: {args.controller_label}")
+        return 2
+
+    bacnet = target.get("bacnet", {})
+    host = str(bacnet.get("host", "")).strip()
+    port = int(bacnet.get("port"))
+    expected_instance = int(bacnet.get("device_instance"))
+
+    result = _probe_bip(
+        host=host,
+        port=port,
+        expected_device_instance=expected_instance,
+        timeout_seconds=args.timeout_seconds,
+        retries=args.retries,
+    )
+    result["controller_label"] = args.controller_label
+
+    artifact_file = artifacts_path / f"{args.controller_label}.json"
+    artifacts_path.mkdir(parents=True, exist_ok=True)
+    artifact_file.write_text(json.dumps(result, sort_keys=True), encoding="utf-8")
+
+    _append_event(
+        logs_path,
+        "bip_probed",
+        {
+            "controller_label": args.controller_label,
+            "host": host,
+            "port": port,
+            "expected_device_instance": expected_instance,
+            "status": result.get("status"),
+            "artifact_json": str(artifact_file.resolve()),
+        },
+    )
+    print(json.dumps(result, sort_keys=True))
+    return 0 if result.get("status") == "reachable_verified" else 2
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Runtime skeleton CLI for commissioning app flows."
@@ -286,6 +365,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Pass strict flag through to simulator verification.",
     )
     verify_sim.set_defaults(handler=cmd_verify_simulator)
+
+    probe_bip = subparsers.add_parser(
+        "probe-bip", help="Probe one BACnet/IP endpoint and classify identity."
+    )
+    probe_bip.add_argument("--run-dir", required=True, type=Path)
+    probe_bip.add_argument("--controller-label", required=True)
+    probe_bip.add_argument("--timeout-seconds", type=float, default=0.5)
+    probe_bip.add_argument("--retries", type=int, default=1)
+    probe_bip.set_defaults(handler=cmd_probe_bip)
 
     init_flow = subparsers.add_parser(
         "init-flow", help="Initialize commissioning flow state for one controller."

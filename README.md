@@ -57,4 +57,11 @@ python3 tools/runtime/app.py verify-simulator \
   --profile ci \
   --scenario happy-path \
   --strict
+
+# 6) Probe one BACnet/IP endpoint from compiled controller list
+python3 tools/runtime/app.py probe-bip \
+  --run-dir artifacts/runtime-run \
+  --controller-label FCU-01A \
+  --timeout-seconds 0.5 \
+  --retries 1
 ```
