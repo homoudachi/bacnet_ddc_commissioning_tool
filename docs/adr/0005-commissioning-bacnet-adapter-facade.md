@@ -1,0 +1,19 @@
+# ADR 0005 — Commissioning BACnet adapter façade
+
+## Status
+
+Accepted
+
+## Context
+
+The runtime mixed two concerns: **minimal UDP Who-Is / I-Am probes** (`bip_adapter.py`) and **BACpypes3 ReadProperty / WriteProperty** (`bacpypes_client.py`). Call sites imported each module separately, which makes it harder to evolve timeouts, discovery policy, or swap implementations without touching every command.
+
+## Decision
+
+Introduce **`tools/bacnet/adapter.py`** with **`CommissioningBACnetAdapter`**: a small façade that exposes **probe**, **plan_write_property** (dry-run path), **read_present_value**, and **write_present_value**, plus helpers such as **`format_ipv4_target`** and **`present_value_property_id`**. The runtime CLI loads this class once (lazy singleton) and routes all BACnet I/O through it. **`bip_adapter.py`** and **`bacpypes_client.py`** remain the low-level implementations.
+
+## Consequences
+
+- New commissioning features should call the **adapter** first; extend the façade when adding operations (e.g. subscribe) rather than importing BACpypes from scattered modules.
+- The façade still uses dynamic `importlib` loading of sibling files (same packaging constraints as before); a future package layout could replace that without changing CLI behavior.
+- Unit tests can mock **`_bip_mod`** / **`_client_mod`** on the adapter instance for focused tests.

@@ -38,7 +38,7 @@ Windows **portable executable** that acts as a **commissioning assistant** for *
 
 ## BACnet runtime assumptions (Python CLI)
 
-These notes apply to the **current** `tools/runtime/app.py` BACnet helpers (`probe-bip`, `bacnet-read`, `bacnet-point-checkout`, `dry-run-bacnet-write` with `--execute`). They are **not** a substitute for site network design; they explain what the code assumes today.
+These notes apply to the **current** `tools/runtime/app.py` BACnet helpers (`probe-bip`, `bacnet-read`, `bacnet-point-checkout`, `dry-run-bacnet-write` with `--execute`). All of those go through **`CommissioningBACnetAdapter`** in [`tools/bacnet/adapter.py`](../tools/bacnet/adapter.py) (facade over the minimal UDP probe module and BACpypes3 client). They are **not** a substitute for site network design; they explain what the code assumes today.
 
 - **Transport:** BACnet/IP **UDP** to the **host:port** on each controller row after `compile-import`. There is **no MS/TP, no BACnet/SC**, and **no BBMD / foreign device** logic in this slice—reachability is “same IP routing and UDP path as any other BACnet workstation on this host.”
 - **Directed discovery:** Before ReadProperty / WriteProperty, the BACpypes3 path issues **Who-Is** with **low_limit = high_limit = expected device instance** toward the **configured address** (not a global broadcast sweep). If the device does not answer, reads and writes stop with **no I-Am** / probe failure rather than guessing a target.
@@ -237,7 +237,7 @@ These are the main gaps once requirements feel “complete enough” to start co
 - **Report layout** — PDF section order, logo/branding, one table vs multiple charts; **CSV vs XLSX** column order frozen for integrators.
 - **Structured log** — schema (JSON lines?), rotation, path on disk for portable exe.
 - **Docker BACnet sim** — which simulator images/libraries, how many virtual devices, scripted scenarios for CI.
-- **BACnet stack** — library choice for Windows portable build; read/write batching and timeouts during sweeps.
+- **BACnet stack** — Windows portable build packaging; **read/write batching**, **COV/subscribe**, and **sweep-timeouts** beyond the current [`CommissioningBACnetAdapter`](../tools/bacnet/adapter.py) façade.
 - **Build and signing** — still **TBD** (toolchain, certificate, release channel).
 
 ## Open questions

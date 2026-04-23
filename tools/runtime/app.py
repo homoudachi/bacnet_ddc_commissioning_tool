@@ -16,17 +16,26 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 IMPORT_COMPILER = ROOT / "tools" / "import" / "compile_job.py"
 SIMULATOR_ORCH = ROOT / "tools" / "simulator" / "orchestrator.py"
-BIP_ADAPTER = ROOT / "tools" / "bacnet" / "bip_adapter.py"
+BACNET_ADAPTER = ROOT / "tools" / "bacnet" / "adapter.py"
+
+_bacnet_adapter_singleton = None
 
 
-def _load_bip_adapter():
-    spec = importlib.util.spec_from_file_location("runtime_bip_adapter", BIP_ADAPTER)
+def _bacnet_adapter():
+    """Lazy singleton :class:`CommissioningBACnetAdapter` (see ``tools/bacnet/adapter.py``)."""
+    global _bacnet_adapter_singleton
+    if _bacnet_adapter_singleton is not None:
+        return _bacnet_adapter_singleton
+    spec = importlib.util.spec_from_file_location(
+        "runtime_commissioning_bacnet", BACNET_ADAPTER
+    )
     if spec is None or spec.loader is None:
-        raise RuntimeError(f"unable to load B/IP adapter module: {BIP_ADAPTER}")
+        raise RuntimeError(f"unable to load BACnet adapter module: {BACNET_ADAPTER}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
-    return module
+    _bacnet_adapter_singleton = module.CommissioningBACnetAdapter(ROOT)
+    return _bacnet_adapter_singleton
 
 
 def _utc_timestamp() -> str:
@@ -53,8 +62,7 @@ def _probe_bip(
     timeout_seconds: float,
     retries: int,
 ) -> dict:
-    bip_adapter = _load_bip_adapter()
-    return bip_adapter.probe_device(
+    return _bacnet_adapter().probe_device(
         host=host,
         port=port,
         expected_device_instance=expected_device_instance,
@@ -751,18 +759,6 @@ def cmd_export_run_summary(args: argparse.Namespace) -> int:
     return 0
 
 
-def _load_bacpypes_client():
-    spec = importlib.util.spec_from_file_location(
-        "runtime_bacpypes_client", ROOT / "tools" / "bacnet" / "bacpypes_client.py"
-    )
-    if spec is None or spec.loader is None:
-        raise RuntimeError("unable to load bacpypes_client module")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
 def cmd_dry_run_bacnet_write(args: argparse.Namespace) -> int:
     run_dir = args.run_dir
     logs_path = run_dir / "logs" / "events.jsonl"
@@ -815,8 +811,8 @@ def cmd_dry_run_bacnet_write(args: argparse.Namespace) -> int:
         print(f"error: invalid BACnet instance for {object_id!r}")
         return 2
 
-    bip_mod = _load_bip_adapter()
-    object_type_int = bip_mod.object_type_name_to_int(type_name)
+    bacnet_ad = _bacnet_adapter()
+    object_type_int = bacnet_ad.object_type_name_to_int(type_name)
     if object_type_int is None:
         print(f"error: unsupported BACnet object_type for writes: {type_name!r}")
         return 2
@@ -827,13 +823,13 @@ def cmd_dry_run_bacnet_write(args: argparse.Namespace) -> int:
     expected_instance = int(addr.get("device_instance", 0))
 
     dry_run = not bool(getattr(args, "execute", False))
-    result = bip_mod.plan_write_property(
+    result = bacnet_ad.plan_write_property(
         host=host,
         port=port,
         expected_device_instance=expected_instance,
         object_type=object_type_int,
         object_instance=object_instance,
-        property_id=int(bip_mod.BACNET_PROP_PRESENT_VALUE),
+        property_id=bacnet_ad.present_value_property_id,
         value=int(args.value),
         timeout_seconds=args.timeout_seconds,
         retries=args.retries,
@@ -846,19 +842,14 @@ def cmd_dry_run_bacnet_write(args: argparse.Namespace) -> int:
 
     if not dry_run and result.get("status") == "dry_run_allowed":
         try:
-            client = _load_bacpypes_client()
-        except (OSError, RuntimeError) as err:
-            print(f"error: failed to load BACnet write client: {err}")
-            return 2
-        try:
             bind_port = int(getattr(args, "bacnet_bind_port", 0) or 0)
         except ValueError:
             bind_port = 0
         who_is_timeout = max(3.0, float(args.timeout_seconds) * max(1, int(args.retries)))
         try:
-            exec_result = client.write_present_value(
+            exec_result = bacnet_ad.write_present_value(
                 bind_port=bind_port,
-                target_address=f"{host}:{port}",
+                target_address=bacnet_ad.format_ipv4_target(host, port),
                 expected_device_instance=expected_instance,
                 object_type=object_type_int,
                 object_instance=object_instance,
@@ -866,6 +857,9 @@ def cmd_dry_run_bacnet_write(args: argparse.Namespace) -> int:
                 who_is_timeout=who_is_timeout,
                 apdu_timeout=8.0,
             )
+        except (OSError, RuntimeError) as err:
+            print(f"error: failed to load BACnet stack: {err}")
+            return 2
         except ModuleNotFoundError as err:
             print(
                 "error: bacpypes3 is required for --execute "
@@ -971,8 +965,8 @@ def _bacnet_read_one(
             "message": "invalid BACnet instance",
         }
 
-    bip_mod = _load_bip_adapter()
-    object_type_int = bip_mod.object_type_name_to_int(type_name)
+    bacnet_ad = _bacnet_adapter()
+    object_type_int = bacnet_ad.object_type_name_to_int(type_name)
     if object_type_int is None:
         return {
             "controller_label": controller_label,
@@ -986,7 +980,7 @@ def _bacnet_read_one(
     port = int(addr.get("port", 0))
     expected_instance = int(addr.get("device_instance", 0))
 
-    probe = bip_mod.probe_device(
+    probe = bacnet_ad.probe_device(
         host=host,
         port=port,
         expected_device_instance=expected_instance,
@@ -1004,22 +998,15 @@ def _bacnet_read_one(
         return result
 
     try:
-        client = _load_bacpypes_client()
-    except (OSError, RuntimeError) as err:
-        result["status"] = "client_load_failed"
-        result["message"] = str(err)
-        return result
-
-    try:
         bind_port = int(bacnet_bind_port or 0)
     except ValueError:
         bind_port = 0
     who_is_timeout = max(3.0, float(timeout_seconds) * max(1, int(retries)))
     prop = str(property_name or "presentValue").strip() or "presentValue"
     try:
-        read_result = client.read_present_value(
+        read_result = bacnet_ad.read_present_value(
             bind_port=bind_port,
-            target_address=f"{host}:{port}",
+            target_address=bacnet_ad.format_ipv4_target(host, port),
             expected_device_instance=expected_instance,
             object_type=object_type_int,
             object_instance=object_instance,
@@ -1027,6 +1014,10 @@ def _bacnet_read_one(
             who_is_timeout=who_is_timeout,
             apdu_timeout=8.0,
         )
+    except (OSError, RuntimeError) as err:
+        result["status"] = "client_load_failed"
+        result["message"] = str(err)
+        return result
     except ModuleNotFoundError as err:
         result["status"] = "bacpypes_missing"
         result["message"] = str(err)
