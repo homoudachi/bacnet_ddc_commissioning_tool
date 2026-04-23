@@ -4,7 +4,7 @@ Audience: future you. Update when intent, behavior, or exports change.
 
 ## Project maturity snapshot (2026-04-23)
 
-- Repository state: **documentation plus Python CLIs** (`tools/`: simulator list verification, import compiler with **duplicate BACnet/IP endpoint warnings**, runtime commissioning helpers including **validate-import** dry compile, **print-job-graph**, **flow/session inspection**, **run summary export** + optional **CSV**, **audited flow re-init**, **profile allowlisted BACnet read/write** and **`point_checkout`** batch reads via **BACpypes3**, and **record-step** policy for failed/pending outcomes). Unit tests under `tests/`.
+- Repository state: **documentation plus Python CLIs** (`tools/`: simulator list verification, import compiler with **duplicate BACnet/IP endpoint warnings**, runtime commissioning helpers including **validate-import** dry compile, **print-job-graph**, **flow/session inspection**, **run summary export** + optional **CSV**, **audited flow re-init**, **profile allowlisted BACnet read/write** and **`point_checkout`** batch reads via **BACpypes3**, and **record-step** policy for failed/pending outcomes). **Unit tests** include a **loopback BACnet fake peer** (BACpypes3-shaped frames) exercising **`bacnet-read`**, **`dry-run-bacnet-write --execute`**, and **`bacnet-point-checkout`** without field hardware.
 - This document is the source of truth for product intent; align runnable steps with [`README.md`](../README.md).
 - Active implementation roadmap lives in: [`docs/plans/2026-04-21-v1-foundation-plan.md`](plans/2026-04-21-v1-foundation-plan.md).
 
@@ -35,6 +35,30 @@ Windows **portable executable** that acts as a **commissioning assistant** for *
 | Transport | BACnet/IP only |
 | Discovery | **Import list** — operators supply targets (e.g. IP / device identity); no Who-Is-first workflow required for v1 |
 | Security | None for this design pass (document site assumptions in [Site-specific requirements](#site-specific-requirements) when known) |
+
+## BACnet runtime assumptions (Python CLI)
+
+These notes apply to the **current** `tools/runtime/app.py` BACnet helpers (`probe-bip`, `bacnet-read`, `bacnet-point-checkout`, `dry-run-bacnet-write` with `--execute`). They are **not** a substitute for site network design; they explain what the code assumes today.
+
+- **Transport:** BACnet/IP **UDP** to the **host:port** on each controller row after `compile-import`. There is **no MS/TP, no BACnet/SC**, and **no BBMD / foreign device** logic in this slice—reachability is “same IP routing and UDP path as any other BACnet workstation on this host.”
+- **Directed discovery:** Before ReadProperty / WriteProperty, the BACpypes3 path issues **Who-Is** with **low_limit = high_limit = expected device instance** toward the **configured address** (not a global broadcast sweep). If the device does not answer, reads and writes stop with **no I-Am** / probe failure rather than guessing a target.
+- **Binding:** The client binds **`0.0.0.0:<bacnet_bind_port>`** (default **0** = ephemeral). Multi-homed hosts and **host firewalls** can block replies or change source address selection; operators may need to open **UDP 47808** (or the site port) inbound/outbound and align subnets with the panel vendor’s guidance.
+- **Safety:** Writes are limited to **`commissioning_write_allowlist`** and profile **`writable`** objects; reads use **`commissioning_read_allowlist`**. This is **not** full “per commissioning mode” interlocks—that remains product/policy work on top of the allowlists.
+
+### BACnet failure handling (operator-visible)
+
+CLI and JSON artifacts use a small set of **terminal statuses** (see also artifact JSON under `artifacts/bacnet_reads/`, `artifacts/bacnet_write_plans/`, `artifacts/bacnet_point_checkout/`).
+
+| Status (examples) | Meaning |
+|--------------------|--------|
+| `reachable_verified` / `identity_mismatch` / `unreachable_timeout` | Outcome of the **minimal Who-Is / I-Am probe** (`probe-bip`, dry-run write probe, or the probe step inside read/write). |
+| `blocked_probe_failed` | Read or write did not proceed because **no matching I-Am** (or probe not verified) for the expected device instance. |
+| `config_error` | Profile or compiled job issue **before** BACnet (e.g. empty allowlist, object id not on allowlist, missing `objects_by_id`). |
+| `read_ok` / `write_ok` | BACnet service completed as expected (write may be **simple ack**). |
+| `read_rejected` / `write_rejected` | Device returned a BACnet **error, reject, or abort** (string captured in the artifact). |
+| `read_failed` / `execute_failed` / `client_load_failed` | Local exception, timeout waiting for the stack, or **bacpypes3 not installed** (`pip install -r requirements.txt`). |
+
+Structured **audit lines** continue to append to `logs/events.jsonl` for each command invocation.
 
 ## Commissioning scope (v1 capabilities described so far)
 

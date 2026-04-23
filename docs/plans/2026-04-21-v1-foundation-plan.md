@@ -64,7 +64,7 @@ Use this order to reduce rework and unblock parallel work later.
 - [ ] Implement BACnet abstraction layer (read/write/subscribe/timeouts/retry policy).
 - [x] Add simulator-backed integration tests for core read/write and mode transitions (loopback fake BACnet peer in `tests/test_runtime_cli.py` exercises `bacnet-read`, `dry-run-bacnet-write --execute`, and `bacnet-point-checkout` against BACpypes3-shaped frames).
 - [ ] Add commissioning safety constraints (write allowlist, per-mode restrictions, abort rules).
-- [ ] Document network assumptions and expected failure handling behavior.
+- [x] Document network assumptions and expected failure handling behavior (see [`docs/project.md`](../project.md#bacnet-runtime-assumptions-python-cli)).
 
 **Deliverables**
 

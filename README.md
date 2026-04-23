@@ -21,7 +21,7 @@
 - Import compiler CLI: **[tools/import/compile_job.py](tools/import/compile_job.py)**
 - Import compiler tests: **[tests/test_import_compiler.py](tests/test_import_compiler.py)**
 - Runtime skeleton CLI: **[tools/runtime/app.py](tools/runtime/app.py)**
-- Runtime CLI tests: **[tests/test_runtime_cli.py](tests/test_runtime_cli.py)**
+- Runtime CLI tests: **[tests/test_runtime_cli.py](tests/test_runtime_cli.py)** (includes **loopback BACnet** coverage for read, write execute, and point checkout via a small UDP fake peer—no panel required for CI).
 
 ## Runtime CLI quick start
 
