@@ -439,6 +439,10 @@ def cmd_export_run_summary(args: argparse.Namespace) -> int:
         "bip_list_summary_present": bip_list_summary is not None,
         "controllers": controllers_out,
     }
+    if bool(getattr(args, "embed_import_report", False)) and import_report is not None:
+        summary["import_report"] = import_report
+    if bool(getattr(args, "embed_bip_list_summary", False)) and bip_list_summary is not None:
+        summary["bip_list_summary"] = bip_list_summary
 
     output_json.parent.mkdir(parents=True, exist_ok=True)
     output_json.write_text(json.dumps(summary, indent=2), encoding="utf-8")
@@ -449,6 +453,109 @@ def cmd_export_run_summary(args: argparse.Namespace) -> int:
     )
     print(f"run_summary_exported=true summary_json={output_json.resolve()}")
     return 0
+
+
+# Profile logical object ids permitted for WriteProperty dry-run (expand deliberately).
+_ALLOWLISTED_WRITE_OBJECT_IDS = frozenset({"msv_test_mode"})
+
+
+def cmd_dry_run_bacnet_write(args: argparse.Namespace) -> int:
+    run_dir = args.run_dir
+    logs_path = run_dir / "logs" / "events.jsonl"
+    runtime_job_path = run_dir / "state" / "runtime-job.json"
+    runtime_job = json.loads(runtime_job_path.read_text(encoding="utf-8"))
+
+    target = None
+    for controller in runtime_job.get("controllers", []):
+        if controller.get("controller_label") == args.controller_label:
+            target = controller
+            break
+    if target is None:
+        print(f"error: controller not found in runtime job: {args.controller_label}")
+        return 2
+
+    object_id = str(args.object_id).strip()
+    if object_id not in _ALLOWLISTED_WRITE_OBJECT_IDS:
+        print(
+            f"error: object_id not allowlisted for BACnet writes: {object_id!r} "
+            f"(allowed: {sorted(_ALLOWLISTED_WRITE_OBJECT_IDS)})"
+        )
+        return 2
+
+    objects_by_id = target.get("objects_by_id", {})
+    if not isinstance(objects_by_id, dict) or object_id not in objects_by_id:
+        print(
+            f"error: object_id not found in compiled runtime job for controller: {object_id}"
+        )
+        return 2
+    meta = objects_by_id[object_id]
+    if not isinstance(meta, dict) or not bool(meta.get("writable")):
+        print(f"error: object {object_id!r} is not writable in profile")
+        return 2
+    bacnet = meta.get("bacnet", {})
+    if not isinstance(bacnet, dict):
+        print(f"error: invalid objects_by_id entry for {object_id!r}")
+        return 2
+    type_name = str(bacnet.get("object_type", "")).strip()
+    try:
+        object_instance = int(bacnet.get("instance"))
+    except (TypeError, ValueError):
+        print(f"error: invalid BACnet instance for {object_id!r}")
+        return 2
+
+    bip_mod = _load_bip_adapter()
+    object_type_int = bip_mod.object_type_name_to_int(type_name)
+    if object_type_int is None:
+        print(f"error: unsupported BACnet object_type for writes: {type_name!r}")
+        return 2
+
+    addr = target.get("bacnet", {})
+    host = str(addr.get("host", "")).strip()
+    port = int(addr.get("port", 0))
+    expected_instance = int(addr.get("device_instance", 0))
+
+    dry_run = not bool(getattr(args, "execute", False))
+    result = bip_mod.plan_write_property(
+        host=host,
+        port=port,
+        expected_device_instance=expected_instance,
+        object_type=object_type_int,
+        object_instance=object_instance,
+        property_id=int(bip_mod.BACNET_PROP_PRESENT_VALUE),
+        value=int(args.value),
+        timeout_seconds=args.timeout_seconds,
+        retries=args.retries,
+        dry_run=dry_run,
+    )
+    result["controller_label"] = args.controller_label
+    result["profile_object_id"] = object_id
+    result["technician_name"] = args.technician_name
+    result["note"] = args.note
+
+    plans_dir = run_dir / "artifacts" / "bacnet_write_plans"
+    plans_dir.mkdir(parents=True, exist_ok=True)
+    artifact = plans_dir / f"{args.controller_label}-{object_id}.json"
+    artifact.write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
+
+    event = (
+        "bacnet_write_planned"
+        if result.get("status") == "dry_run_allowed"
+        else "bacnet_write_blocked"
+    )
+    _append_event(
+        logs_path,
+        event,
+        {
+            "controller_label": args.controller_label,
+            "object_id": object_id,
+            "status": result.get("status"),
+            "artifact_json": str(artifact.resolve()),
+        },
+    )
+    print(json.dumps(result, sort_keys=True))
+    if result.get("status") == "dry_run_allowed":
+        return 0
+    return 2
 
 
 def cmd_record_step(args: argparse.Namespace) -> int:
@@ -734,6 +841,16 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Destination JSON (default: <run-dir>/artifacts/run-summary.json).",
     )
+    export_summary.add_argument(
+        "--embed-import-report",
+        action="store_true",
+        help="Include full import-report.json object under key import_report when present.",
+    )
+    export_summary.add_argument(
+        "--embed-bip-list-summary",
+        action="store_true",
+        help="Include full list-summary.json object under key bip_list_summary when present.",
+    )
     export_summary.set_defaults(handler=cmd_export_run_summary)
 
     verify_sim = subparsers.add_parser(
@@ -781,6 +898,34 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional JSON file with {controller_labels:[], allow_known_unavailable:true}.",
     )
     verify_bip_list.set_defaults(handler=cmd_verify_bip_list)
+
+    dry_write = subparsers.add_parser(
+        "dry-run-bacnet-write",
+        help="Validate allowlisted WriteProperty intent (default dry-run; no frame sent).",
+    )
+    dry_write.add_argument("--run-dir", required=True, type=Path)
+    dry_write.add_argument("--controller-label", required=True)
+    dry_write.add_argument(
+        "--object-id",
+        required=True,
+        help="Profile object id (e.g. msv_test_mode).",
+    )
+    dry_write.add_argument(
+        "--value",
+        required=True,
+        type=int,
+        help="Integer present-value to write (e.g. MSV state number).",
+    )
+    dry_write.add_argument("--technician-name", required=True)
+    dry_write.add_argument("--note", default="")
+    dry_write.add_argument("--timeout-seconds", type=float, default=0.5)
+    dry_write.add_argument("--retries", type=int, default=1)
+    dry_write.add_argument(
+        "--execute",
+        action="store_true",
+        help="Reserved for future live WriteProperty (currently returns not_implemented).",
+    )
+    dry_write.set_defaults(handler=cmd_dry_run_bacnet_write)
 
     init_flow = subparsers.add_parser(
         "init-flow", help="Initialize commissioning flow state for one controller."

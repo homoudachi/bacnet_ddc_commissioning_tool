@@ -1,8 +1,12 @@
+import csv
 import json
 import pathlib
 import shutil
+import socket
 import subprocess
 import sys
+import threading
+import time
 import unittest
 
 
@@ -14,6 +18,49 @@ FIXTURES = ROOT / "tests" / "fixtures"
 def _run_runtime(*args: str) -> subprocess.CompletedProcess[str]:
     cmd = [sys.executable, str(RUNTIME_CLI), *args]
     return subprocess.run(cmd, capture_output=True, text=True, check=False)
+
+
+def _build_i_am_packet(device_instance: int) -> bytes:
+    object_identifier = (8 << 22) | (device_instance & 0x3FFFFF)
+    apdu = b"\x10\x00\xc4" + object_identifier.to_bytes(4, "big") + b"\x22\x00\x91\x00"
+    npdu = b"\x01\x00"
+    payload = npdu + apdu
+    bvlc = b"\x81\x0a" + (len(payload) + 4).to_bytes(2, "big")
+    return bvlc + payload
+
+
+class _FakeBipUdpServer:
+    def __init__(self, device_instance: int) -> None:
+        self.device_instance = device_instance
+        self._stop = threading.Event()
+        self._ready = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self.port = 0
+
+    def start(self) -> None:
+        self._thread.start()
+        if not self._ready.wait(timeout=2):
+            raise RuntimeError("fake bip server failed to start")
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=2)
+
+    def _run(self) -> None:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sock.bind(("127.0.0.1", 0))
+            sock.settimeout(0.1)
+            self.port = sock.getsockname()[1]
+            self._ready.set()
+            while not self._stop.is_set():
+                try:
+                    _data, addr = sock.recvfrom(2048)
+                except socket.timeout:
+                    continue
+                sock.sendto(_build_i_am_packet(self.device_instance), addr)
+        finally:
+            sock.close()
 
 
 class RuntimeCliTests(unittest.TestCase):
@@ -194,6 +241,51 @@ class RuntimeCliTests(unittest.TestCase):
         events = [json.loads(line)["event"] for line in log_lines]
         self.assertIn("run_summary_exported", events)
 
+    def test_export_run_summary_embed_import_and_bip_blobs(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-export-embed",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+        bip_result = _run_runtime(
+            "verify-bip-list",
+            "--run-dir",
+            str(self.run_dir),
+            "--timeout-seconds",
+            "0.1",
+            "--retries",
+            "1",
+        )
+        self.assertEqual(2, bip_result.returncode)
+
+        out_path = self.run_dir / "artifacts" / "summary-embedded.json"
+        result = _run_runtime(
+            "export-run-summary",
+            "--run-dir",
+            str(self.run_dir),
+            "--output-json",
+            str(out_path),
+            "--embed-import-report",
+            "--embed-bip-list-summary",
+        )
+        self.assertEqual(0, result.returncode)
+        summary = json.loads(out_path.read_text(encoding="utf-8"))
+        self.assertIn("import_report", summary)
+        self.assertTrue(summary["import_report"]["compile_ok"])
+        self.assertIn("bip_list_summary", summary)
+        self.assertEqual(3, summary["bip_list_summary"]["total"])
+
     def test_init_flow_rejects_second_init_without_force(self) -> None:
         init_result = _run_runtime(
             "init-run",
@@ -340,6 +432,130 @@ class RuntimeCliTests(unittest.TestCase):
         )
         self.assertEqual(2, bad.returncode)
         self.assertIn("--reset-technician-name", bad.stdout)
+
+    def test_dry_run_bacnet_write_rejects_non_allowlisted_object(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-drywrite-deny",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+
+        result = _run_runtime(
+            "dry-run-bacnet-write",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+            "--object-id",
+            "av_supply_fan_command",
+            "--value",
+            "50",
+            "--technician-name",
+            "Alex Tech",
+            "--note",
+            "Should be blocked",
+        )
+        self.assertEqual(2, result.returncode)
+        self.assertIn("not allowlisted", result.stdout)
+
+    def test_dry_run_bacnet_write_planned_with_localhost_udp_server(self) -> None:
+        server = _FakeBipUdpServer(device_instance=21001)
+        server.start()
+        try:
+            time.sleep(0.05)
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            csv_path = self.run_dir / "controllers-local.csv"
+            with csv_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=[
+                        "controller_label",
+                        "profile_id",
+                        "bacnet_device_instance",
+                        "bacnet_ip",
+                        "bacnet_port",
+                        "building_floor",
+                        "notes",
+                    ],
+                )
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "controller_label": "FCU-LOCAL",
+                        "profile_id": "fcu_2pipe_chw_electric_heat_v1",
+                        "bacnet_device_instance": "21001",
+                        "bacnet_ip": "127.0.0.1",
+                        "bacnet_port": str(server.port),
+                        "building_floor": "L01",
+                        "notes": "test",
+                    }
+                )
+
+            init_result = _run_runtime(
+                "init-run",
+                "--run-dir",
+                str(self.run_dir),
+                "--job-id",
+                "job-drywrite-ok",
+                "--controllers-csv",
+                str(csv_path),
+                "--profiles-dir",
+                str(ROOT / "docs" / "examples"),
+                "--scenarios-dir",
+                str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+            )
+            self.assertEqual(0, init_result.returncode)
+            compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+            self.assertEqual(0, compile_result.returncode)
+
+            result = _run_runtime(
+                "dry-run-bacnet-write",
+                "--run-dir",
+                str(self.run_dir),
+                "--controller-label",
+                "FCU-LOCAL",
+                "--object-id",
+                "msv_test_mode",
+                "--value",
+                "3",
+                "--technician-name",
+                "Alex Tech",
+                "--note",
+                "Arm airflow verify mode",
+                "--timeout-seconds",
+                "0.5",
+                "--retries",
+                "1",
+            )
+        finally:
+            server.stop()
+
+        self.assertEqual(0, result.returncode)
+        payload = json.loads(result.stdout)
+        self.assertEqual("dry_run_allowed", payload["status"])
+        self.assertEqual(19, payload["target"]["object_type"])
+        self.assertEqual(50, payload["target"]["object_instance"])
+        artifact = (
+            self.run_dir / "artifacts" / "bacnet_write_plans" / "FCU-LOCAL-msv_test_mode.json"
+        )
+        self.assertTrue(artifact.exists())
+
+        log_lines = (
+            self.run_dir / "logs" / "events.jsonl"
+        ).read_text(encoding="utf-8").strip().splitlines()
+        events = [json.loads(line)["event"] for line in log_lines]
+        self.assertIn("bacnet_write_planned", events)
 
     def test_verify_simulator_writes_artifact_and_logs_event(self) -> None:
         init_result = _run_runtime(
