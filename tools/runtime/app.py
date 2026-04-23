@@ -318,6 +318,78 @@ def cmd_init_flow(args: argparse.Namespace) -> int:
     return 0
 
 
+def _step_status_counts(steps: list[dict]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in steps:
+        status = str(item.get("status", "pending"))
+        counts[status] = counts.get(status, 0) + 1
+    return counts
+
+
+def cmd_list_flows(args: argparse.Namespace) -> int:
+    run_dir = args.run_dir
+    logs_path = run_dir / "logs" / "events.jsonl"
+    flows_root = _flows_dir(run_dir)
+    flows: list[dict] = []
+
+    if flows_root.is_dir():
+        for path in sorted(flows_root.glob("*.json")):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            label = str(data.get("controller_label", "")).strip()
+            if not label:
+                label = path.stem
+            steps = data.get("steps", [])
+            if not isinstance(steps, list):
+                steps = []
+            flows.append(
+                {
+                    "controller_label": label,
+                    "profile_id": data.get("profile_id"),
+                    "flow_state_json": str(path.resolve()),
+                    "step_count": len(steps),
+                    "status_counts": _step_status_counts(steps),
+                }
+            )
+
+    payload = {"flow_count": len(flows), "flows": flows}
+    _append_event(
+        logs_path,
+        "flows_listed",
+        {
+            "flow_count": len(flows),
+            "controller_labels": [row["controller_label"] for row in flows],
+        },
+    )
+    print(json.dumps(payload, sort_keys=True))
+    return 0
+
+
+def cmd_show_flow(args: argparse.Namespace) -> int:
+    run_dir = args.run_dir
+    logs_path = run_dir / "logs" / "events.jsonl"
+    flow_state_path = _flow_state_path(run_dir, args.controller_label)
+    if not flow_state_path.is_file():
+        print(
+            f"error: flow state not found for controller_label={args.controller_label}"
+        )
+        return 2
+
+    flow_state = json.loads(flow_state_path.read_text(encoding="utf-8"))
+    _append_event(
+        logs_path,
+        "flow_viewed",
+        {
+            "controller_label": args.controller_label,
+            "flow_state_json": str(flow_state_path.resolve()),
+        },
+    )
+    print(json.dumps(flow_state, sort_keys=True))
+    return 0
+
+
 def cmd_record_step(args: argparse.Namespace) -> int:
     run_dir = args.run_dir
     logs_path = run_dir / "logs" / "events.jsonl"
@@ -643,6 +715,21 @@ def build_parser() -> argparse.ArgumentParser:
     init_flow.add_argument("--run-dir", required=True, type=Path)
     init_flow.add_argument("--controller-label", required=True)
     init_flow.set_defaults(handler=cmd_init_flow)
+
+    list_flows = subparsers.add_parser(
+        "list-flows",
+        help="List commissioning flow state files for this run (summary JSON).",
+    )
+    list_flows.add_argument("--run-dir", required=True, type=Path)
+    list_flows.set_defaults(handler=cmd_list_flows)
+
+    show_flow = subparsers.add_parser(
+        "show-flow",
+        help="Print full commissioning flow JSON for one controller.",
+    )
+    show_flow.add_argument("--run-dir", required=True, type=Path)
+    show_flow.add_argument("--controller-label", required=True)
+    show_flow.set_defaults(handler=cmd_show_flow)
 
     record_step = subparsers.add_parser(
         "record-step", help="Record technician signoff for a commissioning step."

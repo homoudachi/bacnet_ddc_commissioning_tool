@@ -1,5 +1,6 @@
 import json
 import pathlib
+import shutil
 import subprocess
 import sys
 import unittest
@@ -19,6 +20,10 @@ class RuntimeCliTests(unittest.TestCase):
     def setUp(self) -> None:
         FIXTURES.mkdir(parents=True, exist_ok=True)
         self.run_dir = FIXTURES / "runtime-run"
+
+    def tearDown(self) -> None:
+        if self.run_dir.exists():
+            shutil.rmtree(self.run_dir)
 
     def test_init_run_creates_layout_config_and_log(self) -> None:
         result = _run_runtime(
@@ -777,3 +782,112 @@ class RuntimeCliTests(unittest.TestCase):
         self.assertEqual("manual_passed", second_history["new_status"])
         self.assertEqual("status_update", first_history["reason_code"])
         self.assertEqual("status_update", second_history["reason_code"])
+
+    def test_list_flows_empty_when_no_flow_state(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-list-flows-empty",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+
+        result = _run_runtime("list-flows", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, result.returncode)
+        payload = json.loads(result.stdout)
+        self.assertEqual(0, payload["flow_count"])
+        self.assertEqual([], payload["flows"])
+
+    def test_list_flows_and_show_flow_after_init_flow(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-list-flows",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+        init_flow_result = _run_runtime(
+            "init-flow",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+        )
+        self.assertEqual(0, init_flow_result.returncode)
+
+        list_result = _run_runtime("list-flows", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, list_result.returncode)
+        listed = json.loads(list_result.stdout)
+        self.assertEqual(1, listed["flow_count"])
+        self.assertEqual("FCU-01A", listed["flows"][0]["controller_label"])
+        self.assertEqual(
+            "fcu_2pipe_chw_electric_heat_v1", listed["flows"][0]["profile_id"]
+        )
+        self.assertGreater(listed["flows"][0]["step_count"], 0)
+        self.assertEqual(
+            listed["flows"][0]["step_count"],
+            listed["flows"][0]["status_counts"].get("pending", 0),
+        )
+
+        show_result = _run_runtime(
+            "show-flow",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+        )
+        self.assertEqual(0, show_result.returncode)
+        detail = json.loads(show_result.stdout)
+        self.assertEqual("FCU-01A", detail["controller_label"])
+        self.assertIn("steps", detail)
+        self.assertGreater(len(detail["steps"]), 0)
+        self.assertEqual("pending", detail["steps"][0]["status"])
+
+        log_lines = (
+            self.run_dir / "logs" / "events.jsonl"
+        ).read_text(encoding="utf-8").strip().splitlines()
+        events = [json.loads(line)["event"] for line in log_lines]
+        self.assertIn("flows_listed", events)
+        self.assertIn("flow_viewed", events)
+
+    def test_show_flow_errors_when_controller_has_no_flow_state(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-show-flow-missing",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+
+        result = _run_runtime(
+            "show-flow",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "HRV-01",
+        )
+        self.assertEqual(2, result.returncode)
+        self.assertIn("flow state not found", result.stdout)
