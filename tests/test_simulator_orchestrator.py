@@ -17,6 +17,7 @@ def _run_orchestrator(
     scenario_name: str,
     strict: bool = True,
     output: str = "text",
+    output_file: pathlib.Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     cmd = [
         sys.executable,
@@ -32,6 +33,8 @@ def _run_orchestrator(
         "--output",
         output,
     ]
+    if output_file is not None:
+        cmd.extend(["--output-file", str(output_file)])
     if strict:
         cmd.append("--strict")
     return subprocess.run(cmd, capture_output=True, text=True, check=False)
@@ -122,4 +125,37 @@ class SimulatorOrchestratorTests(unittest.TestCase):
         parsed = json.loads(result.stdout)
         self.assertEqual(1, parsed["total"])
         self.assertTrue(parsed["strict_pass"])
+
+    def test_orchestrator_writes_json_artifact_file(self) -> None:
+        (self.scenarios / "happy-path.example.json").write_text(
+            json.dumps(
+                {
+                    "rows": [
+                        {
+                            "controller_label": "FCU-01A",
+                            "status": "reachable_verified",
+                        }
+                    ]
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        artifact = FIXTURES / "orchestrator-artifact.json"
+
+        result = _run_orchestrator(
+            controllers_csv=self.controllers,
+            scenario_dir=self.scenarios,
+            profile="ci",
+            scenario_name="happy-path",
+            strict=True,
+            output="json",
+            output_file=artifact,
+        )
+
+        self.assertEqual(0, result.returncode)
+        self.assertTrue(artifact.exists())
+        parsed = json.loads(artifact.read_text(encoding="utf-8"))
+        self.assertEqual(1, parsed["total"])
+        self.assertEqual("happy-path.example.json", parsed["scenario_file"])
 

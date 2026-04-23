@@ -138,6 +138,22 @@ python3 tools/simulator/orchestrator.py \
   --output json
 ```
 
+### 0c) Run scenario matrix and write artifact files
+
+```bash
+python3 tools/simulator/run_matrix.py \
+  --controllers-csv docs/examples/site-controllers.template.csv \
+  --scenarios-dir docs/examples/simulator-scenarios \
+  --output-dir artifacts/simulator
+```
+
+This writes one JSON result per case, for example:
+
+- `artifacts/simulator/ci-happy-path.json`
+- `artifacts/simulator/ci-identity-mismatch.json`
+- `artifacts/simulator/ci-required-point-missing.json`
+- `artifacts/simulator/ci-timeout-burst.json`
+
 ### 1) Render and inspect topology
 
 ```bash

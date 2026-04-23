@@ -58,6 +58,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Fail for any non-reachable required row.",
     )
+    parser.add_argument(
+        "--output-file",
+        type=Path,
+        help="Optional output artifact file path (typically with --output json).",
+    )
     return parser.parse_args()
 
 
@@ -138,6 +143,24 @@ def evaluate(
     return status_counts, strict_pass, unresolved
 
 
+def build_summary_payload(
+    total: int,
+    unresolved: int,
+    strict: bool,
+    strict_pass: bool,
+    status_counts: Counter[str],
+) -> dict[str, Any]:
+    found = total - unresolved
+    return {
+        "found": found,
+        "total": total,
+        "unresolved": unresolved,
+        "strict_mode": strict,
+        "strict_pass": strict_pass,
+        "status_counts": dict(status_counts),
+    }
+
+
 def emit_summary(
     total: int,
     unresolved: int,
@@ -145,19 +168,24 @@ def emit_summary(
     strict_pass: bool,
     status_counts: Counter[str],
     output: str,
+    output_file: Path | None,
 ) -> None:
-    found = total - unresolved
+    payload = build_summary_payload(
+        total=total,
+        unresolved=unresolved,
+        strict=strict,
+        strict_pass=strict_pass,
+        status_counts=status_counts,
+    )
+    if output_file is not None:
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+
     if output == "json":
-        payload = {
-            "found": found,
-            "total": total,
-            "unresolved": unresolved,
-            "strict_mode": strict,
-            "strict_pass": strict_pass,
-            "status_counts": dict(status_counts),
-        }
         print(json.dumps(payload, sort_keys=True))
         return
+
+    found = payload["found"]
 
     print(
         f"found={found} total={total} unresolved={unresolved} "
@@ -183,14 +211,19 @@ def main() -> int:
         print(f"error: {err}")
         return 2
 
-    emit_summary(
-        total=len(controllers),
-        unresolved=unresolved,
-        strict=args.strict,
-        strict_pass=strict_pass,
-        status_counts=status_counts,
-        output=args.output,
-    )
+    try:
+        emit_summary(
+            total=len(controllers),
+            unresolved=unresolved,
+            strict=args.strict,
+            strict_pass=strict_pass,
+            status_counts=status_counts,
+            output=args.output,
+            output_file=args.output_file,
+        )
+    except OSError as err:
+        print(f"error: {err}")
+        return 2
     return 0 if strict_pass else 2
 
 

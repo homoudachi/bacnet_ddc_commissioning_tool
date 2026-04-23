@@ -27,6 +27,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scenario", required=True)
     parser.add_argument("--strict", action="store_true")
     parser.add_argument("--output", choices=["text", "json"], default="text")
+    parser.add_argument(
+        "--output-file",
+        type=Path,
+        help="Optional path where verifier output should be written.",
+    )
     parser.add_argument("--controllers-csv", type=Path, default=DEFAULT_CONTROLLERS_CSV)
     parser.add_argument("--scenarios-dir", type=Path, default=DEFAULT_SCENARIOS_DIR)
     return parser.parse_args()
@@ -50,6 +55,8 @@ def main() -> int:
         "--output",
         args.output,
     ]
+    if args.output_file:
+        cmd.extend(["--output-file", str(args.output_file)])
     if args.strict:
         cmd.append("--strict")
     verifier = subprocess.run(cmd, capture_output=True, text=True, check=False)
@@ -59,6 +66,12 @@ def main() -> int:
         print(verifier.stderr, end="", file=sys.stderr)
     if args.output == "text":
         print(f"scenario_file={scenario_file} profile={args.profile}")
+    elif args.output_file is not None:
+        # Enrich JSON artifact with orchestrator context.
+        payload = json.loads(args.output_file.read_text(encoding="utf-8"))
+        payload["scenario_file"] = scenario_file
+        payload["profile"] = args.profile
+        args.output_file.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
     return verifier.returncode
 
 

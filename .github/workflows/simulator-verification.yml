@@ -1,0 +1,35 @@
+name: simulator-verification
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "cursor/**"
+
+jobs:
+  simulator-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run unit tests
+        run: |
+          python3 -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Run simulator matrix
+        run: |
+          python3 tools/simulator/run_matrix.py --output-dir artifacts/simulator
+
+      - name: Upload simulator artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: simulator-matrix-artifacts
+          path: artifacts/simulator/
+          if-no-files-found: error

@@ -64,6 +64,29 @@ def _run_verifier_json(
     return subprocess.run(cmd, capture_output=True, text=True, check=False)
 
 
+def _run_verifier_json_to_file(
+    list_csv: pathlib.Path,
+    scenario_json: pathlib.Path,
+    output_file: pathlib.Path,
+    strict: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    cmd = [
+        sys.executable,
+        str(CLI),
+        "--controllers-csv",
+        str(list_csv),
+        "--scenario-json",
+        str(scenario_json),
+        "--output",
+        "json",
+        "--output-file",
+        str(output_file),
+    ]
+    if strict:
+        cmd.append("--strict")
+    return subprocess.run(cmd, capture_output=True, text=True, check=False)
+
+
 class ListVerifierCliTests(unittest.TestCase):
     def setUp(self) -> None:
         FIXTURES.mkdir(parents=True, exist_ok=True)
@@ -364,3 +387,40 @@ class ListVerifierCliTests(unittest.TestCase):
         self.assertEqual(1, parsed["unresolved"])
         self.assertFalse(parsed["strict_pass"])
         self.assertEqual(1, parsed["status_counts"]["identity_mismatch"])
+
+    def test_json_output_can_be_written_to_output_file(self) -> None:
+        controllers = FIXTURES / "controllers-json-artifact.csv"
+        scenario = FIXTURES / "scenario-json-artifact.json"
+        output_file = FIXTURES / "verifier-artifact.json"
+        _write_csv(
+            controllers,
+            [
+                {
+                    "controller_label": "FCU-01A",
+                    "profile_id": "fcu_2pipe_chw_electric_heat_v1",
+                    "bacnet_device_instance": "21001",
+                    "bacnet_ip": "192.168.1.50",
+                    "bacnet_port": "47808",
+                    "building_floor": "L01",
+                    "notes": "example row",
+                }
+            ],
+        )
+        _write_json(
+            scenario,
+            {
+                "rows": [
+                    {"controller_label": "FCU-01A", "status": "reachable_verified"},
+                ]
+            },
+        )
+
+        result = _run_verifier_json_to_file(
+            controllers, scenario, output_file, strict=True
+        )
+
+        self.assertEqual(0, result.returncode)
+        self.assertTrue(output_file.exists())
+        parsed = json.loads(output_file.read_text(encoding="utf-8"))
+        self.assertEqual(1, parsed["total"])
+        self.assertTrue(parsed["strict_pass"])
