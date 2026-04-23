@@ -119,6 +119,17 @@ python3 tools/runtime/app.py record-step \
 # python3 tools/runtime/app.py export-commissioning-report --run-dir artifacts/runtime-run
 # python3 tools/runtime/app.py export-commissioning-report --run-dir artifacts/runtime-run --output-json my-report.json
 # Optional: --allow-empty with --output-json writes {"entries":[]} stub when no report yet (CI / templates)
+# Optional: --output-csv modulation.csv exports thermal_modulation_* rows only
+
+# 4c) Append thermal modulation sample (allowlisted BACnet reads → commissioning_report.json)
+# python3 tools/runtime/app.py append-commissioning-modulation-sample --run-dir artifacts/runtime-run \
+#   --controller-label FCU-01A --read ai_sat --read msv_test_mode \
+#   --technician-name "Alex Tech" --note "sweep t=0" --step-id heating_test \
+#   --report-ref thermal_tests_for_report.heating
+
+# 4d) Batch modulation reads from JSON file (list of {controller_label, reads:[...], ...})
+# python3 tools/runtime/app.py append-commissioning-modulation-batch --run-dir artifacts/runtime-run \
+#   --input-json my-samples.json [--default-technician "Alex Tech"]
 
 # Init-flow: second init for the same controller without --force is rejected (avoids silent overwrite).
 # Record-step rule enforcement:

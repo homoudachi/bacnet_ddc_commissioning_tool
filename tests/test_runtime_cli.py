@@ -2859,3 +2859,203 @@ class RuntimeCliTests(unittest.TestCase):
             self.assertEqual("chain.after_prep", doc["entries"][0]["report_ref"])
         finally:
             server.stop()
+
+    def test_append_modulation_sample_and_export_modulation_csv(self) -> None:
+        server = _FakeBipUdpServer(device_instance=21001, analog_input_present=20.0, msv_present=3)
+        server.start()
+        try:
+            time.sleep(0.05)
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            csv_path = self.run_dir / "controllers-local.csv"
+            with csv_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=[
+                        "controller_label",
+                        "profile_id",
+                        "bacnet_device_instance",
+                        "bacnet_ip",
+                        "bacnet_port",
+                        "building_floor",
+                        "notes",
+                    ],
+                )
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "controller_label": "FCU-MOD",
+                        "profile_id": "fcu_2pipe_chw_electric_heat_v1",
+                        "bacnet_device_instance": "21001",
+                        "bacnet_ip": "127.0.0.1",
+                        "bacnet_port": str(server.port),
+                        "building_floor": "L01",
+                        "notes": "mod",
+                    }
+                )
+            init_result = _run_runtime(
+                "init-run",
+                "--run-dir",
+                str(self.run_dir),
+                "--job-id",
+                "job-mod",
+                "--controllers-csv",
+                str(csv_path),
+                "--profiles-dir",
+                str(ROOT / "docs" / "examples"),
+                "--scenarios-dir",
+                str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+            )
+            self.assertEqual(0, init_result.returncode)
+            compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+            self.assertEqual(0, compile_result.returncode)
+
+            app = _run_runtime(
+                "append-commissioning-modulation-sample",
+                "--run-dir",
+                str(self.run_dir),
+                "--controller-label",
+                "FCU-MOD",
+                "--read",
+                "ai_sat",
+                "--read",
+                "msv_test_mode",
+                "--technician-name",
+                "Alex Tech",
+                "--note",
+                "sweep t0",
+                "--step-id",
+                "heating_test",
+                "--report-ref",
+                "thermal_tests_for_report.heating",
+                "--timeout-seconds",
+                "0.5",
+                "--retries",
+                "1",
+            )
+            self.assertEqual(0, app.returncode)
+            report_path = self.run_dir / "artifacts" / "commissioning_report.json"
+            doc = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual("0.2-commissioning-report", doc.get("schema_version"))
+            kinds = [e.get("kind") for e in doc.get("entries", [])]
+            self.assertIn("thermal_modulation_sample", kinds)
+
+            csv_out = self.run_dir / "artifacts" / "modulation.csv"
+            ex = _run_runtime(
+                "export-commissioning-report",
+                "--run-dir",
+                str(self.run_dir),
+                "--output-csv",
+                str(csv_out),
+            )
+            self.assertEqual(0, ex.returncode)
+            text = csv_out.read_text(encoding="utf-8")
+            self.assertIn("ai_sat", text)
+            self.assertIn("msv_test_mode", text)
+            self.assertIn("thermal_modulation_sample", text)
+        finally:
+            server.stop()
+
+    def test_append_modulation_batch_from_json(self) -> None:
+        server = _FakeBipUdpServer(device_instance=21001, analog_input_present=11.0, msv_present=4)
+        server.start()
+        try:
+            time.sleep(0.05)
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            profiles_dir = self.run_dir / "profiles-batch"
+            profiles_dir.mkdir(parents=True, exist_ok=True)
+            (profiles_dir / "unit-batch.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "0.1-example",
+                        "profile_id": "fcu_batch_v1",
+                        "display_name": "Batch",
+                        "commissioning_read_allowlist": ["ai_sat"],
+                        "objects": [
+                            {
+                                "id": "ai_sat",
+                                "bacnet": {"object_type": "analogInput", "instance": 2},
+                                "writable": False,
+                            }
+                        ],
+                        "commissioning_flow": [{"step_id": "s1", "label": "S"}],
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            csv_path = self.run_dir / "controllers-batch.csv"
+            with csv_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=[
+                        "controller_label",
+                        "profile_id",
+                        "bacnet_device_instance",
+                        "bacnet_ip",
+                        "bacnet_port",
+                        "building_floor",
+                        "notes",
+                    ],
+                )
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "controller_label": "FCU-BATCH",
+                        "profile_id": "fcu_batch_v1",
+                        "bacnet_device_instance": "21001",
+                        "bacnet_ip": "127.0.0.1",
+                        "bacnet_port": str(server.port),
+                        "building_floor": "L01",
+                        "notes": "",
+                    }
+                )
+            init_result = _run_runtime(
+                "init-run",
+                "--run-dir",
+                str(self.run_dir),
+                "--job-id",
+                "job-batch-mod",
+                "--controllers-csv",
+                str(csv_path),
+                "--profiles-dir",
+                str(profiles_dir),
+                "--scenarios-dir",
+                str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+            )
+            self.assertEqual(0, init_result.returncode)
+            compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+            self.assertEqual(0, compile_result.returncode)
+
+            batch_file = self.run_dir / "batch-samples.json"
+            batch_file.write_text(
+                json.dumps(
+                    [
+                        {
+                            "controller_label": "FCU-BATCH",
+                            "reads": ["ai_sat"],
+                            "technician_name": "Batch Tech",
+                            "report_ref": "batch.t1",
+                        }
+                    ],
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            r = _run_runtime(
+                "append-commissioning-modulation-batch",
+                "--run-dir",
+                str(self.run_dir),
+                "--input-json",
+                str(batch_file),
+                "--timeout-seconds",
+                "0.5",
+                "--retries",
+                "1",
+            )
+            self.assertEqual(0, r.returncode)
+            doc = json.loads(
+                (self.run_dir / "artifacts" / "commissioning_report.json").read_text(encoding="utf-8")
+            )
+            self.assertTrue(any(e.get("kind") == "thermal_modulation_batch" for e in doc["entries"]))
+        finally:
+            server.stop()

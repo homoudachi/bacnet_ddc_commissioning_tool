@@ -89,7 +89,7 @@ Use this order to reduce rework and unblock parallel work later.
 
 - [ ] Implement report model for unified heating/cooling output tables (SAT + RAT + command + time/step).
 - [x] Export CSV first — **partial:** **`export-run-summary --output-csv`** (controller × flow status rollup); **not** yet the unified modulation table contract.
-- [x] **Partial:** append-only **`export-commissioning-report`** / **`artifacts/commissioning_report.json`** for **point checkout after step** rows (`report_ref` when present); **not** yet full thermal modulation time-series.
+- [x] **Partial:** append-only **`export-commissioning-report`** / **`artifacts/commissioning_report.json`** for **point checkout after step** and **CLI-appended thermal modulation samples/batches** (`append-commissioning-modulation-sample`, **`append-commissioning-modulation-batch`**); CSV export of modulation rows via **`export-commissioning-report --output-csv`**. **Not** yet automated profile **`modulate_actuator_log_sat_for_report`** engine or PDF tables.
 - [ ] Then PDF/XLSX from same normalized dataset.
 - [ ] Package portable Windows executable and document signing/release process.
 - [ ] Add release checklist and smoke-test matrix.

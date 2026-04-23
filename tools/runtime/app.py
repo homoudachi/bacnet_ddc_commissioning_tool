@@ -777,7 +777,7 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
             job_id = str(config.get("job_id", "")).strip() or "unknown-job"
             stub = json.dumps(
                 {
-                    "schema_version": "0.1-commissioning-report",
+                    "schema_version": "0.2-commissioning-report",
                     "job_id": job_id,
                     "entries": [],
                 },
@@ -805,6 +805,35 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
         return 2
 
     text = src.read_text(encoding="utf-8")
+    doc = json.loads(text)
+    csv_path = getattr(args, "output_csv", None)
+    if csv_path:
+        csv_path = Path(csv_path)
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+        fieldnames = [
+            "entry_ts",
+            "kind",
+            "controller_label",
+            "step_id",
+            "report_ref",
+            "technician_name",
+            "object_id",
+            "property",
+            "status",
+            "value_str",
+        ]
+        with csv_path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames)
+            writer.writeheader()
+            for row in _commissioning_report_modulation_rows(doc):
+                writer.writerow(row)
+        _append_event(
+            logs_path,
+            "commissioning_report_modulation_csv_exported",
+            {"csv_path": str(csv_path.resolve())},
+        )
+        print(f"commissioning_report_modulation_csv=true csv_path={csv_path.resolve()}")
+
     if out_path:
         out_path = Path(out_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1250,16 +1279,323 @@ def _append_commissioning_report_entry(run_dir: Path, entry: dict) -> Path:
         doc = json.loads(path.read_text(encoding="utf-8"))
     else:
         doc = {
-            "schema_version": "0.1-commissioning-report",
+            "schema_version": "0.2-commissioning-report",
             "job_id": job_id,
             "entries": [],
         }
     if not isinstance(doc.get("entries"), list):
         doc["entries"] = []
     doc["job_id"] = job_id
+    # Bump schema when older runs pick up new entry kinds (backward compatible readers).
+    if str(doc.get("schema_version", "")).strip() == "0.1-commissioning-report":
+        doc["schema_version"] = "0.2-commissioning-report"
     doc["entries"].append(entry)
     path.write_text(json.dumps(doc, indent=2, sort_keys=True), encoding="utf-8")
     return path
+
+
+def _parse_read_spec(text: str) -> tuple[str, str]:
+    """Parse ``object_id`` or ``object_id:property`` for modulation reads."""
+    raw = str(text).strip()
+    if not raw:
+        raise ValueError("empty read spec")
+    if ":" in raw:
+        oid, prop = raw.split(":", 1)
+        oid, prop = oid.strip(), prop.strip() or "presentValue"
+    else:
+        oid, prop = raw, "presentValue"
+    if not oid:
+        raise ValueError("object_id required in read spec")
+    return oid, prop
+
+
+def _commissioning_report_modulation_rows(doc: dict) -> list[dict[str, str]]:
+    """Flatten ``thermal_modulation_sample`` / ``thermal_modulation_batch`` entries for CSV."""
+    rows: list[dict[str, str]] = []
+    entries = doc.get("entries")
+    if not isinstance(entries, list):
+        return rows
+    for ent in entries:
+        if not isinstance(ent, dict):
+            continue
+        kind = str(ent.get("kind", "")).strip()
+        if kind not in {"thermal_modulation_sample", "thermal_modulation_batch"}:
+            continue
+        base_ts = str(ent.get("ts", ""))
+        ctrl = str(ent.get("controller_label", ""))
+        step_id = str(ent.get("step_id", ""))
+        report_ref = str(ent.get("report_ref", ""))
+        tech = str(ent.get("technician_name", ""))
+        if kind == "thermal_modulation_batch":
+            for sub in ent.get("samples", []) if isinstance(ent.get("samples"), list) else []:
+                if not isinstance(sub, dict):
+                    continue
+                sub_ts = str(sub.get("ts", base_ts))
+                for r in sub.get("readings", []) if isinstance(sub.get("readings"), list) else []:
+                    if not isinstance(r, dict):
+                        continue
+                    rows.append(
+                        {
+                            "entry_ts": sub_ts,
+                            "kind": "thermal_modulation_sample",
+                            "controller_label": str(sub.get("controller_label", ctrl)),
+                            "step_id": str(sub.get("step_id", step_id)),
+                            "report_ref": str(sub.get("report_ref", report_ref)),
+                            "technician_name": str(sub.get("technician_name", tech)),
+                            "object_id": str(r.get("object_id", "")),
+                            "property": str(r.get("property", "")),
+                            "status": str(r.get("status", "")),
+                            "value_str": str(r.get("value_str", "")),
+                        }
+                    )
+            continue
+        for r in ent.get("readings", []) if isinstance(ent.get("readings"), list) else []:
+            if not isinstance(r, dict):
+                continue
+            rows.append(
+                {
+                    "entry_ts": base_ts,
+                    "kind": kind,
+                    "controller_label": ctrl,
+                    "step_id": step_id,
+                    "report_ref": report_ref,
+                    "technician_name": tech,
+                    "object_id": str(r.get("object_id", "")),
+                    "property": str(r.get("property", "")),
+                    "status": str(r.get("status", "")),
+                    "value_str": str(r.get("value_str", "")),
+                }
+            )
+    return rows
+
+
+def cmd_append_commissioning_modulation_sample(args: argparse.Namespace) -> int:
+    """BACnet-read allowlisted points and append one thermal_modulation_sample report row."""
+    run_dir = args.run_dir
+    logs_path = run_dir / "logs" / "events.jsonl"
+    runtime_job_path = run_dir / "state" / "runtime-job.json"
+    runtime_job = json.loads(runtime_job_path.read_text(encoding="utf-8"))
+    target = None
+    for controller in runtime_job.get("controllers", []):
+        if controller.get("controller_label") == args.controller_label:
+            target = controller
+            break
+    if target is None:
+        print(f"error: controller not found in runtime job: {args.controller_label}")
+        return 2
+
+    read_specs: list[tuple[str, str]] = []
+    for item in getattr(args, "read", None) or []:
+        try:
+            read_specs.append(_parse_read_spec(str(item)))
+        except ValueError as err:
+            print(f"error: invalid --read value {item!r}: {err}")
+            return 2
+    if not read_specs:
+        print("error: supply at least one --read object_id or object_id:property")
+        return 2
+
+    try:
+        bind_port = int(getattr(args, "bacnet_bind_port", 0) or 0)
+    except ValueError:
+        bind_port = 0
+    try:
+        _bacnet_adapter().commissioning_apdu_timeout_seconds(args.apdu_timeout)
+    except (TypeError, ValueError) as err:
+        print(f"error: invalid --apdu-timeout: {err}")
+        return 2
+
+    readings: list[dict] = []
+    for oid, prop in read_specs:
+        one = _bacnet_read_one(
+            controller_label=args.controller_label,
+            target=target,
+            object_id=oid,
+            property_name=prop,
+            timeout_seconds=float(args.timeout_seconds),
+            retries=int(args.retries),
+            bacnet_bind_port=bind_port,
+            apdu_timeout_override=args.apdu_timeout,
+        )
+        vr = ""
+        if one.get("status") == "read_ok":
+            vr = str(one.get("read", {}).get("value_str", ""))
+        readings.append(
+            {
+                "object_id": oid,
+                "property": prop,
+                "status": str(one.get("status", "")),
+                "value_str": vr,
+            }
+        )
+
+    entry = {
+        "ts": _utc_timestamp(),
+        "kind": "thermal_modulation_sample",
+        "controller_label": args.controller_label,
+        "step_id": str(getattr(args, "step_id", "") or "").strip() or None,
+        "report_ref": str(getattr(args, "report_ref", "") or "").strip() or None,
+        "technician_name": str(args.technician_name).strip(),
+        "note": str(getattr(args, "note", "") or ""),
+        "readings": readings,
+    }
+    if entry["step_id"] is None:
+        del entry["step_id"]
+    if entry["report_ref"] is None:
+        del entry["report_ref"]
+
+    report_path = _append_commissioning_report_entry(run_dir, entry)
+    _append_event(
+        logs_path,
+        "commissioning_modulation_sample_appended",
+        {
+            "controller_label": args.controller_label,
+            "read_count": len(readings),
+            "commissioning_report_json": str(report_path.resolve()),
+        },
+    )
+    out = {"appended": True, "commissioning_report_json": str(report_path.resolve()), "readings": readings}
+    print(json.dumps(out, indent=2, sort_keys=True))
+    return 0 if all(r.get("status") == "read_ok" for r in readings) else 2
+
+
+def cmd_append_commissioning_modulation_batch(args: argparse.Namespace) -> int:
+    """Append multiple thermal_modulation_sample entries from a JSON file."""
+    run_dir = args.run_dir
+    logs_path = run_dir / "logs" / "events.jsonl"
+    raw = json.loads(args.input_json.read_text(encoding="utf-8"))
+    if isinstance(raw, dict) and isinstance(raw.get("samples"), list):
+        samples_in = raw["samples"]
+    elif isinstance(raw, list):
+        samples_in = raw
+    else:
+        print("error: JSON must be a list of samples or {\"samples\": [...]}")
+        return 2
+
+    runtime_job_path = run_dir / "state" / "runtime-job.json"
+    runtime_job = json.loads(runtime_job_path.read_text(encoding="utf-8"))
+    by_label = {
+        str(c.get("controller_label", "")).strip(): c
+        for c in runtime_job.get("controllers", [])
+        if str(c.get("controller_label", "")).strip()
+    }
+
+    try:
+        bind_port = int(getattr(args, "bacnet_bind_port", 0) or 0)
+    except ValueError:
+        bind_port = 0
+    try:
+        _bacnet_adapter().commissioning_apdu_timeout_seconds(args.apdu_timeout)
+    except (TypeError, ValueError) as err:
+        print(f"error: invalid --apdu-timeout: {err}")
+        return 2
+
+    batch_readings: list[dict] = []
+    all_ok = True
+    for idx, sample in enumerate(samples_in):
+        if not isinstance(sample, dict):
+            print(f"error: sample[{idx}] must be an object")
+            return 2
+        label = str(sample.get("controller_label", "")).strip()
+        if not label or label not in by_label:
+            print(f"error: sample[{idx}] missing or unknown controller_label {label!r}")
+            return 2
+        target = by_label[label]
+        reads_in = sample.get("reads") or sample.get("read") or []
+        if isinstance(reads_in, str):
+            reads_in = [reads_in]
+        if not isinstance(reads_in, list) or not reads_in:
+            print(f"error: sample[{idx}] needs non-empty reads array")
+            return 2
+        specs: list[tuple[str, str]] = []
+        for r in reads_in:
+            if isinstance(r, dict):
+                oid = str(r.get("object_id", "")).strip()
+                prop = str(r.get("property", "presentValue")).strip() or "presentValue"
+                if not oid:
+                    print(f"error: sample[{idx}] read object missing object_id")
+                    return 2
+                specs.append((oid, prop))
+            else:
+                try:
+                    specs.append(_parse_read_spec(str(r)))
+                except ValueError as err:
+                    print(f"error: sample[{idx}] invalid read {r!r}: {err}")
+                    return 2
+        readings: list[dict] = []
+        for oid, prop in specs:
+            one = _bacnet_read_one(
+                controller_label=label,
+                target=target,
+                object_id=oid,
+                property_name=prop,
+                timeout_seconds=float(
+                    sample.get("timeout_seconds", getattr(args, "timeout_seconds", 0.5))
+                ),
+                retries=int(sample.get("retries", getattr(args, "retries", 1))),
+                bacnet_bind_port=bind_port,
+                apdu_timeout_override=args.apdu_timeout,
+            )
+            vr = ""
+            if one.get("status") == "read_ok":
+                vr = str(one.get("read", {}).get("value_str", ""))
+            readings.append(
+                {
+                    "object_id": oid,
+                    "property": prop,
+                    "status": str(one.get("status", "")),
+                    "value_str": vr,
+                }
+            )
+            if one.get("status") != "read_ok":
+                all_ok = False
+        sub = {
+            "ts": str(sample.get("ts", "")).strip() or _utc_timestamp(),
+            "controller_label": label,
+            "step_id": str(sample.get("step_id", "")).strip() or None,
+            "report_ref": str(sample.get("report_ref", "")).strip() or None,
+            "technician_name": (
+                str(sample.get("technician_name", "")).strip()
+                or str(getattr(args, "default_technician", "") or "").strip()
+                or "unknown"
+            ),
+            "note": str(sample.get("note", "")),
+            "readings": readings,
+        }
+        if sub["step_id"] is None:
+            del sub["step_id"]
+        if sub["report_ref"] is None:
+            del sub["report_ref"]
+        batch_readings.append(sub)
+
+    entry = {
+        "ts": _utc_timestamp(),
+        "kind": "thermal_modulation_batch",
+        "sample_count": len(batch_readings),
+        "samples": batch_readings,
+    }
+    report_path = _append_commissioning_report_entry(run_dir, entry)
+    _append_event(
+        logs_path,
+        "commissioning_modulation_batch_appended",
+        {
+            "sample_count": len(batch_readings),
+            "commissioning_report_json": str(report_path.resolve()),
+        },
+    )
+    print(
+        json.dumps(
+            {
+                "appended": True,
+                "all_read_ok": bool(all_ok),
+                "commissioning_report_json": str(report_path.resolve()),
+                "sample_count": len(batch_readings),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+    return 0 if all_ok else 2
 
 
 def cmd_bacnet_point_checkout(args: argparse.Namespace) -> int:
@@ -1777,7 +2113,51 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="With --output-json only: if no report exists yet, write an empty stub JSON.",
     )
+    export_cr.add_argument(
+        "--output-csv",
+        type=Path,
+        help="Also write thermal modulation rows (thermal_modulation_*) to CSV.",
+    )
     export_cr.set_defaults(handler=cmd_export_commissioning_report)
+
+    mod_sample = subparsers.add_parser(
+        "append-commissioning-modulation-sample",
+        help="Read allowlisted BACnet points and append thermal_modulation_sample to commissioning_report.json.",
+    )
+    mod_sample.add_argument("--run-dir", required=True, type=Path)
+    mod_sample.add_argument("--controller-label", required=True)
+    mod_sample.add_argument(
+        "--read",
+        action="append",
+        required=True,
+        help="Logical object id or object_id:property (repeat for multiple reads).",
+    )
+    mod_sample.add_argument("--technician-name", required=True)
+    mod_sample.add_argument("--note", default="")
+    mod_sample.add_argument("--step-id", default="")
+    mod_sample.add_argument("--report-ref", default="")
+    mod_sample.add_argument("--timeout-seconds", type=float, default=0.5)
+    mod_sample.add_argument("--retries", type=int, default=1)
+    mod_sample.add_argument("--bacnet-bind-port", type=int, default=0)
+    mod_sample.add_argument("--apdu-timeout", type=float, default=None)
+    mod_sample.set_defaults(handler=cmd_append_commissioning_modulation_sample)
+
+    mod_batch = subparsers.add_parser(
+        "append-commissioning-modulation-batch",
+        help="Append thermal_modulation_batch from JSON (list of samples or {samples:[]}).",
+    )
+    mod_batch.add_argument("--run-dir", required=True, type=Path)
+    mod_batch.add_argument("--input-json", required=True, type=Path)
+    mod_batch.add_argument(
+        "--default-technician",
+        default="",
+        help="Fallback technician_name when a sample omits it.",
+    )
+    mod_batch.add_argument("--timeout-seconds", type=float, default=0.5)
+    mod_batch.add_argument("--retries", type=int, default=1)
+    mod_batch.add_argument("--bacnet-bind-port", type=int, default=0)
+    mod_batch.add_argument("--apdu-timeout", type=float, default=None)
+    mod_batch.set_defaults(handler=cmd_append_commissioning_modulation_batch)
 
     verify_sim = subparsers.add_parser(
         "verify-simulator", help="Run simulator verification for one scenario."
