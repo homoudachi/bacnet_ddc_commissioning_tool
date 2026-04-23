@@ -2,7 +2,7 @@
 
 ## Documentation
 
-- **Current repo status (2026-04-21):** docs-first project with early runnable tooling (simulator verifier/orchestrator and import compiler). There is no full end-user commissioning application yet.
+- **Current repo status (2026-04-23):** docs-first project with early runnable tooling (simulator verifier/orchestrator, import compiler, and Python runtime CLI). There is no full end-user commissioning application yet.
 - **[Living project doc](docs/project.md)** — product requirements, commissioning flows, examples, import direction, and reports (update as the product evolves).
 - **[ADRs](docs/adr/)** — short decision records when choices are non-obvious.
 - **[Slice plans](docs/plans/)** — time-boxed implementation plans; archive or remove when the slice ships.
@@ -42,6 +42,18 @@ python3 tools/runtime/app.py init-flow \
   --run-dir artifacts/runtime-run \
   --controller-label FCU-01A
 
+# 3b) Re-initialize after a mistake (backs up prior state to state/flow_backups/, logs flow_reinitialized)
+python3 tools/runtime/app.py init-flow \
+  --run-dir artifacts/runtime-run \
+  --controller-label FCU-01A \
+  --force \
+  --reset-technician-name "Lead Tech" \
+  --reset-reason "Wrong unit selected; restarting flow from profile defaults"
+
+# 3c) Export one JSON rollup for the run (after compile-import): controllers, flow presence, next open step
+python3 tools/runtime/app.py export-run-summary --run-dir artifacts/runtime-run
+# Optional: --output-json artifacts/runtime-run/artifacts/my-summary.json
+
 # 4) Record technician signoff for a step
 python3 tools/runtime/app.py record-step \
   --run-dir artifacts/runtime-run \
@@ -51,6 +63,7 @@ python3 tools/runtime/app.py record-step \
   --technician-name "Alex Tech" \
   --note "Reached target airflow in tolerance"
 
+# Init-flow: second init for the same controller without --force is rejected (avoids silent overwrite).
 # Record-step rule enforcement:
 # - A step cannot be marked passed/manual_passed until all prior steps are completed
 # - A step can only be marked skipped if that step is explicitly skippable in profile flow
