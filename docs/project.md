@@ -4,7 +4,7 @@ Audience: future you. Update when intent, behavior, or exports change.
 
 ## Project maturity snapshot (2026-04-23)
 
-- Repository state: **documentation plus Python CLIs** (`tools/`: simulator list verification, import compiler, runtime commissioning helpers including **validate-import** dry compile, **print-job-graph**, **flow/session inspection**, **run summary export** + optional **CSV**, **audited flow re-init**, **profile allowlisted BACnet read/write** via **BACpypes3**, and **record-step** policy for failed/pending outcomes). Unit tests under `tests/`.
+- Repository state: **documentation plus Python CLIs** (`tools/`: simulator list verification, import compiler with **duplicate BACnet/IP endpoint warnings**, runtime commissioning helpers including **validate-import** dry compile, **print-job-graph**, **flow/session inspection**, **run summary export** + optional **CSV**, **audited flow re-init**, **profile allowlisted BACnet read/write** and **`point_checkout`** batch reads via **BACpypes3**, and **record-step** policy for failed/pending outcomes). Unit tests under `tests/`.
 - This document is the source of truth for product intent; align runnable steps with [`README.md`](../README.md).
 - Active implementation roadmap lives in: [`docs/plans/2026-04-21-v1-foundation-plan.md`](plans/2026-04-21-v1-foundation-plan.md).
 

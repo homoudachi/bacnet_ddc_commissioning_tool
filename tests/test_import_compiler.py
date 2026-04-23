@@ -35,6 +35,7 @@ def _write_profile(
     *,
     write_allowlist: list[str] | None = None,
     read_allowlist: list[str] | None = None,
+    point_checkout: list[dict] | None = None,
 ) -> None:
     data: dict = {
                 "schema_version": "0.1-example",
@@ -65,6 +66,8 @@ def _write_profile(
         data["commissioning_write_allowlist"] = write_allowlist
     if read_allowlist is not None:
         data["commissioning_read_allowlist"] = read_allowlist
+    if point_checkout is not None:
+        data["point_checkout"] = point_checkout
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
@@ -136,6 +139,7 @@ class ImportCompilerTests(unittest.TestCase):
             display_name="HRV example",
             write_allowlist=["msv_test_mode"],
             read_allowlist=["msv_test_mode"],
+            point_checkout=[{"object_id": "msv_test_mode", "property": "presentValue"}],
         )
 
         result = _run_compiler(controllers, self.profiles_dir, output_json, report_json)
@@ -148,6 +152,10 @@ class ImportCompilerTests(unittest.TestCase):
         self.assertEqual("FCU example", runtime["controllers"][0]["profile"]["display_name"])
         self.assertEqual(["msv_test_mode"], runtime["controllers"][0]["commissioning_write_allowlist"])
         self.assertEqual(["ai_sat"], runtime["controllers"][0]["commissioning_read_allowlist"])
+        self.assertEqual(
+            [{"object_id": "msv_test_mode", "property": "presentValue"}],
+            runtime["controllers"][1]["point_checkout"],
+        )
         fcu_objs = runtime["controllers"][0].get("objects_by_id", {})
         self.assertIn("msv_test_mode", fcu_objs)
         self.assertEqual("multiStateValue", fcu_objs["msv_test_mode"]["bacnet"]["object_type"])
@@ -259,4 +267,47 @@ class ImportCompilerTests(unittest.TestCase):
         self.assertEqual(2, result.returncode)
         report = json.loads(report_json.read_text(encoding="utf-8"))
         self.assertEqual("invalid_bacnet_port", report["errors"][0]["code"])
+
+    def test_compile_warns_on_duplicate_bacnet_ip_port_different_device(self) -> None:
+        controllers = FIXTURES / "controllers-compile-dup-ip.csv"
+        output_json = FIXTURES / "runtime-job-dup-ip.json"
+        report_json = FIXTURES / "runtime-job-dup-ip-report.json"
+
+        _write_csv(
+            controllers,
+            [
+                {
+                    "controller_label": "FCU-01A",
+                    "profile_id": "fcu_2pipe_chw_electric_heat_v1",
+                    "bacnet_device_instance": "21001",
+                    "bacnet_ip": "192.168.1.50",
+                    "bacnet_port": "47808",
+                    "building_floor": "L01",
+                    "notes": "row a",
+                },
+                {
+                    "controller_label": "FCU-01B",
+                    "profile_id": "fcu_2pipe_chw_electric_heat_v1",
+                    "bacnet_device_instance": "21002",
+                    "bacnet_ip": "192.168.1.50",
+                    "bacnet_port": "47808",
+                    "building_floor": "L01",
+                    "notes": "same endpoint different instance",
+                },
+            ],
+        )
+        _write_profile(
+            self.profiles_dir / "unit-profile-fcu.example.json",
+            profile_id="fcu_2pipe_chw_electric_heat_v1",
+            display_name="FCU example",
+            write_allowlist=["msv_test_mode"],
+            read_allowlist=["ai_sat"],
+        )
+
+        result = _run_compiler(controllers, self.profiles_dir, output_json, report_json)
+
+        self.assertEqual(0, result.returncode)
+        report = json.loads(report_json.read_text(encoding="utf-8"))
+        codes = [w["code"] for w in report["warnings"]]
+        self.assertIn("duplicate_bacnet_ip_port_different_device", codes)
 

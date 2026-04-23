@@ -2,7 +2,7 @@
 
 ## Documentation
 
-- **Current repo status (2026-04-23):** docs-first project with early runnable tooling (simulator verifier/orchestrator, import compiler, and Python runtime CLI). BACnet **probes** use a tiny UDP helper; **WriteProperty** uses **[BACpypes3](https://bacpypes3.readthedocs.io/)** (`pip install -r requirements.txt`). There is no full end-user commissioning application yet.
+- **Current repo status (2026-04-23):** docs-first project with early runnable tooling (simulator verifier/orchestrator, import compiler, and Python runtime CLI). BACnet **probes** use a tiny UDP helper; **ReadProperty / WriteProperty** use **[BACpypes3](https://bacpypes3.readthedocs.io/)** (`pip install -r requirements.txt`). There is no full end-user commissioning application yet.
 - **[Living project doc](docs/project.md)** — product requirements, commissioning flows, examples, import direction, and reports (update as the product evolves).
 - **[ADRs](docs/adr/)** — short decision records when choices are non-obvious.
 - **[Slice plans](docs/plans/)** — time-boxed implementation plans; archive or remove when the slice ships.
@@ -97,6 +97,10 @@ python3 tools/runtime/app.py dry-run-bacnet-write \
 # 3f) ReadProperty (BACpypes3); object_id must be in profile commissioning_read_allowlist
 # python3 tools/runtime/app.py bacnet-read --run-dir artifacts/runtime-run \
 #   --controller-label FCU-01A --object-id ai_sat [--property presentValue]
+
+# 3g) Point checkout: read profile point_checkout[] in order (same allowlist rules per object)
+# python3 tools/runtime/app.py bacnet-point-checkout --run-dir artifacts/runtime-run \
+#   --controller-label FCU-01A [--strict] [--bacnet-bind-port 47809]
 
 # 4) Record technician signoff for a step
 python3 tools/runtime/app.py record-step \

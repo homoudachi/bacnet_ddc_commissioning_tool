@@ -907,6 +907,140 @@ def cmd_dry_run_bacnet_write(args: argparse.Namespace) -> int:
     return 2
 
 
+def _bacnet_read_one(
+    *,
+    controller_label: str,
+    target: dict,
+    object_id: str,
+    property_name: str,
+    timeout_seconds: float,
+    retries: int,
+    bacnet_bind_port: int,
+) -> dict:
+    """Perform one BACnet read; returns result dict (may set status read_ok / blocked / errors)."""
+    object_id = str(object_id).strip()
+    profile_allow = target.get("commissioning_read_allowlist", [])
+    if not isinstance(profile_allow, list) or not profile_allow:
+        return {
+            "controller_label": controller_label,
+            "profile_object_id": object_id,
+            "status": "config_error",
+            "message": "profile has no commissioning_read_allowlist",
+        }
+    allowed = {str(x).strip() for x in profile_allow if str(x).strip()}
+    if object_id not in allowed:
+        return {
+            "controller_label": controller_label,
+            "profile_object_id": object_id,
+            "status": "config_error",
+            "message": f"object_id not in commissioning_read_allowlist (allowed: {sorted(allowed)})",
+        }
+
+    objects_by_id = target.get("objects_by_id", {})
+    if not isinstance(objects_by_id, dict) or object_id not in objects_by_id:
+        return {
+            "controller_label": controller_label,
+            "profile_object_id": object_id,
+            "status": "config_error",
+            "message": "object_id not found in objects_by_id",
+        }
+    meta = objects_by_id[object_id]
+    if not isinstance(meta, dict):
+        return {
+            "controller_label": controller_label,
+            "profile_object_id": object_id,
+            "status": "config_error",
+            "message": "invalid objects_by_id entry",
+        }
+    bacnet = meta.get("bacnet", {})
+    if not isinstance(bacnet, dict):
+        return {
+            "controller_label": controller_label,
+            "profile_object_id": object_id,
+            "status": "config_error",
+            "message": "invalid objects_by_id entry",
+        }
+    type_name = str(bacnet.get("object_type", "")).strip()
+    try:
+        object_instance = int(bacnet.get("instance"))
+    except (TypeError, ValueError):
+        return {
+            "controller_label": controller_label,
+            "profile_object_id": object_id,
+            "status": "config_error",
+            "message": "invalid BACnet instance",
+        }
+
+    bip_mod = _load_bip_adapter()
+    object_type_int = bip_mod.object_type_name_to_int(type_name)
+    if object_type_int is None:
+        return {
+            "controller_label": controller_label,
+            "profile_object_id": object_id,
+            "status": "config_error",
+            "message": f"unsupported BACnet object_type: {type_name!r}",
+        }
+
+    addr = target.get("bacnet", {})
+    host = str(addr.get("host", "")).strip()
+    port = int(addr.get("port", 0))
+    expected_instance = int(addr.get("device_instance", 0))
+
+    probe = bip_mod.probe_device(
+        host=host,
+        port=port,
+        expected_device_instance=expected_instance,
+        timeout_seconds=timeout_seconds,
+        retries=retries,
+    )
+    result: dict = {
+        "controller_label": controller_label,
+        "profile_object_id": object_id,
+        "property": property_name,
+        "probe": probe,
+    }
+    if probe.get("status") != "reachable_verified":
+        result["status"] = "blocked_probe_failed"
+        return result
+
+    try:
+        client = _load_bacpypes_client()
+    except (OSError, RuntimeError) as err:
+        result["status"] = "client_load_failed"
+        result["message"] = str(err)
+        return result
+
+    try:
+        bind_port = int(bacnet_bind_port or 0)
+    except ValueError:
+        bind_port = 0
+    who_is_timeout = max(3.0, float(timeout_seconds) * max(1, int(retries)))
+    prop = str(property_name or "presentValue").strip() or "presentValue"
+    try:
+        read_result = client.read_present_value(
+            bind_port=bind_port,
+            target_address=f"{host}:{port}",
+            expected_device_instance=expected_instance,
+            object_type=object_type_int,
+            object_instance=object_instance,
+            property_name=prop,
+            who_is_timeout=who_is_timeout,
+            apdu_timeout=8.0,
+        )
+    except ModuleNotFoundError as err:
+        result["status"] = "bacpypes_missing"
+        result["message"] = str(err)
+        return result
+    except Exception as err:  # noqa: BLE001
+        result["status"] = "read_failed"
+        result["read_error"] = str(err)
+        return result
+
+    result["read"] = read_result
+    result["status"] = str(read_result.get("status", "read_failed"))
+    return result
+
+
 def cmd_bacnet_read(args: argparse.Namespace) -> int:
     run_dir = args.run_dir
     logs_path = run_dir / "logs" / "events.jsonl"
@@ -923,102 +1057,33 @@ def cmd_bacnet_read(args: argparse.Namespace) -> int:
         return 2
 
     object_id = str(args.object_id).strip()
-    profile_allow = target.get("commissioning_read_allowlist", [])
-    if not isinstance(profile_allow, list) or not profile_allow:
-        print(
-            "error: profile has no commissioning_read_allowlist; "
-            "add a non-empty array of logical object ids to the unit profile JSON"
-        )
-        return 2
-    allowed = {str(x).strip() for x in profile_allow if str(x).strip()}
-    if object_id not in allowed:
-        print(
-            f"error: object_id not in profile commissioning_read_allowlist: {object_id!r} "
-            f"(allowed: {sorted(allowed)})"
-        )
-        return 2
-
-    objects_by_id = target.get("objects_by_id", {})
-    if not isinstance(objects_by_id, dict) or object_id not in objects_by_id:
-        print(
-            f"error: object_id not found in compiled runtime job for controller: {object_id}"
-        )
-        return 2
-    meta = objects_by_id[object_id]
-    if not isinstance(meta, dict):
-        print(f"error: invalid objects_by_id entry for {object_id!r}")
-        return 2
-    bacnet = meta.get("bacnet", {})
-    if not isinstance(bacnet, dict):
-        print(f"error: invalid objects_by_id entry for {object_id!r}")
-        return 2
-    type_name = str(bacnet.get("object_type", "")).strip()
+    prop = str(args.property or "presentValue").strip() or "presentValue"
     try:
-        object_instance = int(bacnet.get("instance"))
-    except (TypeError, ValueError):
-        print(f"error: invalid BACnet instance for {object_id!r}")
-        return 2
+        bind_port = int(getattr(args, "bacnet_bind_port", 0) or 0)
+    except ValueError:
+        bind_port = 0
 
-    bip_mod = _load_bip_adapter()
-    object_type_int = bip_mod.object_type_name_to_int(type_name)
-    if object_type_int is None:
-        print(f"error: unsupported BACnet object_type for reads: {type_name!r}")
-        return 2
-
-    addr = target.get("bacnet", {})
-    host = str(addr.get("host", "")).strip()
-    port = int(addr.get("port", 0))
-    expected_instance = int(addr.get("device_instance", 0))
-
-    probe = bip_mod.probe_device(
-        host=host,
-        port=port,
-        expected_device_instance=expected_instance,
+    result = _bacnet_read_one(
+        controller_label=args.controller_label,
+        target=target,
+        object_id=object_id,
+        property_name=prop,
         timeout_seconds=args.timeout_seconds,
         retries=args.retries,
+        bacnet_bind_port=bind_port,
     )
-    result: dict = {
-        "controller_label": args.controller_label,
-        "profile_object_id": object_id,
-        "probe": probe,
-    }
-    if probe.get("status") != "reachable_verified":
-        result["status"] = "blocked_probe_failed"
-    else:
-        try:
-            client = _load_bacpypes_client()
-        except (OSError, RuntimeError) as err:
-            print(f"error: failed to load BACnet client: {err}")
-            return 2
-        try:
-            bind_port = int(getattr(args, "bacnet_bind_port", 0) or 0)
-        except ValueError:
-            bind_port = 0
-        who_is_timeout = max(3.0, float(args.timeout_seconds) * max(1, int(args.retries)))
-        prop = str(args.property or "presentValue").strip() or "presentValue"
-        try:
-            read_result = client.read_present_value(
-                bind_port=bind_port,
-                target_address=f"{host}:{port}",
-                expected_device_instance=expected_instance,
-                object_type=object_type_int,
-                object_instance=object_instance,
-                property_name=prop,
-                who_is_timeout=who_is_timeout,
-                apdu_timeout=8.0,
-            )
-        except ModuleNotFoundError as err:
-            print(
-                "error: bacpypes3 is required for bacnet-read "
-                f"(pip install -r requirements.txt): {err}"
-            )
-            return 2
-        except Exception as err:  # noqa: BLE001
-            result["status"] = "read_failed"
-            result["read_error"] = str(err)
-        else:
-            result["read"] = read_result
-            result["status"] = str(read_result.get("status", "read_failed"))
+    if result.get("status") == "config_error":
+        print(f"error: {result.get('message', 'invalid configuration')}")
+        return 2
+    if result.get("status") == "client_load_failed":
+        print(f"error: failed to load BACnet client: {result.get('message')}")
+        return 2
+    if result.get("status") == "bacpypes_missing":
+        print(
+            "error: bacpypes3 is required for bacnet-read "
+            f"(pip install -r requirements.txt): {result.get('message')}"
+        )
+        return 2
 
     reads_dir = run_dir / "artifacts" / "bacnet_reads"
     reads_dir.mkdir(parents=True, exist_ok=True)
@@ -1042,6 +1107,85 @@ def cmd_bacnet_read(args: argparse.Namespace) -> int:
     )
     print(json.dumps(result, sort_keys=True))
     return 0 if result.get("status") == "read_ok" else 2
+
+
+def cmd_bacnet_point_checkout(args: argparse.Namespace) -> int:
+    run_dir = args.run_dir
+    logs_path = run_dir / "logs" / "events.jsonl"
+    runtime_job_path = run_dir / "state" / "runtime-job.json"
+    runtime_job = json.loads(runtime_job_path.read_text(encoding="utf-8"))
+
+    target = None
+    for controller in runtime_job.get("controllers", []):
+        if controller.get("controller_label") == args.controller_label:
+            target = controller
+            break
+    if target is None:
+        print(f"error: controller not found in runtime job: {args.controller_label}")
+        return 2
+
+    checkout = target.get("point_checkout", [])
+    if not isinstance(checkout, list) or not checkout:
+        print(
+            "error: profile has no point_checkout list; "
+            "add point_checkout: [{object_id, property}, ...] to the unit profile JSON"
+        )
+        return 2
+
+    try:
+        bind_port = int(getattr(args, "bacnet_bind_port", 0) or 0)
+    except ValueError:
+        bind_port = 0
+
+    rows: list[dict] = []
+    strict = bool(getattr(args, "strict", False))
+    all_ok = True
+    for entry in checkout:
+        if not isinstance(entry, dict):
+            continue
+        oid = str(entry.get("object_id", "")).strip()
+        if not oid:
+            continue
+        prop = str(entry.get("property", "presentValue")).strip() or "presentValue"
+        one = _bacnet_read_one(
+            controller_label=args.controller_label,
+            target=target,
+            object_id=oid,
+            property_name=prop,
+            timeout_seconds=args.timeout_seconds,
+            retries=args.retries,
+            bacnet_bind_port=bind_port,
+        )
+        rows.append(one)
+        if one.get("status") != "read_ok":
+            all_ok = False
+            if strict:
+                break
+
+    payload = {
+        "controller_label": args.controller_label,
+        "strict": strict,
+        "point_count": len(rows),
+        "all_read_ok": bool(all_ok),
+        "reads": rows,
+    }
+
+    out_dir = run_dir / "artifacts" / "bacnet_point_checkout"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    artifact = out_dir / f"{args.controller_label}.json"
+    artifact.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    _append_event(
+        logs_path,
+        "bacnet_point_checkout_completed",
+        {
+            "controller_label": args.controller_label,
+            "all_read_ok": bool(all_ok),
+            "artifact_json": str(artifact.resolve()),
+        },
+    )
+    print(json.dumps(payload, sort_keys=True))
+    return 0 if all_ok else 2
 
 
 def cmd_record_step(args: argparse.Namespace) -> int:
@@ -1468,6 +1612,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="Local UDP bind port for BACpypes3 client (0 = OS-assigned).",
     )
     bacnet_read.set_defaults(handler=cmd_bacnet_read)
+
+    point_checkout = subparsers.add_parser(
+        "bacnet-point-checkout",
+        help="Read profile point_checkout list in order (BACpypes3; requires bacpypes3).",
+    )
+    point_checkout.add_argument("--run-dir", required=True, type=Path)
+    point_checkout.add_argument("--controller-label", required=True)
+    point_checkout.add_argument("--timeout-seconds", type=float, default=0.5)
+    point_checkout.add_argument("--retries", type=int, default=1)
+    point_checkout.add_argument(
+        "--bacnet-bind-port",
+        type=int,
+        default=0,
+        help="Local UDP bind port for BACpypes3 client (0 = OS-assigned).",
+    )
+    point_checkout.add_argument(
+        "--strict",
+        action="store_true",
+        help="Stop after first failed read instead of continuing.",
+    )
+    point_checkout.set_defaults(handler=cmd_bacnet_point_checkout)
 
     init_flow = subparsers.add_parser(
         "init-flow", help="Initialize commissioning flow state for one controller."

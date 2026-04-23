@@ -49,6 +49,10 @@ def _warning(warnings: list[dict[str, Any]], code: str, message: str) -> None:
     warnings.append({"code": code, "message": message})
 
 
+def _bacnet_endpoint_key(host: str, port: int) -> str:
+    return f"{host.strip().lower()}:{int(port)}"
+
+
 def load_profiles(
     profiles_dir: Path,
 ) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
@@ -103,6 +107,8 @@ def compile_model(
     controllers: list[dict[str, Any]] = []
     labels_seen: set[str] = set()
     instances_seen: set[int] = set()
+    # host:port -> list of (controller_label, device_instance, row)
+    endpoint_rows: dict[str, list[tuple[str, int, int]]] = {}
 
     try:
         handle = controllers_csv.open("r", encoding="utf-8", newline="")
@@ -225,6 +231,9 @@ def compile_model(
                 )
                 continue
 
+            ep_key = _bacnet_endpoint_key(host, port)
+            endpoint_rows.setdefault(ep_key, []).append((label, device_instance, row_index))
+
             allow_ids: list[str] = []
             raw_allow = profile.get("commissioning_write_allowlist")
             if isinstance(raw_allow, list):
@@ -253,6 +262,7 @@ def compile_model(
                     "commissioning_write_allowlist": allow_ids,
                     "commissioning_read_allowlist": read_allow_ids,
                     "objects_by_id": _extract_objects_by_id(profile),
+                    "point_checkout": _extract_point_checkout(profile),
                     "commissioning_flow": _extract_commissioning_steps(profile),
                     "bacnet": {
                         "device_instance": device_instance,
@@ -262,6 +272,30 @@ def compile_model(
                     "building_floor": (row.get("building_floor") or "").strip(),
                     "notes": (row.get("notes") or "").strip(),
                 }
+            )
+
+    for ep_key, rows in endpoint_rows.items():
+        if len(rows) < 2:
+            continue
+        instances = {r[1] for r in rows}
+        labels = sorted({r[0] for r in rows})
+        if len(instances) > 1:
+            _warning(
+                warnings,
+                code="duplicate_bacnet_ip_port_different_device",
+                message=(
+                    f"multiple controllers share BACnet/IP endpoint {ep_key} "
+                    f"with different device_instance values: {', '.join(labels)}"
+                ),
+            )
+        elif len(rows) > 1:
+            _warning(
+                warnings,
+                code="duplicate_bacnet_ip_port_same_device",
+                message=(
+                    f"multiple controller rows target the same BACnet/IP endpoint {ep_key} "
+                    f"and device_instance {next(iter(instances))}: {', '.join(labels)}"
+                ),
             )
 
     return build_outputs(
@@ -325,6 +359,23 @@ def _extract_objects_by_id(profile: dict[str, Any]) -> dict[str, dict[str, Any]]
             "bacnet": {"object_type": object_type, "instance": inst_int},
             "writable": bool(item.get("writable")),
         }
+    return out
+
+
+def _extract_point_checkout(profile: dict[str, Any]) -> list[dict[str, Any]]:
+    """Optional ordered list of read checks for point checkout (object_id + property)."""
+    out: list[dict[str, Any]] = []
+    raw = profile.get("point_checkout")
+    if not isinstance(raw, list):
+        return out
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        oid = str(item.get("object_id", "")).strip()
+        if not oid:
+            continue
+        prop = str(item.get("property", "presentValue")).strip() or "presentValue"
+        out.append({"object_id": oid, "property": prop})
     return out
 
 

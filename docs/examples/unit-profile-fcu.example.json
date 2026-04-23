@@ -18,6 +18,10 @@
     "ai_sat",
     "msv_test_mode"
   ],
+  "point_checkout": [
+    { "object_id": "ai_sat", "property": "presentValue" },
+    { "object_id": "msv_test_mode", "property": "presentValue" }
+  ],
   "unit_specs": {
     "design_supply_airflow_L_s": 0.85,
     "design_return_airflow_L_s": null,

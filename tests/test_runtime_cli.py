@@ -208,6 +208,94 @@ class RuntimeCliTests(unittest.TestCase):
         events = [json.loads(line)["event"] for line in lines]
         self.assertIn("job_graph_printed", events)
 
+    def test_bacnet_point_checkout_errors_when_no_point_checkout(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-point-checkout-missing",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+        init_flow_result = _run_runtime(
+            "init-flow",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "HRV-01",
+        )
+        self.assertEqual(0, init_flow_result.returncode)
+
+        job_path = self.run_dir / "state" / "runtime-job.json"
+        job = json.loads(job_path.read_text(encoding="utf-8"))
+        for c in job["controllers"]:
+            if c.get("controller_label") == "HRV-01":
+                c["point_checkout"] = []
+                break
+        job_path.write_text(json.dumps(job, indent=2), encoding="utf-8")
+
+        result = _run_runtime(
+            "bacnet-point-checkout",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "HRV-01",
+        )
+        self.assertEqual(2, result.returncode)
+        self.assertIn("no point_checkout", result.stdout)
+
+    def test_bacnet_point_checkout_writes_artifact(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-point-checkout-artifact",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+        init_flow_result = _run_runtime(
+            "init-flow",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+        )
+        self.assertEqual(0, init_flow_result.returncode)
+
+        result = _run_runtime(
+            "bacnet-point-checkout",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+            "--timeout-seconds",
+            "0.1",
+            "--retries",
+            "1",
+        )
+        self.assertEqual(2, result.returncode)
+        artifact = self.run_dir / "artifacts" / "bacnet_point_checkout" / "FCU-01A.json"
+        self.assertTrue(artifact.exists())
+        payload = json.loads(artifact.read_text(encoding="utf-8"))
+        self.assertGreaterEqual(payload["point_count"], 1)
+        self.assertFalse(payload["all_read_ok"])
+
     def test_bacnet_read_rejects_object_not_on_read_allowlist(self) -> None:
         init_result = _run_runtime(
             "init-run",
