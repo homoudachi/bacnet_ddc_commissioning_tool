@@ -83,6 +83,80 @@ async def _write_present_value_async(
         app.close()
 
 
+async def _read_present_value_async(
+    *,
+    bind_port: int,
+    target_address: str,
+    expected_device_instance: int,
+    object_type: int,
+    object_instance: int,
+    property_name: str,
+    who_is_timeout: float,
+    apdu_timeout: float,
+) -> dict[str, Any]:
+    """Who-Is to populate cache, then ReadProperty."""
+    local_device_instance = 999000 + (bind_port % 900000)
+    device = DeviceObject(
+        objectIdentifier=ObjectIdentifier(("device", local_device_instance)),
+        objectName=CharacterString("commissioning-tool-client"),
+    )
+    app = NormalApplication(device, IPv4Address(f"0.0.0.0:{bind_port}"))
+
+    try:
+        await asyncio.sleep(0.05)
+        who_future = app.who_is(
+            low_limit=expected_device_instance,
+            high_limit=expected_device_instance,
+            address=IPv4Address(target_address),
+            timeout=who_is_timeout,
+        )
+        iams = await asyncio.wait_for(who_future, timeout=who_is_timeout + 1.0)
+        if not iams:
+            return {"status": "blocked_probe_failed", "message": "no I-Am from target"}
+
+        dest = IPv4Address(target_address)
+        obj_tag = f"{_object_type_tag(object_type)} {object_instance}"
+        value = await asyncio.wait_for(
+            app.read_property(dest, obj_tag, property_name),
+            timeout=apdu_timeout,
+        )
+        if isinstance(value, ErrorRejectAbortNack):
+            return {
+                "status": "read_rejected",
+                "message": str(value),
+                "detail": repr(value),
+            }
+        return {"status": "read_ok", "value": repr(value), "value_str": str(value)}
+    finally:
+        app.close()
+
+
+def read_present_value(
+    *,
+    bind_port: int,
+    target_address: str,
+    expected_device_instance: int,
+    object_type: int,
+    object_instance: int,
+    property_name: str = "presentValue",
+    who_is_timeout: float = 3.0,
+    apdu_timeout: float = 5.0,
+) -> dict[str, Any]:
+    """Synchronous ReadProperty wrapper."""
+    return asyncio.run(
+        _read_present_value_async(
+            bind_port=bind_port,
+            target_address=target_address,
+            expected_device_instance=expected_device_instance,
+            object_type=object_type,
+            object_instance=object_instance,
+            property_name=property_name,
+            who_is_timeout=who_is_timeout,
+            apdu_timeout=apdu_timeout,
+        )
+    )
+
+
 def write_present_value(
     *,
     bind_port: int,

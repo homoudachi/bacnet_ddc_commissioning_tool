@@ -37,6 +37,12 @@ python3 tools/runtime/app.py init-run \
 # 2) Compile import into runtime state
 python3 tools/runtime/app.py compile-import --run-dir artifacts/runtime-run
 
+# 2b) Dry-run compile only (writes artifacts/import-validation/, does not overwrite state/runtime-job.json)
+python3 tools/runtime/app.py validate-import --run-dir artifacts/runtime-run
+
+# 2c) Print controller / flow / object-count summary (requires compile-import first)
+python3 tools/runtime/app.py print-job-graph --run-dir artifacts/runtime-run
+
 # 3) Initialize commissioning flow state for one controller
 python3 tools/runtime/app.py init-flow \
   --run-dir artifacts/runtime-run \
@@ -71,6 +77,7 @@ python3 tools/runtime/app.py init-flow \
 # 3d) Export one JSON rollup for the run (after compile-import): controllers, flow presence, next open step
 python3 tools/runtime/app.py export-run-summary --run-dir artifacts/runtime-run
 # Optional: --output-json artifacts/runtime-run/artifacts/my-summary.json
+# Optional: --output-csv artifacts/runtime-run/artifacts/run-summary.csv
 # Optional: embed full blobs for single-file handoff (larger JSON):
 #   --embed-import-report --embed-bip-list-summary
 
@@ -86,6 +93,10 @@ python3 tools/runtime/app.py dry-run-bacnet-write \
   --note "Arm test mode state 3 (profile-defined meaning)"
 # Live write (install: pip install -r requirements.txt):
 # python3 tools/runtime/app.py dry-run-bacnet-write ... --execute [--bacnet-bind-port 47809]
+
+# 3f) ReadProperty (BACpypes3); object_id must be in profile commissioning_read_allowlist
+# python3 tools/runtime/app.py bacnet-read --run-dir artifacts/runtime-run \
+#   --controller-label FCU-01A --object-id ai_sat [--property presentValue]
 
 # 4) Record technician signoff for a step
 python3 tools/runtime/app.py record-step \

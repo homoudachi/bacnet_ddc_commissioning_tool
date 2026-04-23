@@ -14,6 +14,9 @@
   "commissioning_write_allowlist": [
     "msv_test_mode"
   ],
+  "commissioning_read_allowlist": [
+    "msv_test_mode"
+  ],
   "unit_specs": {
     "design_supply_airflow_L_s": 47.2,
     "design_exhaust_airflow_L_s": 45.0,

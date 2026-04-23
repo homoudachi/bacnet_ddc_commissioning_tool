@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import importlib.util
 import subprocess
@@ -261,6 +262,90 @@ def cmd_compile_import(args: argparse.Namespace) -> int:
         {"exit_code": result.returncode, "report_json": str(report_json.resolve())},
     )
     return result.returncode
+
+
+def cmd_validate_import(args: argparse.Namespace) -> int:
+    """Compile import into an isolated directory without overwriting runtime-job.json."""
+    run_dir = args.run_dir
+    logs_path = run_dir / "logs" / "events.jsonl"
+    config = _parse_run_config(run_dir)
+    out_dir = args.output_dir or (run_dir / "artifacts" / "import-validation")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    output_json = out_dir / "runtime-job.json"
+    report_json = out_dir / "import-report.json"
+
+    cmd = [
+        sys.executable,
+        str(IMPORT_COMPILER),
+        "--controllers-csv",
+        config["controllers_csv"],
+        "--profiles-dir",
+        config["profiles_dir"],
+        "--output-json",
+        str(output_json),
+        "--report-json",
+        str(report_json),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.stdout:
+        print(result.stdout, end="")
+    if result.stderr:
+        print(result.stderr, end="", file=sys.stderr)
+
+    _append_event(
+        logs_path,
+        "import_validated",
+        {
+            "exit_code": result.returncode,
+            "validation_dir": str(out_dir.resolve()),
+            "report_json": str(report_json.resolve()),
+        },
+    )
+    print(f"import_validated=true validation_dir={out_dir.resolve()}")
+    return result.returncode
+
+
+def cmd_print_job_graph(args: argparse.Namespace) -> int:
+    run_dir = args.run_dir
+    logs_path = run_dir / "logs" / "events.jsonl"
+    runtime_job_path = run_dir / "state" / "runtime-job.json"
+    if not runtime_job_path.is_file():
+        print(
+            f"error: runtime job missing at {runtime_job_path}; run compile-import first"
+        )
+        return 2
+
+    runtime_job = json.loads(runtime_job_path.read_text(encoding="utf-8"))
+    config = _parse_run_config(run_dir)
+    lines: list[str] = []
+    lines.append(f"job_id={config.get('job_id')}")
+    lines.append(
+        f"controller_count={runtime_job.get('summary', {}).get('controller_count', len(runtime_job.get('controllers', [])))}"
+    )
+    for row in runtime_job.get("controllers", []):
+        label = str(row.get("controller_label", "")).strip()
+        flow = row.get("commissioning_flow", [])
+        step_count = len(flow) if isinstance(flow, list) else 0
+        objs = row.get("objects_by_id", {})
+        obj_count = len(objs) if isinstance(objs, dict) else 0
+        w_allow = row.get("commissioning_write_allowlist", [])
+        r_allow = row.get("commissioning_read_allowlist", [])
+        wn = len(w_allow) if isinstance(w_allow, list) else 0
+        rn = len(r_allow) if isinstance(r_allow, list) else 0
+        lines.append(
+            f"  {label} profile_id={row.get('profile_id')} "
+            f"steps={step_count} objects_by_id={obj_count} "
+            f"write_allowlist={wn} read_allowlist={rn}"
+        )
+
+    text = "\n".join(lines) + "\n"
+    print(text, end="")
+    _append_event(
+        logs_path,
+        "job_graph_printed",
+        {"line_count": len(lines)},
+    )
+    return 0
 
 
 def cmd_verify_simulator(args: argparse.Namespace) -> int:
@@ -613,16 +698,60 @@ def cmd_export_run_summary(args: argparse.Namespace) -> int:
 
     output_json.parent.mkdir(parents=True, exist_ok=True)
     output_json.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+
+    csv_path = getattr(args, "output_csv", None)
+    if csv_path:
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+        fieldnames = [
+            "controller_label",
+            "profile_id",
+            "flow_initialized",
+            "step_count",
+            "next_step_id",
+            "next_step_status",
+            "pending_count",
+            "passed_count",
+            "failed_count",
+            "skipped_count",
+            "manual_passed_count",
+        ]
+        with csv_path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames)
+            writer.writeheader()
+            for row in controllers_out:
+                counts = row.get("status_counts") or {}
+                nxt = row.get("next_open_step") or {}
+                writer.writerow(
+                    {
+                        "controller_label": row.get("controller_label", ""),
+                        "profile_id": row.get("profile_id", ""),
+                        "flow_initialized": str(bool(row.get("flow_initialized"))).lower(),
+                        "step_count": row.get("step_count") if row.get("step_count") is not None else "",
+                        "next_step_id": nxt.get("step_id", "") if isinstance(nxt, dict) else "",
+                        "next_step_status": nxt.get("status", "") if isinstance(nxt, dict) else "",
+                        "pending_count": counts.get("pending", 0),
+                        "passed_count": counts.get("passed", 0),
+                        "failed_count": counts.get("failed", 0),
+                        "skipped_count": counts.get("skipped", 0),
+                        "manual_passed_count": counts.get("manual_passed", 0),
+                    }
+                )
+
     _append_event(
         logs_path,
         "run_summary_exported",
-        {"summary_json": str(output_json.resolve())},
+        {
+            "summary_json": str(output_json.resolve()),
+            "csv_path": str(csv_path.resolve()) if csv_path else None,
+        },
     )
     print(f"run_summary_exported=true summary_json={output_json.resolve()}")
+    if csv_path:
+        print(f"run_summary_csv=true csv_path={csv_path.resolve()}")
     return 0
 
 
-def _load_bacpypes_write_client():
+def _load_bacpypes_client():
     spec = importlib.util.spec_from_file_location(
         "runtime_bacpypes_client", ROOT / "tools" / "bacnet" / "bacpypes_client.py"
     )
@@ -717,7 +846,7 @@ def cmd_dry_run_bacnet_write(args: argparse.Namespace) -> int:
 
     if not dry_run and result.get("status") == "dry_run_allowed":
         try:
-            client = _load_bacpypes_write_client()
+            client = _load_bacpypes_client()
         except (OSError, RuntimeError) as err:
             print(f"error: failed to load BACnet write client: {err}")
             return 2
@@ -776,6 +905,143 @@ def cmd_dry_run_bacnet_write(args: argparse.Namespace) -> int:
     if result.get("status") in {"dry_run_allowed", "write_ok"}:
         return 0
     return 2
+
+
+def cmd_bacnet_read(args: argparse.Namespace) -> int:
+    run_dir = args.run_dir
+    logs_path = run_dir / "logs" / "events.jsonl"
+    runtime_job_path = run_dir / "state" / "runtime-job.json"
+    runtime_job = json.loads(runtime_job_path.read_text(encoding="utf-8"))
+
+    target = None
+    for controller in runtime_job.get("controllers", []):
+        if controller.get("controller_label") == args.controller_label:
+            target = controller
+            break
+    if target is None:
+        print(f"error: controller not found in runtime job: {args.controller_label}")
+        return 2
+
+    object_id = str(args.object_id).strip()
+    profile_allow = target.get("commissioning_read_allowlist", [])
+    if not isinstance(profile_allow, list) or not profile_allow:
+        print(
+            "error: profile has no commissioning_read_allowlist; "
+            "add a non-empty array of logical object ids to the unit profile JSON"
+        )
+        return 2
+    allowed = {str(x).strip() for x in profile_allow if str(x).strip()}
+    if object_id not in allowed:
+        print(
+            f"error: object_id not in profile commissioning_read_allowlist: {object_id!r} "
+            f"(allowed: {sorted(allowed)})"
+        )
+        return 2
+
+    objects_by_id = target.get("objects_by_id", {})
+    if not isinstance(objects_by_id, dict) or object_id not in objects_by_id:
+        print(
+            f"error: object_id not found in compiled runtime job for controller: {object_id}"
+        )
+        return 2
+    meta = objects_by_id[object_id]
+    if not isinstance(meta, dict):
+        print(f"error: invalid objects_by_id entry for {object_id!r}")
+        return 2
+    bacnet = meta.get("bacnet", {})
+    if not isinstance(bacnet, dict):
+        print(f"error: invalid objects_by_id entry for {object_id!r}")
+        return 2
+    type_name = str(bacnet.get("object_type", "")).strip()
+    try:
+        object_instance = int(bacnet.get("instance"))
+    except (TypeError, ValueError):
+        print(f"error: invalid BACnet instance for {object_id!r}")
+        return 2
+
+    bip_mod = _load_bip_adapter()
+    object_type_int = bip_mod.object_type_name_to_int(type_name)
+    if object_type_int is None:
+        print(f"error: unsupported BACnet object_type for reads: {type_name!r}")
+        return 2
+
+    addr = target.get("bacnet", {})
+    host = str(addr.get("host", "")).strip()
+    port = int(addr.get("port", 0))
+    expected_instance = int(addr.get("device_instance", 0))
+
+    probe = bip_mod.probe_device(
+        host=host,
+        port=port,
+        expected_device_instance=expected_instance,
+        timeout_seconds=args.timeout_seconds,
+        retries=args.retries,
+    )
+    result: dict = {
+        "controller_label": args.controller_label,
+        "profile_object_id": object_id,
+        "probe": probe,
+    }
+    if probe.get("status") != "reachable_verified":
+        result["status"] = "blocked_probe_failed"
+    else:
+        try:
+            client = _load_bacpypes_client()
+        except (OSError, RuntimeError) as err:
+            print(f"error: failed to load BACnet client: {err}")
+            return 2
+        try:
+            bind_port = int(getattr(args, "bacnet_bind_port", 0) or 0)
+        except ValueError:
+            bind_port = 0
+        who_is_timeout = max(3.0, float(args.timeout_seconds) * max(1, int(args.retries)))
+        prop = str(args.property or "presentValue").strip() or "presentValue"
+        try:
+            read_result = client.read_present_value(
+                bind_port=bind_port,
+                target_address=f"{host}:{port}",
+                expected_device_instance=expected_instance,
+                object_type=object_type_int,
+                object_instance=object_instance,
+                property_name=prop,
+                who_is_timeout=who_is_timeout,
+                apdu_timeout=8.0,
+            )
+        except ModuleNotFoundError as err:
+            print(
+                "error: bacpypes3 is required for bacnet-read "
+                f"(pip install -r requirements.txt): {err}"
+            )
+            return 2
+        except Exception as err:  # noqa: BLE001
+            result["status"] = "read_failed"
+            result["read_error"] = str(err)
+        else:
+            result["read"] = read_result
+            result["status"] = str(read_result.get("status", "read_failed"))
+
+    reads_dir = run_dir / "artifacts" / "bacnet_reads"
+    reads_dir.mkdir(parents=True, exist_ok=True)
+    artifact = reads_dir / f"{args.controller_label}-{object_id}.json"
+    artifact.write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
+
+    event = (
+        "bacnet_read_ok"
+        if result.get("status") == "read_ok"
+        else "bacnet_read_blocked"
+    )
+    _append_event(
+        logs_path,
+        event,
+        {
+            "controller_label": args.controller_label,
+            "object_id": object_id,
+            "status": result.get("status"),
+            "artifact_json": str(artifact.resolve()),
+        },
+    )
+    print(json.dumps(result, sort_keys=True))
+    return 0 if result.get("status") == "read_ok" else 2
 
 
 def cmd_record_step(args: argparse.Namespace) -> int:
@@ -1051,6 +1317,25 @@ def build_parser() -> argparse.ArgumentParser:
     compile_import.add_argument("--run-dir", required=True, type=Path)
     compile_import.set_defaults(handler=cmd_compile_import)
 
+    validate_import = subparsers.add_parser(
+        "validate-import",
+        help="Dry-run compile to artifacts/import-validation (does not overwrite state/runtime-job.json).",
+    )
+    validate_import.add_argument("--run-dir", required=True, type=Path)
+    validate_import.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Destination directory (default: <run-dir>/artifacts/import-validation).",
+    )
+    validate_import.set_defaults(handler=cmd_validate_import)
+
+    print_graph = subparsers.add_parser(
+        "print-job-graph",
+        help="Print human-readable summary of controllers and commissioning flow sizes.",
+    )
+    print_graph.add_argument("--run-dir", required=True, type=Path)
+    print_graph.set_defaults(handler=cmd_print_job_graph)
+
     export_summary = subparsers.add_parser(
         "export-run-summary",
         help="Write aggregated run summary JSON (controllers, flow hints, import/BIP flags).",
@@ -1070,6 +1355,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--embed-bip-list-summary",
         action="store_true",
         help="Include full list-summary.json object under key bip_list_summary when present.",
+    )
+    export_summary.add_argument(
+        "--output-csv",
+        type=Path,
+        help="Also write controller rollup as CSV (same rows as summary controllers).",
     )
     export_summary.set_defaults(handler=cmd_export_run_summary)
 
@@ -1152,6 +1442,32 @@ def build_parser() -> argparse.ArgumentParser:
         help="Send WriteProperty via BACpypes3 (requires pip install -r requirements.txt).",
     )
     dry_write.set_defaults(handler=cmd_dry_run_bacnet_write)
+
+    bacnet_read = subparsers.add_parser(
+        "bacnet-read",
+        help="ReadProperty via BACpypes3 for allowlisted profile object (requires bacpypes3).",
+    )
+    bacnet_read.add_argument("--run-dir", required=True, type=Path)
+    bacnet_read.add_argument("--controller-label", required=True)
+    bacnet_read.add_argument(
+        "--object-id",
+        required=True,
+        help="Profile object id (must be in commissioning_read_allowlist).",
+    )
+    bacnet_read.add_argument(
+        "--property",
+        default="presentValue",
+        help="BACnet property name (default: presentValue).",
+    )
+    bacnet_read.add_argument("--timeout-seconds", type=float, default=0.5)
+    bacnet_read.add_argument("--retries", type=int, default=1)
+    bacnet_read.add_argument(
+        "--bacnet-bind-port",
+        type=int,
+        default=0,
+        help="Local UDP bind port for BACpypes3 client (0 = OS-assigned).",
+    )
+    bacnet_read.set_defaults(handler=cmd_bacnet_read)
 
     init_flow = subparsers.add_parser(
         "init-flow", help="Initialize commissioning flow state for one controller."

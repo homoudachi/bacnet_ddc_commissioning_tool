@@ -34,6 +34,7 @@ def _write_profile(
     display_name: str,
     *,
     write_allowlist: list[str] | None = None,
+    read_allowlist: list[str] | None = None,
 ) -> None:
     data: dict = {
                 "schema_version": "0.1-example",
@@ -62,6 +63,8 @@ def _write_profile(
     }
     if write_allowlist is not None:
         data["commissioning_write_allowlist"] = write_allowlist
+    if read_allowlist is not None:
+        data["commissioning_read_allowlist"] = read_allowlist
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
@@ -125,12 +128,14 @@ class ImportCompilerTests(unittest.TestCase):
             profile_id="fcu_2pipe_chw_electric_heat_v1",
             display_name="FCU example",
             write_allowlist=["msv_test_mode"],
+            read_allowlist=["ai_sat"],
         )
         _write_profile(
             self.profiles_dir / "unit-profile-hrv.example.json",
             profile_id="hrv_counterflow_erv_v1",
             display_name="HRV example",
             write_allowlist=["msv_test_mode"],
+            read_allowlist=["msv_test_mode"],
         )
 
         result = _run_compiler(controllers, self.profiles_dir, output_json, report_json)
@@ -142,6 +147,7 @@ class ImportCompilerTests(unittest.TestCase):
         self.assertEqual(2, len(runtime["controllers"]))
         self.assertEqual("FCU example", runtime["controllers"][0]["profile"]["display_name"])
         self.assertEqual(["msv_test_mode"], runtime["controllers"][0]["commissioning_write_allowlist"])
+        self.assertEqual(["ai_sat"], runtime["controllers"][0]["commissioning_read_allowlist"])
         fcu_objs = runtime["controllers"][0].get("objects_by_id", {})
         self.assertIn("msv_test_mode", fcu_objs)
         self.assertEqual("multiStateValue", fcu_objs["msv_test_mode"]["bacnet"]["object_type"])

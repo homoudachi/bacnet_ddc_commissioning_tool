@@ -139,6 +139,105 @@ class RuntimeCliTests(unittest.TestCase):
         events = [json.loads(line)["event"] for line in lines]
         self.assertIn("import_compiled", events)
 
+    def test_validate_import_writes_separate_artifacts(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-validate-import",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+        first_mtime = (self.run_dir / "state" / "runtime-job.json").stat().st_mtime_ns
+
+        val_dir = self.run_dir / "artifacts" / "import-validation-custom"
+        result = _run_runtime(
+            "validate-import",
+            "--run-dir",
+            str(self.run_dir),
+            "--output-dir",
+            str(val_dir),
+        )
+        self.assertEqual(0, result.returncode)
+        self.assertTrue((val_dir / "runtime-job.json").exists())
+        self.assertTrue((val_dir / "import-report.json").exists())
+        second_mtime = (self.run_dir / "state" / "runtime-job.json").stat().st_mtime_ns
+        self.assertEqual(first_mtime, second_mtime)
+
+        lines = (
+            self.run_dir / "logs" / "events.jsonl"
+        ).read_text(encoding="utf-8").strip().splitlines()
+        events = [json.loads(line)["event"] for line in lines]
+        self.assertIn("import_validated", events)
+
+    def test_print_job_graph_after_compile(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-print-graph",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+
+        result = _run_runtime("print-job-graph", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, result.returncode)
+        self.assertIn("job-print-graph", result.stdout)
+        self.assertIn("FCU-01A", result.stdout)
+        self.assertIn("read_allowlist=", result.stdout)
+
+        lines = (
+            self.run_dir / "logs" / "events.jsonl"
+        ).read_text(encoding="utf-8").strip().splitlines()
+        events = [json.loads(line)["event"] for line in lines]
+        self.assertIn("job_graph_printed", events)
+
+    def test_bacnet_read_rejects_object_not_on_read_allowlist(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-bacnet-read-deny",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+
+        result = _run_runtime(
+            "bacnet-read",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+            "--object-id",
+            "av_supply_fan_command",
+        )
+        self.assertEqual(2, result.returncode)
+        self.assertIn("commissioning_read_allowlist", result.stdout)
+
     def test_export_run_summary_requires_runtime_job(self) -> None:
         init_result = _run_runtime(
             "init-run",
@@ -240,6 +339,38 @@ class RuntimeCliTests(unittest.TestCase):
         ).read_text(encoding="utf-8").strip().splitlines()
         events = [json.loads(line)["event"] for line in log_lines]
         self.assertIn("run_summary_exported", events)
+
+    def test_export_run_summary_writes_csv_when_requested(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-export-csv",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+
+        csv_path = self.run_dir / "artifacts" / "run-summary.csv"
+        result = _run_runtime(
+            "export-run-summary",
+            "--run-dir",
+            str(self.run_dir),
+            "--output-csv",
+            str(csv_path),
+        )
+        self.assertEqual(0, result.returncode)
+        self.assertTrue(csv_path.exists())
+        text = csv_path.read_text(encoding="utf-8")
+        self.assertIn("controller_label", text)
+        self.assertIn("FCU-01A", text)
 
     def test_export_run_summary_embed_import_and_bip_blobs(self) -> None:
         init_result = _run_runtime(
