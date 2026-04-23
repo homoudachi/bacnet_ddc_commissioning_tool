@@ -135,3 +135,9 @@ Use this checklist in order:
 - Topology spec: `docker/simulator/docker-compose.yml`
 - Simulator planning sequence: `docs/plans/2026-04-21-bacnet-simulator-plan.md`
 - Product record: `docs/project.md`
+
+## Verification status (2026-04-21)
+
+- `docker compose -f docker/simulator/docker-compose.yml --profile ci config` succeeded
+- `docker compose -f docker/simulator/docker-compose.yml --profile lab config` succeeded
+- `docker compose -f docker/simulator/docker-compose.yml --profile multisubnet config` succeeded
