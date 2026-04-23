@@ -294,11 +294,19 @@ def _extract_commissioning_steps(profile: dict[str, Any]) -> list[dict[str, Any]
         label = str(item.get("label", "")).strip()
         if not step_id:
             continue
+        raw_requires = item.get("requires_step_ids", [])
+        requires_step_ids: list[str] = []
+        if isinstance(raw_requires, list):
+            for dep in raw_requires:
+                dep_id = str(dep).strip()
+                if dep_id:
+                    requires_step_ids.append(dep_id)
         steps.append(
             {
                 "step_id": step_id,
                 "label": label,
                 "skippable": bool(item.get("skippable", False)),
+                "requires_step_ids": requires_step_ids,
             }
         )
     return steps

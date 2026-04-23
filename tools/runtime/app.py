@@ -74,6 +74,13 @@ def _is_terminal_prereq_status(status: str) -> bool:
     return status in {"passed", "manual_passed", "skipped"}
 
 
+def _lookup_step_by_id(steps: list[dict], step_id: str) -> dict | None:
+    for item in steps:
+        if item.get("step_id") == step_id:
+            return item
+    return None
+
+
 def _validate_step_transition(
     steps: list[dict],
     step: dict,
@@ -85,6 +92,21 @@ def _validate_step_transition(
 
     if requested_status in {"passed", "manual_passed"}:
         step_id = step.get("step_id")
+        requires_step_ids = step.get("requires_step_ids", [])
+        if isinstance(requires_step_ids, list):
+            for required_id in requires_step_ids:
+                required = _lookup_step_by_id(steps, str(required_id))
+                if required is None:
+                    return (
+                        f"step '{step_id}' requires completed dependency "
+                        f"'{required_id}' which is not present in flow"
+                    )
+                required_status = str(required.get("status", "pending"))
+                if not _is_terminal_prereq_status(required_status):
+                    return (
+                        f"step '{step_id}' requires completed dependency "
+                        f"'{required_id}'"
+                    )
         current_index = next(
             (idx for idx, item in enumerate(steps) if item.get("step_id") == step_id),
             None,

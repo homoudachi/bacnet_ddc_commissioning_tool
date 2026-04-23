@@ -452,3 +452,59 @@ class RuntimeCliTests(unittest.TestCase):
         self.assertEqual(2, result.returncode)
         self.assertIn("invalid step transition", result.stdout)
         self.assertIn("is not skippable", result.stdout)
+
+    def test_record_step_rejects_when_explicit_dependency_not_satisfied(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-flow-explicit-dependency",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+        init_flow_result = _run_runtime(
+            "init-flow",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+        )
+        self.assertEqual(0, init_flow_result.returncode)
+
+        # Inject an explicit dependency on a later step to prove dependency checks
+        # are enforced independently of index ordering.
+        flow_state_path = self.run_dir / "state" / "flows" / "FCU-01A.json"
+        flow_state = json.loads(flow_state_path.read_text(encoding="utf-8"))
+        for step in flow_state["steps"]:
+            if step["step_id"] == "half_design_airflow_auto":
+                step["requires_step_ids"] = ["heating_test"]
+                break
+        flow_state_path.write_text(json.dumps(flow_state, indent=2), encoding="utf-8")
+
+        result = _run_runtime(
+            "record-step",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+            "--step-id",
+            "half_design_airflow_auto",
+            "--status",
+            "passed",
+            "--technician-name",
+            "Alex Tech",
+            "--note",
+            "Attempting explicit dependency bypass",
+        )
+
+        self.assertEqual(2, result.returncode)
+        self.assertIn("invalid step transition", result.stdout)
+        self.assertIn("requires completed dependency", result.stdout)
