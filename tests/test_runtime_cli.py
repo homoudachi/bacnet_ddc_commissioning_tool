@@ -892,6 +892,135 @@ class RuntimeCliTests(unittest.TestCase):
         self.assertEqual(2, result.returncode)
         self.assertIn("flow state not found", result.stdout)
 
+    def test_set_session_value_requires_init_flow(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-session-no-flow",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+
+        result = _run_runtime(
+            "set-session-value",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+            "--key",
+            "rat_degC",
+            "--value",
+            "22.5",
+            "--technician-name",
+            "Alex Tech",
+            "--note",
+            "Manual RAT",
+        )
+        self.assertEqual(2, result.returncode)
+        self.assertIn("init-flow first", result.stdout)
+
+    def test_set_session_value_and_show_session_round_trip(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-session-roundtrip",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+        init_flow_result = _run_runtime(
+            "init-flow",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+        )
+        self.assertEqual(0, init_flow_result.returncode)
+
+        set_result = _run_runtime(
+            "set-session-value",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+            "--key",
+            "rat_degC",
+            "--value",
+            "22.5",
+            "--technician-name",
+            "Alex Tech",
+            "--note",
+            "Manual RAT for heat-rise",
+        )
+        self.assertEqual(0, set_result.returncode)
+        self.assertIn("session_value_set=true", set_result.stdout)
+
+        session_path = self.run_dir / "state" / "sessions" / "FCU-01A.json"
+        self.assertTrue(session_path.exists())
+        stored = json.loads(session_path.read_text(encoding="utf-8"))
+        self.assertEqual("FCU-01A", stored["controller_label"])
+        self.assertEqual("22.5", stored["values"]["rat_degC"]["value"])
+        self.assertEqual("Alex Tech", stored["values"]["rat_degC"]["technician_name"])
+
+        show_result = _run_runtime(
+            "show-session",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+        )
+        self.assertEqual(0, show_result.returncode)
+        shown = json.loads(show_result.stdout)
+        self.assertEqual("22.5", shown["values"]["rat_degC"]["value"])
+
+        log_lines = (
+            self.run_dir / "logs" / "events.jsonl"
+        ).read_text(encoding="utf-8").strip().splitlines()
+        events = [json.loads(line)["event"] for line in log_lines]
+        self.assertIn("session_value_set", events)
+        self.assertIn("session_viewed", events)
+
+    def test_show_session_errors_when_missing(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-show-session-missing",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+
+        result = _run_runtime(
+            "show-session",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+        )
+        self.assertEqual(2, result.returncode)
+        self.assertIn("session state not found", result.stdout)
+
     def test_record_step_rejects_pending_status_record(self) -> None:
         init_result = _run_runtime(
             "init-run",

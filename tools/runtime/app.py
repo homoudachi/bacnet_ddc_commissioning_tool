@@ -70,6 +70,14 @@ def _flow_state_path(run_dir: Path, controller_label: str) -> Path:
     return _flows_dir(run_dir) / f"{controller_label}.json"
 
 
+def _sessions_dir(run_dir: Path) -> Path:
+    return run_dir / "state" / "sessions"
+
+
+def _session_state_path(run_dir: Path, controller_label: str) -> Path:
+    return _sessions_dir(run_dir) / f"{controller_label}.json"
+
+
 def _is_terminal_prereq_status(status: str) -> bool:
     return status in {"passed", "manual_passed", "skipped"}
 
@@ -402,6 +410,86 @@ def cmd_show_flow(args: argparse.Namespace) -> int:
         },
     )
     print(json.dumps(flow_state, sort_keys=True))
+    return 0
+
+
+def cmd_set_session_value(args: argparse.Namespace) -> int:
+    run_dir = args.run_dir
+    logs_path = run_dir / "logs" / "events.jsonl"
+    flow_state_path = _flow_state_path(run_dir, args.controller_label)
+    if not flow_state_path.is_file():
+        print(
+            "error: commissioning flow not initialized; run init-flow first "
+            f"(missing {flow_state_path})"
+        )
+        return 2
+
+    key = str(args.key).strip()
+    if not key:
+        print("error: session key must be non-empty")
+        return 2
+    if len(key) > 128:
+        print("error: session key exceeds maximum length (128)")
+        return 2
+
+    session_path = _session_state_path(run_dir, args.controller_label)
+    session_path.parent.mkdir(parents=True, exist_ok=True)
+    if session_path.is_file():
+        session_state = json.loads(session_path.read_text(encoding="utf-8"))
+    else:
+        session_state = {
+            "controller_label": args.controller_label,
+            "updated_at": _utc_timestamp(),
+            "values": {},
+        }
+
+    if not isinstance(session_state.get("values"), dict):
+        session_state["values"] = {}
+
+    session_state["values"][key] = {
+        "value": str(args.value),
+        "technician_name": args.technician_name,
+        "note": args.note,
+        "ts": _utc_timestamp(),
+    }
+    session_state["updated_at"] = _utc_timestamp()
+    session_path.write_text(json.dumps(session_state, indent=2), encoding="utf-8")
+
+    _append_event(
+        logs_path,
+        "session_value_set",
+        {
+            "controller_label": args.controller_label,
+            "session_key": key,
+            "session_state_json": str(session_path.resolve()),
+        },
+    )
+    print(
+        f"session_value_set=true controller_label={args.controller_label} key={key}"
+    )
+    return 0
+
+
+def cmd_show_session(args: argparse.Namespace) -> int:
+    run_dir = args.run_dir
+    logs_path = run_dir / "logs" / "events.jsonl"
+    session_path = _session_state_path(run_dir, args.controller_label)
+    if not session_path.is_file():
+        print(
+            f"error: session state not found for controller_label={args.controller_label}"
+        )
+        return 2
+
+    session_state = json.loads(session_path.read_text(encoding="utf-8"))
+    _append_event(
+        logs_path,
+        "session_viewed",
+        {
+            "controller_label": args.controller_label,
+            "session_state_json": str(session_path.resolve()),
+        },
+    )
+    print(json.dumps(session_state, sort_keys=True))
     return 0
 
 
@@ -745,6 +833,34 @@ def build_parser() -> argparse.ArgumentParser:
     show_flow.add_argument("--run-dir", required=True, type=Path)
     show_flow.add_argument("--controller-label", required=True)
     show_flow.set_defaults(handler=cmd_show_flow)
+
+    set_session = subparsers.add_parser(
+        "set-session-value",
+        help="Store operator-entered session value for a controller (e.g. manual RAT).",
+    )
+    set_session.add_argument("--run-dir", required=True, type=Path)
+    set_session.add_argument("--controller-label", required=True)
+    set_session.add_argument(
+        "--key",
+        required=True,
+        help="Session field key (e.g. rat_degC).",
+    )
+    set_session.add_argument(
+        "--value",
+        required=True,
+        help="Value to store (string; caller may pass numeric text).",
+    )
+    set_session.add_argument("--technician-name", required=True)
+    set_session.add_argument("--note", default="")
+    set_session.set_defaults(handler=cmd_set_session_value)
+
+    show_session = subparsers.add_parser(
+        "show-session",
+        help="Print session values JSON for one controller.",
+    )
+    show_session.add_argument("--run-dir", required=True, type=Path)
+    show_session.add_argument("--controller-label", required=True)
+    show_session.set_defaults(handler=cmd_show_session)
 
     record_step = subparsers.add_parser(
         "record-step", help="Record technician signoff for a commissioning step."
