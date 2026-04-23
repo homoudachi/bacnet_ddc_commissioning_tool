@@ -1,6 +1,7 @@
 import csv
 import json
 import pathlib
+import shutil
 import subprocess
 import sys
 import unittest
@@ -97,6 +98,10 @@ class ImportCompilerTests(unittest.TestCase):
         FIXTURES.mkdir(parents=True, exist_ok=True)
         self.profiles_dir = FIXTURES / "profiles"
         self.profiles_dir.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self) -> None:
+        if FIXTURES.exists():
+            shutil.rmtree(FIXTURES)
 
     def test_compile_job_happy_path_writes_runtime_model(self) -> None:
         controllers = FIXTURES / "controllers-compile-happy.csv"

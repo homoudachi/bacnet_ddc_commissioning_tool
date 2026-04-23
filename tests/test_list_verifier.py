@@ -1,6 +1,7 @@
 import csv
 import json
 import pathlib
+import shutil
 import subprocess
 import sys
 import unittest
@@ -90,6 +91,10 @@ def _run_verifier_json_to_file(
 class ListVerifierCliTests(unittest.TestCase):
     def setUp(self) -> None:
         FIXTURES.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self) -> None:
+        if FIXTURES.exists():
+            shutil.rmtree(FIXTURES)
 
     def test_happy_path_strict_passes_when_all_rows_verified(self) -> None:
         controllers = FIXTURES / "controllers-happy.csv"

@@ -1,5 +1,6 @@
 import json
 import pathlib
+import shutil
 import subprocess
 import sys
 import unittest
@@ -56,6 +57,10 @@ class SimulatorOrchestratorTests(unittest.TestCase):
             + "\n",
             encoding="utf-8",
         )
+
+    def tearDown(self) -> None:
+        if FIXTURES.exists():
+            shutil.rmtree(FIXTURES)
 
     def test_orchestrator_runs_verifier_for_profile_and_scenario(self) -> None:
         (self.scenarios / "happy-path.example.json").write_text(
