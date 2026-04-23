@@ -20,3 +20,27 @@
 - ADR lock-ins: **[docs/adr/](docs/adr/)** (0001-0003)
 - Import compiler CLI: **[tools/import/compile_job.py](tools/import/compile_job.py)**
 - Import compiler tests: **[tests/test_import_compiler.py](tests/test_import_compiler.py)**
+- Runtime skeleton CLI: **[tools/runtime/app.py](tools/runtime/app.py)**
+- Runtime CLI tests: **[tests/test_runtime_cli.py](tests/test_runtime_cli.py)**
+
+## Runtime CLI quick start
+
+```bash
+# 1) Initialize run directory
+python3 tools/runtime/app.py init-run \
+  --run-dir artifacts/runtime-run \
+  --job-id demo-job-001 \
+  --controllers-csv docs/examples/site-controllers.template.csv \
+  --profiles-dir docs/examples \
+  --scenarios-dir docs/examples/simulator-scenarios
+
+# 2) Compile import into runtime state
+python3 tools/runtime/app.py compile-import --run-dir artifacts/runtime-run
+
+# 3) Verify one simulator scenario
+python3 tools/runtime/app.py verify-simulator \
+  --run-dir artifacts/runtime-run \
+  --profile ci \
+  --scenario happy-path \
+  --strict
+```
