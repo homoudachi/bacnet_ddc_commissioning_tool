@@ -25,6 +25,13 @@ class BacnetAdapterTests(unittest.TestCase):
         self.assertEqual(3.0, adapter.effective_who_is_timeout(1.0, 2))
         self.assertEqual(4.0, adapter.effective_who_is_timeout(2.0, 2))
         self.assertEqual(8.0, adapter.commissioning_apdu_timeout_seconds())
+        self.assertEqual(12.5, adapter.commissioning_apdu_timeout_seconds(12.5))
+        with self.assertRaises(ValueError):
+            adapter.commissioning_apdu_timeout_seconds(0)
+        with self.assertRaises(ValueError):
+            adapter.commissioning_apdu_timeout_seconds(-1)
+        with self.assertRaises(ValueError):
+            adapter.commissioning_apdu_timeout_seconds(float("nan"))
 
     def test_format_target_and_present_value_property_id(self) -> None:
         mod = _load_adapter_module()
