@@ -28,10 +28,14 @@ def _write_csv(path: pathlib.Path, rows: list[dict[str, str]]) -> None:
             writer.writerow(row)
 
 
-def _write_profile(path: pathlib.Path, profile_id: str, display_name: str) -> None:
-    path.write_text(
-        json.dumps(
-            {
+def _write_profile(
+    path: pathlib.Path,
+    profile_id: str,
+    display_name: str,
+    *,
+    write_allowlist: list[str] | None = None,
+) -> None:
+    data: dict = {
                 "schema_version": "0.1-example",
                 "profile_id": profile_id,
                 "display_name": display_name,
@@ -55,11 +59,10 @@ def _write_profile(path: pathlib.Path, profile_id: str, display_name: str) -> No
                         "bacnet": {"object_type": "analogValue", "instance": 3},
                     },
                 ],
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+    }
+    if write_allowlist is not None:
+        data["commissioning_write_allowlist"] = write_allowlist
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
 def _run_compiler(
@@ -121,11 +124,13 @@ class ImportCompilerTests(unittest.TestCase):
             self.profiles_dir / "unit-profile-fcu.example.json",
             profile_id="fcu_2pipe_chw_electric_heat_v1",
             display_name="FCU example",
+            write_allowlist=["msv_test_mode"],
         )
         _write_profile(
             self.profiles_dir / "unit-profile-hrv.example.json",
             profile_id="hrv_counterflow_erv_v1",
             display_name="HRV example",
+            write_allowlist=["msv_test_mode"],
         )
 
         result = _run_compiler(controllers, self.profiles_dir, output_json, report_json)
@@ -136,6 +141,7 @@ class ImportCompilerTests(unittest.TestCase):
         self.assertEqual(2, runtime["summary"]["controller_count"])
         self.assertEqual(2, len(runtime["controllers"]))
         self.assertEqual("FCU example", runtime["controllers"][0]["profile"]["display_name"])
+        self.assertEqual(["msv_test_mode"], runtime["controllers"][0]["commissioning_write_allowlist"])
         fcu_objs = runtime["controllers"][0].get("objects_by_id", {})
         self.assertIn("msv_test_mode", fcu_objs)
         self.assertEqual("multiStateValue", fcu_objs["msv_test_mode"]["bacnet"]["object_type"])

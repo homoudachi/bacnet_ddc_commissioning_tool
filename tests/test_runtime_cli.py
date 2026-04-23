@@ -467,7 +467,7 @@ class RuntimeCliTests(unittest.TestCase):
             "Should be blocked",
         )
         self.assertEqual(2, result.returncode)
-        self.assertIn("not allowlisted", result.stdout)
+        self.assertIn("commissioning_write_allowlist", result.stdout)
 
     def test_dry_run_bacnet_write_planned_with_localhost_udp_server(self) -> None:
         server = _FakeBipUdpServer(device_instance=21001)

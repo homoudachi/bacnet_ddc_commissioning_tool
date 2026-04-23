@@ -2,7 +2,7 @@
 
 ## Documentation
 
-- **Current repo status (2026-04-23):** docs-first project with early runnable tooling (simulator verifier/orchestrator, import compiler, and Python runtime CLI). There is no full end-user commissioning application yet.
+- **Current repo status (2026-04-23):** docs-first project with early runnable tooling (simulator verifier/orchestrator, import compiler, and Python runtime CLI). BACnet **probes** use a tiny UDP helper; **WriteProperty** uses **[BACpypes3](https://bacpypes3.readthedocs.io/)** (`pip install -r requirements.txt`). There is no full end-user commissioning application yet.
 - **[Living project doc](docs/project.md)** — product requirements, commissioning flows, examples, import direction, and reports (update as the product evolves).
 - **[ADRs](docs/adr/)** — short decision records when choices are non-obvious.
 - **[Slice plans](docs/plans/)** — time-boxed implementation plans; archive or remove when the slice ships.
@@ -56,8 +56,9 @@ python3 tools/runtime/app.py export-run-summary --run-dir artifacts/runtime-run
 # Optional: embed full blobs for single-file handoff (larger JSON):
 #   --embed-import-report --embed-bip-list-summary
 
-# 3d) Dry-run allowlisted BACnet WriteProperty intent (Who-Is probe only; no write PDU sent)
-# Requires compile-import; object_id must be allowlisted (e.g. msv_test_mode) and writable in profile.
+# 3d) BACnet WriteProperty (profile-driven allowlist + BACpypes3)
+# Unit profile JSON must include commissioning_write_allowlist: ["msv_test_mode", ...]
+# Default: dry-run uses minimal Who-Is probe only (no BACpypes3 write).
 python3 tools/runtime/app.py dry-run-bacnet-write \
   --run-dir artifacts/runtime-run \
   --controller-label FCU-01A \
@@ -65,6 +66,8 @@ python3 tools/runtime/app.py dry-run-bacnet-write \
   --value 3 \
   --technician-name "Alex Tech" \
   --note "Arm test mode state 3 (profile-defined meaning)"
+# Live write (install: pip install -r requirements.txt):
+# python3 tools/runtime/app.py dry-run-bacnet-write ... --execute [--bacnet-bind-port 47809]
 
 # 4) Record technician signoff for a step
 python3 tools/runtime/app.py record-step \

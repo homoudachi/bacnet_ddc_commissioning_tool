@@ -1,0 +1,2 @@
+# Runtime BACnet client (WriteProperty / device discovery).
+bacpypes3>=0.0.80

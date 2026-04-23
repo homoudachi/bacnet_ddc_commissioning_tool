@@ -11,6 +11,9 @@
       "port": 47808
     }
   },
+  "commissioning_write_allowlist": [
+    "msv_test_mode"
+  ],
   "unit_specs": {
     "design_supply_airflow_L_s": 0.85,
     "design_return_airflow_L_s": null,

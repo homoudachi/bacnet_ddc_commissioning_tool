@@ -232,7 +232,7 @@ def plan_write_property(
         }
     if not dry_run:
         return {
-            "status": "not_implemented",
+            "status": "use_bacpypes_client",
             "dry_run": False,
             "probe": probe,
             "target": {
@@ -241,7 +241,7 @@ def plan_write_property(
                 "property_id": property_id,
                 "value": value,
             },
-            "message": "live BACnet WriteProperty is not implemented; use --dry-run",
+            "message": "use tools.bacnet.bacpypes_client.write_present_value for live writes",
         }
     return {
         "status": "dry_run_allowed",

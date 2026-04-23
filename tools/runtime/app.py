@@ -455,8 +455,16 @@ def cmd_export_run_summary(args: argparse.Namespace) -> int:
     return 0
 
 
-# Profile logical object ids permitted for WriteProperty dry-run (expand deliberately).
-_ALLOWLISTED_WRITE_OBJECT_IDS = frozenset({"msv_test_mode"})
+def _load_bacpypes_write_client():
+    spec = importlib.util.spec_from_file_location(
+        "runtime_bacpypes_client", ROOT / "tools" / "bacnet" / "bacpypes_client.py"
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError("unable to load bacpypes_client module")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def cmd_dry_run_bacnet_write(args: argparse.Namespace) -> int:
@@ -475,10 +483,18 @@ def cmd_dry_run_bacnet_write(args: argparse.Namespace) -> int:
         return 2
 
     object_id = str(args.object_id).strip()
-    if object_id not in _ALLOWLISTED_WRITE_OBJECT_IDS:
+    profile_allow = target.get("commissioning_write_allowlist", [])
+    if not isinstance(profile_allow, list) or not profile_allow:
         print(
-            f"error: object_id not allowlisted for BACnet writes: {object_id!r} "
-            f"(allowed: {sorted(_ALLOWLISTED_WRITE_OBJECT_IDS)})"
+            "error: profile has no commissioning_write_allowlist; "
+            "add a non-empty array of logical object ids to the unit profile JSON"
+        )
+        return 2
+    allowed = {str(x).strip() for x in profile_allow if str(x).strip()}
+    if object_id not in allowed:
+        print(
+            f"error: object_id not in profile commissioning_write_allowlist: {object_id!r} "
+            f"(allowed: {sorted(allowed)})"
         )
         return 2
 
@@ -525,23 +541,60 @@ def cmd_dry_run_bacnet_write(args: argparse.Namespace) -> int:
         value=int(args.value),
         timeout_seconds=args.timeout_seconds,
         retries=args.retries,
-        dry_run=dry_run,
+        dry_run=True,
     )
     result["controller_label"] = args.controller_label
     result["profile_object_id"] = object_id
     result["technician_name"] = args.technician_name
     result["note"] = args.note
 
+    if not dry_run and result.get("status") == "dry_run_allowed":
+        try:
+            client = _load_bacpypes_write_client()
+        except (OSError, RuntimeError) as err:
+            print(f"error: failed to load BACnet write client: {err}")
+            return 2
+        try:
+            bind_port = int(getattr(args, "bacnet_bind_port", 0) or 0)
+        except ValueError:
+            bind_port = 0
+        who_is_timeout = max(3.0, float(args.timeout_seconds) * max(1, int(args.retries)))
+        try:
+            exec_result = client.write_present_value(
+                bind_port=bind_port,
+                target_address=f"{host}:{port}",
+                expected_device_instance=expected_instance,
+                object_type=object_type_int,
+                object_instance=object_instance,
+                value=int(args.value),
+                who_is_timeout=who_is_timeout,
+                apdu_timeout=8.0,
+            )
+        except ModuleNotFoundError as err:
+            print(
+                "error: bacpypes3 is required for --execute "
+                f"(pip install -r requirements.txt): {err}"
+            )
+            return 2
+        except Exception as err:  # noqa: BLE001 — surface client failures to operator
+            result["execute_error"] = str(err)
+            result["status"] = "execute_failed"
+        else:
+            result["execute"] = exec_result
+            result["status"] = str(exec_result.get("status", "execute_failed"))
+            result["dry_run"] = False
+
     plans_dir = run_dir / "artifacts" / "bacnet_write_plans"
     plans_dir.mkdir(parents=True, exist_ok=True)
     artifact = plans_dir / f"{args.controller_label}-{object_id}.json"
     artifact.write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
 
-    event = (
-        "bacnet_write_planned"
-        if result.get("status") == "dry_run_allowed"
-        else "bacnet_write_blocked"
-    )
+    if result.get("status") == "write_ok":
+        event = "bacnet_write_executed"
+    elif result.get("status") in {"dry_run_allowed", "use_bacpypes_client"}:
+        event = "bacnet_write_planned"
+    else:
+        event = "bacnet_write_blocked"
     _append_event(
         logs_path,
         event,
@@ -553,7 +606,7 @@ def cmd_dry_run_bacnet_write(args: argparse.Namespace) -> int:
         },
     )
     print(json.dumps(result, sort_keys=True))
-    if result.get("status") == "dry_run_allowed":
+    if result.get("status") in {"dry_run_allowed", "write_ok"}:
         return 0
     return 2
 
@@ -921,9 +974,15 @@ def build_parser() -> argparse.ArgumentParser:
     dry_write.add_argument("--timeout-seconds", type=float, default=0.5)
     dry_write.add_argument("--retries", type=int, default=1)
     dry_write.add_argument(
+        "--bacnet-bind-port",
+        type=int,
+        default=0,
+        help="Local UDP bind port for BACpypes3 client (0 = OS-assigned).",
+    )
+    dry_write.add_argument(
         "--execute",
         action="store_true",
-        help="Reserved for future live WriteProperty (currently returns not_implemented).",
+        help="Send WriteProperty via BACpypes3 (requires pip install -r requirements.txt).",
     )
     dry_write.set_defaults(handler=cmd_dry_run_bacnet_write)
 

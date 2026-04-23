@@ -225,6 +225,14 @@ def compile_model(
                 )
                 continue
 
+            allow_ids: list[str] = []
+            raw_allow = profile.get("commissioning_write_allowlist")
+            if isinstance(raw_allow, list):
+                for item in raw_allow:
+                    text = str(item).strip()
+                    if text:
+                        allow_ids.append(text)
+
             controllers.append(
                 {
                     "controller_label": label,
@@ -234,6 +242,7 @@ def compile_model(
                         "display_name": str(profile.get("display_name", "")).strip(),
                         "schema_version": str(profile.get("schema_version", "")).strip(),
                     },
+                    "commissioning_write_allowlist": allow_ids,
                     "objects_by_id": _extract_objects_by_id(profile),
                     "commissioning_flow": _extract_commissioning_steps(profile),
                     "bacnet": {
