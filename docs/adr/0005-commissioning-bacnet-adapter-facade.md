@@ -10,7 +10,7 @@ The runtime mixed two concerns: **minimal UDP Who-Is / I-Am probes** (`bip_adapt
 
 ## Decision
 
-Introduce **`tools/bacnet/adapter.py`** with **`CommissioningBACnetAdapter`**: a small façade that exposes **probe**, **plan_write_property** (dry-run path), **read_present_value**, and **write_present_value**, plus helpers such as **`format_ipv4_target`** and **`present_value_property_id`**. The runtime CLI loads this class once (lazy singleton) and routes all BACnet I/O through it. **`bip_adapter.py`** and **`bacpypes_client.py`** remain the low-level implementations.
+Introduce **`tools/bacnet/adapter.py`** with **`CommissioningBACnetAdapter`**: a small façade that exposes **probe**, **plan_write_property** (dry-run path), **read_present_value**, and **write_present_value**, plus helpers such as **`format_ipv4_target`**, **`present_value_property_id`**, and **derived timeouts** (`effective_who_is_timeout`, `commissioning_apdu_timeout_seconds`) so CLI commands do not duplicate magic numbers. The runtime CLI loads this class once (lazy singleton) and routes all BACnet I/O through it. **`bip_adapter.py`** and **`bacpypes_client.py`** remain the low-level implementations.
 
 ## Consequences
 

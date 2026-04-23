@@ -18,6 +18,14 @@ def _load_adapter_module():
 
 
 class BacnetAdapterTests(unittest.TestCase):
+    def test_effective_who_is_timeout_and_apdu_timeout(self) -> None:
+        mod = _load_adapter_module()
+        adapter = mod.CommissioningBACnetAdapter(ROOT)
+        self.assertEqual(3.0, adapter.effective_who_is_timeout(0.1, 1))
+        self.assertEqual(3.0, adapter.effective_who_is_timeout(1.0, 2))
+        self.assertEqual(4.0, adapter.effective_who_is_timeout(2.0, 2))
+        self.assertEqual(8.0, adapter.commissioning_apdu_timeout_seconds())
+
     def test_format_target_and_present_value_property_id(self) -> None:
         mod = _load_adapter_module()
         adapter = mod.CommissioningBACnetAdapter(ROOT)

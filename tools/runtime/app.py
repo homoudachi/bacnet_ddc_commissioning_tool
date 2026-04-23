@@ -845,7 +845,9 @@ def cmd_dry_run_bacnet_write(args: argparse.Namespace) -> int:
             bind_port = int(getattr(args, "bacnet_bind_port", 0) or 0)
         except ValueError:
             bind_port = 0
-        who_is_timeout = max(3.0, float(args.timeout_seconds) * max(1, int(args.retries)))
+        who_is_timeout = bacnet_ad.effective_who_is_timeout(
+            args.timeout_seconds, args.retries
+        )
         try:
             exec_result = bacnet_ad.write_present_value(
                 bind_port=bind_port,
@@ -855,7 +857,7 @@ def cmd_dry_run_bacnet_write(args: argparse.Namespace) -> int:
                 object_instance=object_instance,
                 value=int(args.value),
                 who_is_timeout=who_is_timeout,
-                apdu_timeout=8.0,
+                apdu_timeout=bacnet_ad.commissioning_apdu_timeout_seconds(),
             )
         except (OSError, RuntimeError) as err:
             print(f"error: failed to load BACnet stack: {err}")
@@ -1001,7 +1003,7 @@ def _bacnet_read_one(
         bind_port = int(bacnet_bind_port or 0)
     except ValueError:
         bind_port = 0
-    who_is_timeout = max(3.0, float(timeout_seconds) * max(1, int(retries)))
+    who_is_timeout = bacnet_ad.effective_who_is_timeout(timeout_seconds, retries)
     prop = str(property_name or "presentValue").strip() or "presentValue"
     try:
         read_result = bacnet_ad.read_present_value(
@@ -1012,7 +1014,7 @@ def _bacnet_read_one(
             object_instance=object_instance,
             property_name=prop,
             who_is_timeout=who_is_timeout,
-            apdu_timeout=8.0,
+            apdu_timeout=bacnet_ad.commissioning_apdu_timeout_seconds(),
         )
     except (OSError, RuntimeError) as err:
         result["status"] = "client_load_failed"

@@ -31,6 +31,11 @@ def _load_sibling_module(logical_name: str, filename: Path) -> Any:
 class CommissioningBACnetAdapter:
     """BACnet/IP façade: minimal UDP probe (B/IP) + BACpypes3 Read/WriteProperty."""
 
+    #: Floor for Who-Is wait when deriving timeouts from CLI ``--timeout-seconds`` × retries.
+    MIN_WHO_IS_TIMEOUT_SECONDS = 3.0
+    #: Single confirmed service timeout for commissioning Read/WriteProperty (seconds).
+    COMMISSIONING_APDU_TIMEOUT_SECONDS = 8.0
+
     def __init__(self, repo_root: Path) -> None:
         self._repo_root = Path(repo_root).resolve()
         self._bacnet_dir = self._repo_root / "tools" / "bacnet"
@@ -62,6 +67,19 @@ class CommissioningBACnetAdapter:
     @staticmethod
     def format_ipv4_target(host: str, port: int) -> str:
         return target_address(host, port)
+
+    @classmethod
+    def effective_who_is_timeout(cls, timeout_seconds: float, retries: int) -> float:
+        """Who-Is timeout derived from probe timeout and retry count (BACpypes3 path)."""
+        return max(
+            cls.MIN_WHO_IS_TIMEOUT_SECONDS,
+            float(timeout_seconds) * max(1, int(retries)),
+        )
+
+    @classmethod
+    def commissioning_apdu_timeout_seconds(cls) -> float:
+        """APDU timeout for commissioning Read/WriteProperty."""
+        return float(cls.COMMISSIONING_APDU_TIMEOUT_SECONDS)
 
     def probe_device(
         self,
