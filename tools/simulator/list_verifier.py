@@ -25,6 +25,14 @@ ALLOWED_STATUSES = {
     "known_unavailable",
 }
 
+REQUIRED_CSV_COLUMNS = {
+    "controller_label",
+    "profile_id",
+    "bacnet_device_instance",
+    "bacnet_ip",
+    "bacnet_port",
+}
+
 
 @dataclass(frozen=True)
 class ControllerRow:
@@ -49,6 +57,11 @@ def load_controller_rows(csv_path: Path) -> list[ControllerRow]:
     rows: list[ControllerRow] = []
     with csv_path.open("r", encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle)
+        header = set(reader.fieldnames or [])
+        missing_columns = sorted(REQUIRED_CSV_COLUMNS - header)
+        if missing_columns:
+            missing = ", ".join(missing_columns)
+            raise ValueError(f"Missing required CSV columns: {missing}")
         for index, item in enumerate(reader, start=2):
             label = (item.get("controller_label") or "").strip()
             if not label:
@@ -59,6 +72,8 @@ def load_controller_rows(csv_path: Path) -> list[ControllerRow]:
 
 def load_scenario_statuses(scenario_path: Path) -> dict[str, dict[str, Any]]:
     data = json.loads(scenario_path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("Scenario JSON top-level value must be an object")
     scenario_rows = data.get("rows")
     if not isinstance(scenario_rows, list):
         raise ValueError("Scenario JSON must contain a top-level 'rows' list")
@@ -103,7 +118,10 @@ def evaluate(
                 strict_pass = False
         else:
             if status == "known_unavailable":
-                allowed = bool(scenario_row and scenario_row.get("allow_known_unavailable"))
+                allowed = bool(
+                    scenario_row
+                    and scenario_row.get("allow_known_unavailable") is True
+                )
                 if not allowed:
                     strict_pass = False
             elif status != "reachable_verified":

@@ -205,3 +205,98 @@ class ListVerifierCliTests(unittest.TestCase):
 
         self.assertEqual(2, result.returncode)
         self.assertIn("Unsupported status", result.stdout)
+
+    def test_invalid_scenario_top_level_returns_controlled_error(self) -> None:
+        controllers = FIXTURES / "controllers-invalid-top-level.csv"
+        scenario = FIXTURES / "scenario-invalid-top-level.json"
+        _write_csv(
+            controllers,
+            [
+                {
+                    "controller_label": "FCU-01A",
+                    "profile_id": "fcu_2pipe_chw_electric_heat_v1",
+                    "bacnet_device_instance": "21001",
+                    "bacnet_ip": "192.168.1.50",
+                    "bacnet_port": "47808",
+                    "building_floor": "L01",
+                    "notes": "example row",
+                }
+            ],
+        )
+        scenario.write_text("[]", encoding="utf-8")
+
+        result = _run_verifier(controllers, scenario, strict=True)
+
+        self.assertEqual(2, result.returncode)
+        self.assertIn("Scenario JSON top-level value must be an object", result.stdout)
+
+    def test_non_strict_rejects_known_unavailable_when_flag_not_boolean_true(self) -> None:
+        controllers = FIXTURES / "controllers-known-unavailable-flag-type.csv"
+        scenario = FIXTURES / "scenario-known-unavailable-flag-type.json"
+        _write_csv(
+            controllers,
+            [
+                {
+                    "controller_label": "FCU-01A",
+                    "profile_id": "fcu_2pipe_chw_electric_heat_v1",
+                    "bacnet_device_instance": "21001",
+                    "bacnet_ip": "192.168.1.50",
+                    "bacnet_port": "47808",
+                    "building_floor": "L01",
+                    "notes": "example row",
+                }
+            ],
+        )
+        _write_json(
+            scenario,
+            {
+                "rows": [
+                    {
+                        "controller_label": "FCU-01A",
+                        "status": "known_unavailable",
+                        "allow_known_unavailable": "true",
+                    }
+                ]
+            },
+        )
+
+        result = _run_verifier(controllers, scenario, strict=False)
+
+        self.assertEqual(2, result.returncode)
+        self.assertIn("strict_pass=false", result.stdout)
+
+    def test_missing_required_csv_header_returns_error(self) -> None:
+        controllers = FIXTURES / "controllers-missing-header.csv"
+        scenario = FIXTURES / "scenario-missing-header.json"
+        with controllers.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(
+                handle,
+                fieldnames=[
+                    "controller_label",
+                    "profile_id",
+                    "bacnet_device_instance",
+                    "bacnet_ip",
+                    "building_floor",
+                    "notes",
+                ],
+            )
+            writer.writeheader()
+            writer.writerow(
+                {
+                    "controller_label": "FCU-01A",
+                    "profile_id": "fcu_2pipe_chw_electric_heat_v1",
+                    "bacnet_device_instance": "21001",
+                    "bacnet_ip": "192.168.1.50",
+                    "building_floor": "L01",
+                    "notes": "missing bacnet_port",
+                }
+            )
+        _write_json(
+            scenario,
+            {"rows": [{"controller_label": "FCU-01A", "status": "reachable_verified"}]},
+        )
+
+        result = _run_verifier(controllers, scenario, strict=True)
+
+        self.assertEqual(2, result.returncode)
+        self.assertIn("Missing required CSV columns", result.stdout)
