@@ -14,8 +14,9 @@ The commissioning report file (`artifacts/commissioning_report.json`) started wi
 2. Add CLI commands:
    - **`append-commissioning-modulation-sample`** — one timestamped **`thermal_modulation_sample`** with multiple allowlisted reads (`--read` repeatable, `object_id` or `object_id:property`).
    - **`append-commissioning-modulation-batch`** — one **`thermal_modulation_batch`** wrapping multiple samples from a JSON file (for scripted sweeps).
-3. Extend **`export-commissioning-report`** with **`--output-csv`** to flatten **`thermal_modulation_sample`** and nested batch samples into rows (`entry_ts`, `controller_label`, `step_id`, `report_ref`, `object_id`, `status`, `value_str`, …).
+3. Extend **`export-commissioning-report`** with **`--output-csv`** to flatten **`thermal_modulation_sample`**, **`thermal_modulation_batch`**, and **`thermal_modulation_sweep`** (extra columns `command_object_id`, `command_percent`, `dwell_seconds` where applicable).
 4. **`--allow-empty`** stub uses schema **0.2** for consistency.
+5. **`bacnet-modulation-sweep`** writes command percent then reads SAT/RAT/context per profile **`modulate_actuator_log_sat_for_report`** action (v1 slice; no automated multi-point sweep loop yet).
 
 ## Consequences
 

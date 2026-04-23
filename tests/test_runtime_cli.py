@@ -48,10 +48,14 @@ class _FakeBipUdpServer:
         *,
         analog_input_present: float = 21.5,
         msv_present: int = 1,
+        av_heat_present: float = 0.0,
+        ao_valve_present: float = 0.0,
     ) -> None:
         self.device_instance = device_instance
         self._ai_present = float(analog_input_present)
         self._msv_present = int(msv_present)
+        self._av_heat_present = float(av_heat_present)
+        self._ao_valve_present = float(ao_valve_present)
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._ready = threading.Event()
@@ -118,10 +122,18 @@ class _FakeBipUdpServer:
             with self._lock:
                 ai_val = self._ai_present
                 msv_val = self._msv_present
+                av_heat = self._av_heat_present
+                ao_valve = self._ao_valve_present
             if ot == 0 and oi == 2:
                 payload = Any(Real(ai_val))
             elif ot == 19 and oi == 50:
                 payload = Any(Unsigned(msv_val))
+            elif ot == 2 and oi == 3:
+                payload = Any(Real(av_heat))
+            elif ot == 2 and oi == 4:
+                payload = Any(Real(av_heat))
+            elif ot == 1 and oi == 5:
+                payload = Any(Real(ao_valve))
             else:
                 return
             ack = ReadPropertyACK(
@@ -142,11 +154,26 @@ class _FakeBipUdpServer:
             wreq = WritePropertyRequest.decode(inc)
             if str(wreq.propertyIdentifier) != "present-value":
                 return
-            if int(wreq.objectIdentifier[0]) != 19 or int(wreq.objectIdentifier[1]) != 50:
+            ot_w = int(wreq.objectIdentifier[0])
+            oi_w = int(wreq.objectIdentifier[1])
+            if ot_w == 19 and oi_w == 50:
+                new_val = int(wreq.propertyValue.cast_out(Unsigned))
+                with self._lock:
+                    self._msv_present = new_val
+            elif ot_w == 2 and oi_w == 3:
+                new_val = float(wreq.propertyValue.cast_out(Real))
+                with self._lock:
+                    self._av_heat_present = new_val
+            elif ot_w == 2 and oi_w == 4:
+                new_val = float(wreq.propertyValue.cast_out(Real))
+                with self._lock:
+                    self._av_heat_present = new_val
+            elif ot_w == 1 and oi_w == 5:
+                new_val = float(wreq.propertyValue.cast_out(Real))
+                with self._lock:
+                    self._ao_valve_present = new_val
+            else:
                 return
-            new_val = int(wreq.propertyValue.cast_out(Unsigned))
-            with self._lock:
-                self._msv_present = new_val
             sack = SimpleAckPDU(service_choice=ConfirmedServiceChoice.writeProperty, context=inc)
             wire = sack.encode().pduData
             sock.sendto(_bvlc_original_unicast(b"\x01\x00" + wire), addr)
@@ -3057,5 +3084,160 @@ class RuntimeCliTests(unittest.TestCase):
                 (self.run_dir / "artifacts" / "commissioning_report.json").read_text(encoding="utf-8")
             )
             self.assertTrue(any(e.get("kind") == "thermal_modulation_batch" for e in doc["entries"]))
+        finally:
+            server.stop()
+
+    def test_bacnet_modulation_sweep_heating_step(self) -> None:
+        server = _FakeBipUdpServer(
+            device_instance=21001,
+            analog_input_present=23.5,
+            msv_present=1,
+            av_heat_present=10.0,
+        )
+        server.start()
+        try:
+            time.sleep(0.05)
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            profiles_dir = self.run_dir / "profiles-sweep"
+            profiles_dir.mkdir(parents=True, exist_ok=True)
+            (profiles_dir / "unit-sweep.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "0.1-example",
+                        "profile_id": "fcu_sweep_v1",
+                        "display_name": "Sweep",
+                        "commissioning_write_allowlist": ["av_electric_heat_command"],
+                        "commissioning_read_allowlist": ["ai_sat", "av_electric_heat_command"],
+                        "objects": [
+                            {
+                                "id": "ai_sat",
+                                "bacnet": {"object_type": "analogInput", "instance": 2},
+                                "writable": False,
+                            },
+                            {
+                                "id": "av_electric_heat_command",
+                                "bacnet": {"object_type": "analogValue", "instance": 4},
+                                "writable": True,
+                            },
+                        ],
+                        "commissioning_flow": [
+                            {
+                                "step_id": "heating_test",
+                                "label": "Heating",
+                                "report_ref": "thermal_tests_for_report.heating",
+                                "actions": [
+                                    {
+                                        "type": "modulate_actuator_log_sat_for_report",
+                                        "command_object_id": "av_electric_heat_command",
+                                        "result_supply_temperature_object_id": "ai_sat",
+                                        "optional_context_object_ids": ["av_electric_heat_command"],
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            csv_path = self.run_dir / "controllers-sweep.csv"
+            with csv_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=[
+                        "controller_label",
+                        "profile_id",
+                        "bacnet_device_instance",
+                        "bacnet_ip",
+                        "bacnet_port",
+                        "building_floor",
+                        "notes",
+                    ],
+                )
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "controller_label": "FCU-SWEEP",
+                        "profile_id": "fcu_sweep_v1",
+                        "bacnet_device_instance": "21001",
+                        "bacnet_ip": "127.0.0.1",
+                        "bacnet_port": str(server.port),
+                        "building_floor": "L01",
+                        "notes": "",
+                    }
+                )
+            self.assertEqual(
+                0,
+                _run_runtime(
+                    "init-run",
+                    "--run-dir",
+                    str(self.run_dir),
+                    "--job-id",
+                    "job-sweep",
+                    "--controllers-csv",
+                    str(csv_path),
+                    "--profiles-dir",
+                    str(profiles_dir),
+                    "--scenarios-dir",
+                    str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+                ).returncode,
+            )
+            self.assertEqual(0, _run_runtime("compile-import", "--run-dir", str(self.run_dir)).returncode)
+            self.assertEqual(
+                0,
+                _run_runtime(
+                    "init-flow",
+                    "--run-dir",
+                    str(self.run_dir),
+                    "--controller-label",
+                    "FCU-SWEEP",
+                ).returncode,
+            )
+            sw = _run_runtime(
+                "bacnet-modulation-sweep",
+                "--run-dir",
+                str(self.run_dir),
+                "--controller-label",
+                "FCU-SWEEP",
+                "--step-id",
+                "heating_test",
+                "--command-percent",
+                "55",
+                "--dwell-seconds",
+                "0.05",
+                "--technician-name",
+                "Alex Tech",
+                "--note",
+                "sweep test",
+                "--timeout-seconds",
+                "0.5",
+                "--retries",
+                "1",
+            )
+            self.assertEqual(0, sw.returncode)
+            doc = json.loads(
+                (self.run_dir / "artifacts" / "commissioning_report.json").read_text(encoding="utf-8")
+            )
+            kinds = [e.get("kind") for e in doc.get("entries", [])]
+            self.assertIn("thermal_modulation_sweep", kinds)
+            sweep = [e for e in doc["entries"] if e.get("kind") == "thermal_modulation_sweep"][0]
+            self.assertEqual(55.0, sweep["command_percent"])
+            ids = {r["logical_object_id"] for r in sweep["readings"]}
+            self.assertEqual({"ai_sat", "av_electric_heat_command"}, ids)
+
+            csv_out = self.run_dir / "artifacts" / "sweep.csv"
+            self.assertEqual(
+                0,
+                _run_runtime(
+                    "export-commissioning-report",
+                    "--run-dir",
+                    str(self.run_dir),
+                    "--output-csv",
+                    str(csv_out),
+                ).returncode,
+            )
+            csv_text = csv_out.read_text(encoding="utf-8")
+            self.assertIn("thermal_modulation_sweep", csv_text)
+            self.assertIn("av_electric_heat_command", csv_text)
         finally:
             server.stop()

@@ -166,7 +166,7 @@ class CommissioningBACnetAdapter:
         expected_device_instance: int,
         object_type: int,
         object_instance: int,
-        value: int,
+        value: int | float,
         who_is_timeout: float = 3.0,
         apdu_timeout: float = 5.0,
     ) -> dict[str, Any]:

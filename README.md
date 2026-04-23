@@ -131,6 +131,11 @@ python3 tools/runtime/app.py record-step \
 # python3 tools/runtime/app.py append-commissioning-modulation-batch --run-dir artifacts/runtime-run \
 #   --input-json my-samples.json [--default-technician "Alex Tech"]
 
+# 4e) Modulation sweep from profile flow step (init-flow + modulate_actuator_log_sat_for_report action):
+# python3 tools/runtime/app.py bacnet-modulation-sweep --run-dir artifacts/runtime-run \
+#   --controller-label FCU-01A --step-id heating_test --command-percent 50 \
+#   --dwell-seconds 0.5 --technician-name "Alex Tech" [--note "..."] [--report-ref override]
+
 # Init-flow: second init for the same controller without --force is rejected (avoids silent overwrite).
 # Record-step rule enforcement:
 # - Outcomes use passed, manual_passed, failed, or skipped (pending is not recordable)

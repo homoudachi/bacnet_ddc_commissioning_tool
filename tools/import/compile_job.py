@@ -413,6 +413,9 @@ def _extract_commissioning_steps(profile: dict[str, Any]) -> list[dict[str, Any]
         }
         if report_ref:
             step_row["report_ref"] = report_ref
+        raw_actions = item.get("actions")
+        if isinstance(raw_actions, list) and raw_actions:
+            step_row["actions"] = raw_actions
         steps.append(step_row)
     return steps
 

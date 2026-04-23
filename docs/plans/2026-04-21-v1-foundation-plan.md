@@ -77,7 +77,7 @@ Use this order to reduce rework and unblock parallel work later.
 - [x] Implement point checkout flow — **v1:** **`bacnet-point-checkout`** CLI; **`record-step`** can run the same reads when a profile step uses **`step_type: bacnet_point_checkout`** or **`run_point_checkout_on_pass`**; results append **`artifacts/commissioning_report.json`**; **guided UI** still future.
 - [ ] Implement airflow adjustment + technician confirmation checkpoints.
 - [ ] Implement cooling valve stroke test (no CHW) with mandatory human confirmation records.
-- [ ] Implement heating/cooling modulation test scaffolds with skippable/manual-pass controls.
+- [ ] Implement heating/cooling modulation test scaffolds with skippable/manual-pass controls — **partial:** **`bacnet-modulation-sweep`** + report **`thermal_modulation_sweep`** from profile **`modulate_actuator_log_sat_for_report`** action; **not** full step engine / skip UI / session RAT column yet.
 
 **Deliverables**
 

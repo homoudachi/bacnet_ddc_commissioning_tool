@@ -9,6 +9,7 @@ import json
 import importlib.util
 import subprocess
 import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -475,6 +476,9 @@ def cmd_init_flow(args: argparse.Namespace) -> int:
         report_ref = str(step.get("report_ref", "")).strip()
         if report_ref:
             step_row["report_ref"] = report_ref
+        raw_actions = step.get("actions")
+        if isinstance(raw_actions, list) and raw_actions:
+            step_row["actions"] = raw_actions
         steps.append(step_row)
 
     flow_state = {
@@ -817,6 +821,9 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
             "step_id",
             "report_ref",
             "technician_name",
+            "command_object_id",
+            "command_percent",
+            "dwell_seconds",
             "object_id",
             "property",
             "status",
@@ -1310,7 +1317,7 @@ def _parse_read_spec(text: str) -> tuple[str, str]:
 
 
 def _commissioning_report_modulation_rows(doc: dict) -> list[dict[str, str]]:
-    """Flatten ``thermal_modulation_sample`` / ``thermal_modulation_batch`` entries for CSV."""
+    """Flatten thermal modulation-related entries for CSV."""
     rows: list[dict[str, str]] = []
     entries = doc.get("entries")
     if not isinstance(entries, list):
@@ -1319,6 +1326,36 @@ def _commissioning_report_modulation_rows(doc: dict) -> list[dict[str, str]]:
         if not isinstance(ent, dict):
             continue
         kind = str(ent.get("kind", "")).strip()
+        if kind == "thermal_modulation_sweep":
+            base_ts = str(ent.get("ts", ""))
+            ctrl = str(ent.get("controller_label", ""))
+            step_id = str(ent.get("step_id", ""))
+            report_ref = str(ent.get("report_ref", ""))
+            tech = str(ent.get("technician_name", ""))
+            cmd_oid = str(ent.get("command_object_id", ""))
+            cmd_pct = str(ent.get("command_percent", ""))
+            dwell = str(ent.get("dwell_seconds", ""))
+            for r in ent.get("readings", []) if isinstance(ent.get("readings"), list) else []:
+                if not isinstance(r, dict):
+                    continue
+                rows.append(
+                    {
+                        "entry_ts": base_ts,
+                        "kind": kind,
+                        "controller_label": ctrl,
+                        "step_id": step_id,
+                        "report_ref": report_ref,
+                        "technician_name": tech,
+                        "command_object_id": cmd_oid,
+                        "command_percent": cmd_pct,
+                        "dwell_seconds": dwell,
+                        "object_id": str(r.get("logical_object_id", "")),
+                        "property": "presentValue",
+                        "status": str(r.get("status", "")),
+                        "value_str": str(r.get("value_str", "")),
+                    }
+                )
+            continue
         if kind not in {"thermal_modulation_sample", "thermal_modulation_batch"}:
             continue
         base_ts = str(ent.get("ts", ""))
@@ -1342,6 +1379,9 @@ def _commissioning_report_modulation_rows(doc: dict) -> list[dict[str, str]]:
                             "step_id": str(sub.get("step_id", step_id)),
                             "report_ref": str(sub.get("report_ref", report_ref)),
                             "technician_name": str(sub.get("technician_name", tech)),
+                            "command_object_id": "",
+                            "command_percent": "",
+                            "dwell_seconds": "",
                             "object_id": str(r.get("object_id", "")),
                             "property": str(r.get("property", "")),
                             "status": str(r.get("status", "")),
@@ -1360,6 +1400,9 @@ def _commissioning_report_modulation_rows(doc: dict) -> list[dict[str, str]]:
                     "step_id": step_id,
                     "report_ref": report_ref,
                     "technician_name": tech,
+                    "command_object_id": "",
+                    "command_percent": "",
+                    "dwell_seconds": "",
                     "object_id": str(r.get("object_id", "")),
                     "property": str(r.get("property", "")),
                     "status": str(r.get("status", "")),
@@ -1457,6 +1500,241 @@ def cmd_append_commissioning_modulation_sample(args: argparse.Namespace) -> int:
     out = {"appended": True, "commissioning_report_json": str(report_path.resolve()), "readings": readings}
     print(json.dumps(out, indent=2, sort_keys=True))
     return 0 if all(r.get("status") == "read_ok" for r in readings) else 2
+
+
+def _resolve_profile_object_bacnet(
+    target: dict, object_id: str
+) -> tuple[int, int] | None:
+    """Return (object_type_int, instance) for logical ``object_id`` or None."""
+    oid = str(object_id).strip()
+    objs = target.get("objects_by_id", {})
+    if not isinstance(objs, dict) or oid not in objs:
+        return None
+    meta = objs.get(oid)
+    if not isinstance(meta, dict):
+        return None
+    bacnet = meta.get("bacnet", {})
+    if not isinstance(bacnet, dict):
+        return None
+    type_name = str(bacnet.get("object_type", "")).strip()
+    try:
+        inst = int(bacnet.get("instance"))
+    except (TypeError, ValueError):
+        return None
+    ad = _bacnet_adapter()
+    ot = ad.object_type_name_to_int(type_name)
+    if ot is None:
+        return None
+    return ot, inst
+
+
+def _find_modulate_actuator_action(step: dict) -> dict | None:
+    actions = step.get("actions")
+    if not isinstance(actions, list):
+        return None
+    for act in actions:
+        if not isinstance(act, dict):
+            continue
+        if str(act.get("type", "")).strip() == "modulate_actuator_log_sat_for_report":
+            return act
+    return None
+
+
+def cmd_bacnet_modulation_sweep(args: argparse.Namespace) -> int:
+    """Write command percent, dwell, read SAT/RAT/context points; append commissioning_report."""
+    run_dir = args.run_dir
+    logs_path = run_dir / "logs" / "events.jsonl"
+    runtime_job_path = run_dir / "state" / "runtime-job.json"
+    runtime_job = json.loads(runtime_job_path.read_text(encoding="utf-8"))
+    target = None
+    for controller in runtime_job.get("controllers", []):
+        if controller.get("controller_label") == args.controller_label:
+            target = controller
+            break
+    if target is None:
+        print(f"error: controller not found in runtime job: {args.controller_label}")
+        return 2
+
+    flow_path = _flow_state_path(run_dir, args.controller_label)
+    if not flow_path.is_file():
+        print(f"error: flow state missing; run init-flow first ({flow_path})")
+        return 2
+    flow_state = json.loads(flow_path.read_text(encoding="utf-8"))
+    step = None
+    for item in flow_state.get("steps", []):
+        if item.get("step_id") == args.step_id:
+            step = item
+            break
+    if step is None:
+        print(f"error: step_id not found in flow state: {args.step_id}")
+        return 2
+
+    action = _find_modulate_actuator_action(step)
+    if action is None:
+        print(
+            "error: step has no modulate_actuator_log_sat_for_report action; "
+            "compile-import with profile commissioning_flow.actions"
+        )
+        return 2
+
+    cmd_oid = str(action.get("command_object_id", "")).strip()
+    sat_oid = str(action.get("result_supply_temperature_object_id", "")).strip()
+    rat_oid = str(action.get("result_return_temperature_object_id", "")).strip()
+    if not cmd_oid or not sat_oid:
+        print("error: modulate action missing command_object_id or result_supply_temperature_object_id")
+        return 2
+
+    cmd_res = _resolve_profile_object_bacnet(target, cmd_oid)
+    sat_res = _resolve_profile_object_bacnet(target, sat_oid)
+    if cmd_res is None or sat_res is None:
+        print("error: could not resolve BACnet object for command or SAT from profile")
+        return 2
+    cmd_ot, cmd_oi = cmd_res
+    sat_ot, sat_oi = sat_res
+    rat_ot = rat_oi = None
+    if rat_oid:
+        rat_res = _resolve_profile_object_bacnet(target, rat_oid)
+        if rat_res is None:
+            print(f"error: could not resolve BACnet object for RAT {rat_oid!r}")
+            return 2
+        rat_ot, rat_oi = rat_res
+
+    extra_reads: list[tuple[str, int, int]] = []
+    raw_ctx = action.get("optional_context_object_ids")
+    if isinstance(raw_ctx, list):
+        for oid in raw_ctx:
+            text = str(oid).strip()
+            if not text:
+                continue
+            res = _resolve_profile_object_bacnet(target, text)
+            if res is None:
+                print(f"error: could not resolve optional_context_object_ids entry {text!r}")
+                return 2
+            extra_reads.append((text, res[0], res[1]))
+
+    objects_by_id = target.get("objects_by_id", {})
+    if not isinstance(objects_by_id, dict) or cmd_oid not in objects_by_id:
+        print("error: command object not in objects_by_id")
+        return 2
+    if not bool(objects_by_id[cmd_oid].get("writable")):
+        print(f"error: command object {cmd_oid!r} is not writable in profile")
+        return 2
+
+    addr = target.get("bacnet", {})
+    host = str(addr.get("host", "")).strip()
+    port = int(addr.get("port", 0))
+    expected_instance = int(addr.get("device_instance", 0))
+    target_addr = _bacnet_adapter().format_ipv4_target(host, port)
+
+    try:
+        bind_port = int(getattr(args, "bacnet_bind_port", 0) or 0)
+    except ValueError:
+        bind_port = 0
+    bacnet_ad = _bacnet_adapter()
+    try:
+        apdu_t = bacnet_ad.commissioning_apdu_timeout_seconds(args.apdu_timeout)
+    except (TypeError, ValueError) as err:
+        print(f"error: invalid --apdu-timeout: {err}")
+        return 2
+    who_t = bacnet_ad.effective_who_is_timeout(
+        float(args.timeout_seconds), int(args.retries)
+    )
+
+    pct = float(args.command_percent)
+    dwell = float(args.dwell_seconds)
+    if dwell < 0:
+        print("error: dwell_seconds must be >= 0")
+        return 2
+
+    write_res = bacnet_ad.write_present_value(
+        bind_port=bind_port,
+        target_address=target_addr,
+        expected_device_instance=expected_instance,
+        object_type=cmd_ot,
+        object_instance=cmd_oi,
+        value=pct,
+        who_is_timeout=who_t,
+        apdu_timeout=apdu_t,
+    )
+    if write_res.get("status") != "write_ok":
+        print(json.dumps({"status": "write_failed", "write": write_res}, indent=2, sort_keys=True))
+        return 2
+
+    if dwell > 0:
+        time.sleep(dwell)
+
+    readings: list[dict] = []
+
+    def _read_one(oid: str, ot: int, oi: int) -> dict:
+        r = bacnet_ad.read_present_value(
+            bind_port=bind_port,
+            target_address=target_addr,
+            expected_device_instance=expected_instance,
+            object_type=ot,
+            object_instance=oi,
+            property_name="presentValue",
+            who_is_timeout=who_t,
+            apdu_timeout=apdu_t,
+        )
+        vr = ""
+        if r.get("status") == "read_ok":
+            vr = str(r.get("value_str", ""))
+        return {
+            "logical_object_id": oid,
+            "status": str(r.get("status", "")),
+            "value_str": vr,
+        }
+
+    readings.append(_read_one(sat_oid, sat_ot, sat_oi))
+    if rat_ot is not None:
+        readings.append(_read_one(rat_oid, rat_ot, rat_oi))
+    for logical, ot, oi in extra_reads:
+        readings.append(_read_one(logical, ot, oi))
+
+    all_read_ok = all(r.get("status") == "read_ok" for r in readings)
+    report_ref = str(step.get("report_ref", "")).strip() or str(
+        getattr(args, "report_ref", "") or ""
+    ).strip()
+
+    entry = {
+        "ts": _utc_timestamp(),
+        "kind": "thermal_modulation_sweep",
+        "controller_label": args.controller_label,
+        "step_id": args.step_id,
+        "command_object_id": cmd_oid,
+        "command_percent": pct,
+        "dwell_seconds": dwell,
+        "readings": readings,
+        "write": {"status": write_res.get("status")},
+        "technician_name": str(args.technician_name).strip(),
+        "note": str(getattr(args, "note", "") or ""),
+    }
+    if report_ref:
+        entry["report_ref"] = report_ref
+
+    report_path = _append_commissioning_report_entry(run_dir, entry)
+    _append_event(
+        logs_path,
+        "bacnet_modulation_sweep_completed",
+        {
+            "controller_label": args.controller_label,
+            "step_id": args.step_id,
+            "all_read_ok": bool(all_read_ok),
+            "commissioning_report_json": str(report_path.resolve()),
+        },
+    )
+    print(
+        json.dumps(
+            {
+                "status": "sweep_ok" if all_read_ok else "sweep_partial_reads",
+                "commissioning_report_json": str(report_path.resolve()),
+                "readings": readings,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+    return 0 if all_read_ok else 2
 
 
 def cmd_append_commissioning_modulation_batch(args: argparse.Namespace) -> int:
@@ -2158,6 +2436,41 @@ def build_parser() -> argparse.ArgumentParser:
     mod_batch.add_argument("--bacnet-bind-port", type=int, default=0)
     mod_batch.add_argument("--apdu-timeout", type=float, default=None)
     mod_batch.set_defaults(handler=cmd_append_commissioning_modulation_batch)
+
+    mod_sweep = subparsers.add_parser(
+        "bacnet-modulation-sweep",
+        help=(
+            "Write command_object_id percent, dwell, read SAT/RAT/context from a flow step's "
+            "modulate_actuator_log_sat_for_report action; append thermal_modulation_sweep to report."
+        ),
+    )
+    mod_sweep.add_argument("--run-dir", required=True, type=Path)
+    mod_sweep.add_argument("--controller-label", required=True)
+    mod_sweep.add_argument("--step-id", required=True)
+    mod_sweep.add_argument(
+        "--command-percent",
+        type=float,
+        required=True,
+        help="Present-value to write to the step's command_object_id (e.g. 50 for 50%%).",
+    )
+    mod_sweep.add_argument(
+        "--dwell-seconds",
+        type=float,
+        default=0.2,
+        help="Sleep after write before reads (default 0.2).",
+    )
+    mod_sweep.add_argument("--technician-name", required=True)
+    mod_sweep.add_argument("--note", default="")
+    mod_sweep.add_argument(
+        "--report-ref",
+        default="",
+        help="Override report_ref when flow step has none.",
+    )
+    mod_sweep.add_argument("--timeout-seconds", type=float, default=0.5)
+    mod_sweep.add_argument("--retries", type=int, default=1)
+    mod_sweep.add_argument("--bacnet-bind-port", type=int, default=0)
+    mod_sweep.add_argument("--apdu-timeout", type=float, default=None)
+    mod_sweep.set_defaults(handler=cmd_bacnet_modulation_sweep)
 
     verify_sim = subparsers.add_parser(
         "verify-simulator", help="Run simulator verification for one scenario."

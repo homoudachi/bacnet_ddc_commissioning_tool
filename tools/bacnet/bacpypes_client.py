@@ -7,7 +7,7 @@ from typing import Any
 
 from bacpypes3.apdu import ErrorRejectAbortNack
 from bacpypes3.local.device import DeviceObject
-from bacpypes3.primitivedata import CharacterString, ObjectIdentifier, Unsigned
+from bacpypes3.primitivedata import CharacterString, ObjectIdentifier, Real, Unsigned
 from bacpypes3.pdu import IPv4Address
 
 from bacpypes3.ipv4.app import NormalApplication
@@ -31,6 +31,14 @@ def _object_type_tag(object_type: int) -> str:
     return name
 
 
+def _encode_present_value_write(object_type: int, object_instance: int, value: int | float):
+    """Pick BACnet primitive for present-value write (MSV uses Unsigned; analog types use Real)."""
+    # multiStateValue (19) state numbers are integral in our profiles
+    if object_type == 19:
+        return Unsigned(int(round(float(value))))
+    return Real(float(value))
+
+
 async def _write_present_value_async(
     *,
     bind_port: int,
@@ -38,7 +46,7 @@ async def _write_present_value_async(
     expected_device_instance: int,
     object_type: int,
     object_instance: int,
-    value: int,
+    value: int | float,
     who_is_timeout: float,
     apdu_timeout: float,
 ) -> dict[str, Any]:
@@ -66,9 +74,9 @@ async def _write_present_value_async(
         dest = IPv4Address(target_address)
         # ObjectIdentifier parsing expects "type,instance" (not a space separator).
         obj_tag = f"{_object_type_tag(object_type)},{object_instance}"
-        # MSV / AV / AO present-value uses Unsigned in standard profiles for these writes.
+        payload = _encode_present_value_write(object_type, object_instance, value)
         result = await asyncio.wait_for(
-            app.write_property(dest, obj_tag, "presentValue", Unsigned(value)),
+            app.write_property(dest, obj_tag, "presentValue", payload),
             timeout=apdu_timeout,
         )
         if isinstance(result, ErrorRejectAbortNack):
@@ -165,7 +173,7 @@ def write_present_value(
     expected_device_instance: int,
     object_type: int,
     object_instance: int,
-    value: int,
+    value: int | float,
     who_is_timeout: float = 3.0,
     apdu_timeout: float = 5.0,
 ) -> dict[str, Any]:

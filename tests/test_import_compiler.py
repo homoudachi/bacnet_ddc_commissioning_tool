@@ -222,6 +222,54 @@ class ImportCompilerTests(unittest.TestCase):
         self.assertTrue(flow[1]["run_point_checkout_on_pass"])
         self.assertEqual("test.after_pass", flow[1]["report_ref"])
 
+    def test_compile_preserves_commissioning_flow_actions(self) -> None:
+        controllers = FIXTURES / "controllers-compile-actions.csv"
+        output_json = FIXTURES / "runtime-job-actions.json"
+        report_json = FIXTURES / "runtime-job-actions-report.json"
+        _write_csv(
+            controllers,
+            [
+                {
+                    "controller_label": "FCU-A",
+                    "profile_id": "profile_actions",
+                    "bacnet_device_instance": "21001",
+                    "bacnet_ip": "192.168.1.50",
+                    "bacnet_port": "47808",
+                    "building_floor": "L01",
+                    "notes": "",
+                },
+            ],
+        )
+        _write_profile(
+            self.profiles_dir / "unit-profile-actions.json",
+            profile_id="profile_actions",
+            display_name="Actions",
+            read_allowlist=["ai_sat"],
+            commissioning_flow=[
+                {
+                    "step_id": "heat",
+                    "label": "Heat",
+                    "report_ref": "thermal.heating",
+                    "actions": [
+                        {
+                            "type": "modulate_actuator_log_sat_for_report",
+                            "command_object_id": "av_electric_heat_command",
+                            "result_supply_temperature_object_id": "ai_sat",
+                        }
+                    ],
+                }
+            ],
+        )
+        result = _run_compiler(controllers, self.profiles_dir, output_json, report_json)
+        self.assertEqual(0, result.returncode)
+        runtime = json.loads(output_json.read_text(encoding="utf-8"))
+        flow = runtime["controllers"][0]["commissioning_flow"]
+        self.assertEqual(1, len(flow[0].get("actions", [])))
+        self.assertEqual(
+            "modulate_actuator_log_sat_for_report",
+            flow[0]["actions"][0]["type"],
+        )
+
     def test_compile_fails_when_profile_is_missing(self) -> None:
         controllers = FIXTURES / "controllers-compile-missing-profile.csv"
         output_json = FIXTURES / "runtime-job-missing-profile.json"
