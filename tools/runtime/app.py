@@ -338,12 +338,14 @@ def cmd_print_job_graph(args: argparse.Namespace) -> int:
         obj_count = len(objs) if isinstance(objs, dict) else 0
         w_allow = row.get("commissioning_write_allowlist", [])
         r_allow = row.get("commissioning_read_allowlist", [])
+        checkout = row.get("point_checkout", [])
+        pc_count = len(checkout) if isinstance(checkout, list) else 0
         wn = len(w_allow) if isinstance(w_allow, list) else 0
         rn = len(r_allow) if isinstance(r_allow, list) else 0
         lines.append(
             f"  {label} profile_id={row.get('profile_id')} "
             f"steps={step_count} objects_by_id={obj_count} "
-            f"write_allowlist={wn} read_allowlist={rn}"
+            f"write_allowlist={wn} read_allowlist={rn} point_checkout={pc_count}"
         )
 
     text = "\n".join(lines) + "\n"

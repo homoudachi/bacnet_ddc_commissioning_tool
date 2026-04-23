@@ -2,9 +2,9 @@
 
 Audience: future you. Update when intent, behavior, or exports change.
 
-## Project maturity snapshot (2026-04-23)
+## Project maturity snapshot (2026-04-24)
 
-- Repository state: **documentation plus Python CLIs** (`tools/`: simulator list verification, import compiler with **duplicate BACnet/IP endpoint warnings**, runtime commissioning helpers including **validate-import** dry compile, **print-job-graph**, **flow/session inspection**, **run summary export** + optional **CSV**, **audited flow re-init**, **profile allowlisted BACnet read/write** and **`point_checkout`** batch reads via **BACpypes3**, and **record-step** policy for failed/pending outcomes). **Unit tests** include a **loopback BACnet fake peer** (BACpypes3-shaped frames) exercising **`bacnet-read`**, **`dry-run-bacnet-write --execute`**, and **`bacnet-point-checkout`** without field hardware.
+- Repository state: **documentation plus Python CLIs** (`tools/`: simulator list verification, import compiler with **duplicate BACnet/IP endpoint warnings**, runtime commissioning helpers including **validate-import** dry compile, **print-job-graph**, **flow/session inspection**, **run summary export** + optional **CSV**, **audited flow re-init**, **BACnet façade** [`tools/bacnet/adapter.py`](../tools/bacnet/adapter.py), **profile allowlisted BACnet read/write**, **`point_checkout`** batch reads, CLI flags **`--apdu-timeout`** / echoed **`bacnet_timeouts`** in artifacts, and **record-step** policy for failed/pending outcomes). **Unit tests** include a **loopback BACnet fake peer** (BACpypes3-shaped frames) exercising **`bacnet-read`**, **`dry-run-bacnet-write --execute`**, and **`bacnet-point-checkout`** without field hardware.
 - This document is the source of truth for product intent; align runnable steps with [`README.md`](../README.md).
 - Active implementation roadmap lives in: [`docs/plans/2026-04-21-v1-foundation-plan.md`](plans/2026-04-21-v1-foundation-plan.md).
 
@@ -232,11 +232,11 @@ Runtime commands (init-run through export-run-summary, record-step, simulator/BI
 These are the main gaps once requirements feel “complete enough” to start coding:
 
 - **Spreadsheet column spec** — frozen header row for **120+ controllers**, which columns are **required vs optional** per `profile_id`, and how **object overrides** (if any) serialize from sheet cells.
-- **Sheet → runtime compiler** — validation rules, error messages, and optional **generated JSON** for debugging.
+- **Sheet → runtime compiler** — **shipped baseline** in `tools/import/compile_job.py` + `compile-import` / `validate-import`; optional **generated JSON** debugging workflow and **large-sheet** performance targets still to lock.
 - **HRV effectiveness equation** — lock **sensor placement** vs math for each program version; until then keep **advisory** only.
 - **RAT proxy rules** — if using **HRV return** for **FCU** commissioning, document **eligibility** and UI warnings.
 - **Report layout** — PDF section order, logo/branding, one table vs multiple charts; **CSV vs XLSX** column order frozen for integrators.
-- **Structured log** — schema (JSON lines?), rotation, path on disk for portable exe.
+- **Structured log** — **v1 slice:** append-only **JSON Lines** at `logs/events.jsonl` per run-dir; **rotation / retention / portable exe paths** still to define.
 - **Docker BACnet sim** — which simulator images/libraries, how many virtual devices, scripted scenarios for CI.
 - **BACnet stack** — Windows portable build packaging; **read/write batching**, **COV/subscribe**, and **sweep-timeouts** beyond the current [`CommissioningBACnetAdapter`](../tools/bacnet/adapter.py) façade.
 - **Build and signing** — still **TBD** (toolchain, certificate, release channel).

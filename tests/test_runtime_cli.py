@@ -326,6 +326,8 @@ class RuntimeCliTests(unittest.TestCase):
         self.assertIn("job-print-graph", result.stdout)
         self.assertIn("FCU-01A", result.stdout)
         self.assertIn("read_allowlist=", result.stdout)
+        self.assertIn("point_checkout=", result.stdout)
+        self.assertRegex(result.stdout, r"FCU-01A.*point_checkout=2")
 
         lines = (
             self.run_dir / "logs" / "events.jsonl"

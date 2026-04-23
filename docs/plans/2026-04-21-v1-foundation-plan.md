@@ -11,9 +11,9 @@ Move this repository from "requirements and examples only" to a working baseline
 
 ## Current status
 
-- **2026-04-23:** Runnable Python CLIs, unit tests, and GitHub Actions exist; see `README.md` and `docs/project.md`. The checklist below is still useful for remaining v1 gaps (stack ADRs, portable packaging, full flow engine).
+- **2026-04-24:** Runnable **Python 3** CLIs (`tools/`), growing **unittest** suite (run `python3 -m unittest discover -s tests -p 'test_*.py'`), GitHub Actions, **BACnet façade** ([`tools/bacnet/adapter.py`](../bacnet/adapter.py)), **loopback BACnet integration tests**, **export-run-summary** CSV, **validate-import** / **print-job-graph**, flow/session + **record-step** policy. Remaining v1 gaps: **portable Windows packaging**, **Docker BACnet sim lab**, **full commissioning flow engine** (guided steps beyond reads), **unified heat/cool report model** + PDF/XLSX. See `README.md` and `docs/project.md`.
 - Product intent is tracked in `docs/project.md`.
-- This plan remains the high-level execution sequence; treat unchecked items as backlog unless superseded by newer ADRs.
+- This plan remains the high-level execution sequence; treat unchecked items as backlog unless superseded by newer ADRs. **Checklist:** `[x]` = shipped enough for baseline; notes in-line mark partials.
 
 ## Recommended sequencing (authoritative)
 
@@ -21,11 +21,11 @@ Use this order to reduce rework and unblock parallel work later.
 
 ### Phase 0 — lock critical decisions first
 
-- [ ] Create ADR: implementation stack and packaging target (recommended default: Go + Fyne + Windows portable exe workflow).
-- [ ] Create ADR: internal job model and file format (`.json` generated from spreadsheet + profile library).
-- [ ] Create ADR: reporting stack (PDF + CSV/XLSX library choices and schema).
-- [ ] Freeze "required columns" for `site-controllers` spreadsheet v1.
-- [ ] Freeze v1 pass/fail default fields that must appear in every profile.
+- [ ] Create ADR: implementation stack and packaging target (**current code:** Python 3 CLI baseline; **portable exe / Go+Fyne** still TBD — see `docs/project.md` → *Remaining to plan*).
+- [x] Create ADR: internal job model and file format — **partial:** runtime **`state/runtime-job.json`** + import report contract documented via compiler + examples; formal ADR for long-lived schema versioning still optional.
+- [ ] Create ADR: reporting stack (PDF + CSV/XLSX library choices and schema) — **partial:** CSV export slice exists (`export-run-summary --output-csv`).
+- [ ] Freeze "required columns" for `site-controllers` spreadsheet v1 (template + compiler enforce core columns; **120+ row** column spec still open).
+- [ ] Freeze v1 pass/fail default fields that must appear in every profile (recommended defaults live in `docs/examples/` markdown; **profile contract freeze** open).
 
 **Deliverables**
 
@@ -35,10 +35,10 @@ Use this order to reduce rework and unblock parallel work later.
 
 ### Phase 1 — bootstrap runtime and quality gates
 
-- [ ] Create app skeleton (CLI + package structure + config loading + structured logging).
-- [ ] Add test harness and CI checks (format, lint, unit test, fixture validation).
-- [ ] Add golden fixtures from `docs/examples/*.json` and `docs/examples/site-controllers.template.csv`.
-- [ ] Add a no-network "dry run" command that validates import and prints unit/test graph.
+- [x] Create app skeleton (CLI + package structure + config loading + structured logging) — `tools/runtime/app.py`, `config/`, `logs/events.jsonl`.
+- [x] Add test harness and CI checks — **unittest** in CI (`.github/workflows/simulator-verification.yml`); dedicated **format/lint** matrix still optional.
+- [x] Add golden fixtures from `docs/examples/*.json` and `docs/examples/site-controllers.template.csv`.
+- [x] Add a no-network "dry run" command that validates import and prints unit/test graph — **`validate-import`**, **`print-job-graph`**.
 
 **Deliverables**
 
@@ -48,10 +48,10 @@ Use this order to reduce rework and unblock parallel work later.
 
 ### Phase 2 — import compiler and validation UX
 
-- [ ] Implement spreadsheet parser and validator for `~120 controllers` scale.
-- [ ] Enforce uniqueness/consistency checks (IP/device ID/profile references/object overrides).
-- [ ] Produce normalized internal job model and human-readable validation errors.
-- [ ] Add import report output (warning/error summary for commissioning leads).
+- [x] Implement spreadsheet parser and validator — **in repo** (`tools/import/compile_job.py`); **120+ row** performance / stress harness not yet dedicated.
+- [x] Enforce uniqueness/consistency checks — device instance, ports, profiles, **duplicate BACnet IP:port** warnings, etc.; expand as new columns ship.
+- [x] Produce normalized internal job model and human-readable validation errors — `runtime-job.json` + `import-report.json`.
+- [x] Add import report output (warning/error summary for commissioning leads).
 
 **Deliverables**
 
@@ -63,18 +63,18 @@ Use this order to reduce rework and unblock parallel work later.
 
 - [x] Implement BACnet abstraction layer (read/write/subscribe/timeouts/retry policy) — **v1 slice:** stable façade [`tools/bacnet/adapter.py`](../bacnet/adapter.py) (`CommissioningBACnetAdapter`) used by the runtime CLI for probe + present-value read/write; **subscribe** and richer retry policy remain future work.
 - [x] Add simulator-backed integration tests for core read/write and mode transitions (loopback fake BACnet peer in `tests/test_runtime_cli.py` exercises `bacnet-read`, `dry-run-bacnet-write --execute`, and `bacnet-point-checkout` against BACpypes3-shaped frames).
-- [ ] Add commissioning safety constraints (write allowlist, per-mode restrictions, abort rules).
+- [x] Add commissioning safety constraints (write allowlist, per-mode restrictions, abort rules) — **v1:** profile **`commissioning_write_allowlist`** / **`commissioning_read_allowlist`** + **`writable`** in job model; **per-mode / sweep abort rules** not encoded in CLI yet.
 - [x] Document network assumptions and expected failure handling behavior (see [`docs/project.md`](../project.md#bacnet-runtime-assumptions-python-cli)).
 
 **Deliverables**
 
-- Stable adapter interface usable by commissioning flow engine
-- CI integration suite using simulator containers or mock devices
-- First operator-visible diagnostic logs for comms failures
+- Stable adapter interface usable by commissioning flow engine — **yes** (`CommissioningBACnetAdapter`).
+- CI integration suite using simulator containers or mock devices — **partial:** list verifier + **loopback BACnet fake** in unittest; **Docker BACnet sim** still planned (`docs/simulator/`).
+- First operator-visible diagnostic logs for comms failures — **partial:** JSON artifacts + `events.jsonl`; richer comms diagnostics TBD.
 
 ### Phase 4 — commissioning flow engine (v1 slices)
 
-- [ ] Implement point checkout flow.
+- [x] Implement point checkout flow — **v1:** **`bacnet-point-checkout`** reads profile `point_checkout[]` with allowlist enforcement; **guided UI / step linkage** to commissioning_flow still future.
 - [ ] Implement airflow adjustment + technician confirmation checkpoints.
 - [ ] Implement cooling valve stroke test (no CHW) with mandatory human confirmation records.
 - [ ] Implement heating/cooling modulation test scaffolds with skippable/manual-pass controls.
@@ -88,7 +88,8 @@ Use this order to reduce rework and unblock parallel work later.
 ### Phase 5 — reporting and Windows distribution
 
 - [ ] Implement report model for unified heating/cooling output tables (SAT + RAT + command + time/step).
-- [ ] Export CSV first, then PDF/XLSX from same normalized dataset.
+- [x] Export CSV first — **partial:** **`export-run-summary --output-csv`** (controller × flow status rollup); **not** yet the unified modulation table contract.
+- [ ] Then PDF/XLSX from same normalized dataset.
 - [ ] Package portable Windows executable and document signing/release process.
 - [ ] Add release checklist and smoke-test matrix.
 
