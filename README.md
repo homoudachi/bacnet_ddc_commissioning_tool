@@ -64,4 +64,18 @@ python3 tools/runtime/app.py probe-bip \
   --controller-label FCU-01A \
   --timeout-seconds 0.5 \
   --retries 1
+
+# 7) Probe full BACnet/IP controller list (strict: all must be reachable)
+python3 tools/runtime/app.py verify-bip-list \
+  --run-dir artifacts/runtime-run \
+  --strict \
+  --timeout-seconds 0.5 \
+  --retries 1
+
+# 8) Probe full list in non-strict mode with known-unavailable overrides
+python3 tools/runtime/app.py verify-bip-list \
+  --run-dir artifacts/runtime-run \
+  --timeout-seconds 0.5 \
+  --retries 1 \
+  --known-unavailable-file artifacts/runtime-run/config/bip-known-unavailable.json
 ```

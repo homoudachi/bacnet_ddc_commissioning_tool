@@ -333,6 +333,96 @@ def cmd_probe_bip(args: argparse.Namespace) -> int:
     return 0 if result.get("status") == "reachable_verified" else 2
 
 
+def cmd_verify_bip_list(args: argparse.Namespace) -> int:
+    run_dir = args.run_dir
+    logs_path = run_dir / "logs" / "events.jsonl"
+    runtime_job = json.loads((run_dir / "state" / "runtime-job.json").read_text(encoding="utf-8"))
+
+    bip_artifacts_dir = run_dir / "artifacts" / "bip"
+    bip_artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    status_counts: dict[str, int] = {}
+    rows: list[dict] = []
+    total = 0
+    unresolved = 0
+    strict_pass = True
+
+    allow_labels = {label.strip() for label in args.allow_known_unavailable}
+    if args.known_unavailable_file:
+        data = json.loads(args.known_unavailable_file.read_text(encoding="utf-8"))
+        if bool(data.get("allow_known_unavailable", False)):
+            for label in data.get("controller_labels", []):
+                text = str(label).strip()
+                if text:
+                    allow_labels.add(text)
+
+    for controller in runtime_job.get("controllers", []):
+        total += 1
+        controller_label = str(controller.get("controller_label", "")).strip()
+        bacnet = controller.get("bacnet", {})
+        host = str(bacnet.get("host", "")).strip()
+        port = int(bacnet.get("port", 0))
+        expected_instance = int(bacnet.get("device_instance", 0))
+
+        probe = _probe_bip(
+            host=host,
+            port=port,
+            expected_device_instance=expected_instance,
+            timeout_seconds=args.timeout_seconds,
+            retries=args.retries,
+        )
+        probe["controller_label"] = controller_label
+        if controller_label in allow_labels and probe.get("status") == "unreachable_timeout":
+            probe["status"] = "known_unavailable"
+            probe["allow_known_unavailable"] = True
+
+        status = str(probe.get("status"))
+        status_counts[status] = status_counts.get(status, 0) + 1
+        if status != "reachable_verified":
+            unresolved += 1
+
+        if args.strict:
+            if status != "reachable_verified":
+                strict_pass = False
+        else:
+            if status == "known_unavailable":
+                if not bool(probe.get("allow_known_unavailable") is True):
+                    strict_pass = False
+            elif status != "reachable_verified":
+                strict_pass = False
+
+        artifact_file = bip_artifacts_dir / f"{controller_label}.json"
+        artifact_file.write_text(json.dumps(probe, sort_keys=True), encoding="utf-8")
+        rows.append(probe)
+
+    summary = {
+        "total": total,
+        "found": total - unresolved,
+        "unresolved": unresolved,
+        "strict_mode": bool(args.strict),
+        "strict_pass": bool(strict_pass),
+        "status_counts": status_counts,
+        "rows": rows,
+    }
+
+    summary_path = bip_artifacts_dir / "list-summary.json"
+    summary_path.write_text(json.dumps(summary, sort_keys=True), encoding="utf-8")
+
+    _append_event(
+        logs_path,
+        "bip_list_verified",
+        {
+            "total": total,
+            "unresolved": unresolved,
+            "strict_mode": bool(args.strict),
+            "strict_pass": bool(strict_pass),
+            "summary_json": str(summary_path.resolve()),
+        },
+    )
+    print(json.dumps(summary, sort_keys=True))
+    return 0 if strict_pass else 2
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Runtime skeleton CLI for commissioning app flows."
@@ -374,6 +464,30 @@ def build_parser() -> argparse.ArgumentParser:
     probe_bip.add_argument("--timeout-seconds", type=float, default=0.5)
     probe_bip.add_argument("--retries", type=int, default=1)
     probe_bip.set_defaults(handler=cmd_probe_bip)
+
+    verify_bip_list = subparsers.add_parser(
+        "verify-bip-list", help="Probe all controllers in runtime job via BACnet/IP."
+    )
+    verify_bip_list.add_argument("--run-dir", required=True, type=Path)
+    verify_bip_list.add_argument(
+        "--strict",
+        action="store_true",
+        help="Require every controller to be reachable_verified.",
+    )
+    verify_bip_list.add_argument("--timeout-seconds", type=float, default=0.5)
+    verify_bip_list.add_argument("--retries", type=int, default=1)
+    verify_bip_list.add_argument(
+        "--allow-known-unavailable",
+        action="append",
+        default=[],
+        help="Controller labels allowed to classify as known_unavailable in non-strict mode.",
+    )
+    verify_bip_list.add_argument(
+        "--known-unavailable-file",
+        type=Path,
+        help="Optional JSON file with {controller_labels:[], allow_known_unavailable:true}.",
+    )
+    verify_bip_list.set_defaults(handler=cmd_verify_bip_list)
 
     init_flow = subparsers.add_parser(
         "init-flow", help="Initialize commissioning flow state for one controller."

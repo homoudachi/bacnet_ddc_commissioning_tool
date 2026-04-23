@@ -170,6 +170,100 @@ class RuntimeCliTests(unittest.TestCase):
         events = [json.loads(line)["event"] for line in lines]
         self.assertIn("bip_probed", events)
 
+    def test_verify_bip_list_writes_summary_artifact_and_logs_event(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-bip-list",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+
+        result = _run_runtime(
+            "verify-bip-list",
+            "--run-dir",
+            str(self.run_dir),
+            "--timeout-seconds",
+            "0.1",
+            "--retries",
+            "1",
+            "--strict",
+        )
+
+        self.assertEqual(2, result.returncode)
+        summary_path = self.run_dir / "artifacts" / "bip" / "list-summary.json"
+        self.assertTrue(summary_path.exists())
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        self.assertEqual(3, summary["total"])
+        self.assertIn("status_counts", summary)
+        self.assertFalse(summary["strict_pass"])
+
+        lines = (
+            self.run_dir / "logs" / "events.jsonl"
+        ).read_text(encoding="utf-8").strip().splitlines()
+        events = [json.loads(line)["event"] for line in lines]
+        self.assertIn("bip_list_verified", events)
+
+    def test_verify_bip_list_non_strict_allows_known_unavailable(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-bip-list-nonstrict",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+
+        overrides_path = self.run_dir / "config" / "bip-known-unavailable.json"
+        overrides_path.write_text(
+            json.dumps(
+                {
+                    "controller_labels": ["FCU-01A", "FCU-01B", "HRV-01"],
+                    "allow_known_unavailable": True,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        result = _run_runtime(
+            "verify-bip-list",
+            "--run-dir",
+            str(self.run_dir),
+            "--timeout-seconds",
+            "0.1",
+            "--retries",
+            "1",
+            "--known-unavailable-file",
+            str(overrides_path),
+        )
+
+        self.assertEqual(0, result.returncode)
+        summary = json.loads(
+            (self.run_dir / "artifacts" / "bip" / "list-summary.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertTrue(summary["strict_pass"])
+        self.assertEqual(3, summary["status_counts"].get("known_unavailable", 0))
+
     def test_init_flow_creates_controller_flow_state(self) -> None:
         init_result = _run_runtime(
             "init-run",
