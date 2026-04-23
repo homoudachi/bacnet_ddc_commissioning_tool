@@ -126,3 +126,99 @@ class RuntimeCliTests(unittest.TestCase):
         ).read_text(encoding="utf-8").strip().splitlines()
         events = [json.loads(line)["event"] for line in lines]
         self.assertIn("simulator_verified", events)
+
+    def test_init_flow_creates_controller_flow_state(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-flow-init",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+
+        result = _run_runtime(
+            "init-flow",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+        )
+
+        self.assertEqual(0, result.returncode)
+        flow_state_path = self.run_dir / "state" / "flows" / "FCU-01A.json"
+        self.assertTrue(flow_state_path.exists())
+        flow_state = json.loads(flow_state_path.read_text(encoding="utf-8"))
+        self.assertEqual("FCU-01A", flow_state["controller_label"])
+        self.assertGreater(len(flow_state["steps"]), 0)
+        self.assertEqual("pending", flow_state["steps"][0]["status"])
+
+    def test_record_step_updates_status_and_captures_technician_signoff(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-flow-record",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+        init_flow_result = _run_runtime(
+            "init-flow",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+        )
+        self.assertEqual(0, init_flow_result.returncode)
+
+        result = _run_runtime(
+            "record-step",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+            "--step-id",
+            "half_design_airflow_auto",
+            "--status",
+            "passed",
+            "--technician-name",
+            "Alex Tech",
+            "--note",
+            "Reached target airflow in tolerance",
+        )
+
+        self.assertEqual(0, result.returncode)
+        flow_state = json.loads(
+            (self.run_dir / "state" / "flows" / "FCU-01A.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        step = [s for s in flow_state["steps"] if s["step_id"] == "half_design_airflow_auto"][
+            0
+        ]
+        self.assertEqual("passed", step["status"])
+        self.assertEqual("Alex Tech", step["technician_name"])
+        self.assertIn("Reached target airflow", step["note"])
+
+        lines = (
+            self.run_dir / "logs" / "events.jsonl"
+        ).read_text(encoding="utf-8").strip().splitlines()
+        events = [json.loads(line)["event"] for line in lines]
+        self.assertIn("flow_initialized", events)
+        self.assertIn("flow_step_recorded", events)

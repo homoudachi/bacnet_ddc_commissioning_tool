@@ -234,6 +234,7 @@ def compile_model(
                         "display_name": str(profile.get("display_name", "")).strip(),
                         "schema_version": str(profile.get("schema_version", "")).strip(),
                     },
+                    "commissioning_flow": _extract_commissioning_steps(profile),
                     "bacnet": {
                         "device_instance": device_instance,
                         "host": host,
@@ -278,6 +279,29 @@ def build_outputs(
         "warnings": warnings,
     }
     return runtime_model, report, (0 if compile_ok else 2)
+
+
+def _extract_commissioning_steps(profile: dict[str, Any]) -> list[dict[str, Any]]:
+    steps: list[dict[str, Any]] = []
+    raw_flow = profile.get("commissioning_flow")
+    if not isinstance(raw_flow, list):
+        return steps
+
+    for item in raw_flow:
+        if not isinstance(item, dict):
+            continue
+        step_id = str(item.get("step_id", "")).strip()
+        label = str(item.get("label", "")).strip()
+        if not step_id:
+            continue
+        steps.append(
+            {
+                "step_id": step_id,
+                "label": label,
+                "skippable": bool(item.get("skippable", False)),
+            }
+        )
+    return steps
 
 
 def main() -> int:

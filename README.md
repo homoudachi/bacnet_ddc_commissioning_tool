@@ -37,7 +37,21 @@ python3 tools/runtime/app.py init-run \
 # 2) Compile import into runtime state
 python3 tools/runtime/app.py compile-import --run-dir artifacts/runtime-run
 
-# 3) Verify one simulator scenario
+# 3) Initialize commissioning flow state for one controller
+python3 tools/runtime/app.py init-flow \
+  --run-dir artifacts/runtime-run \
+  --controller-label FCU-01A
+
+# 4) Record technician signoff for a step
+python3 tools/runtime/app.py record-step \
+  --run-dir artifacts/runtime-run \
+  --controller-label FCU-01A \
+  --step-id half_design_airflow_auto \
+  --status passed \
+  --technician-name "Alex Tech" \
+  --note "Reached target airflow in tolerance"
+
+# 5) Verify one simulator scenario
 python3 tools/runtime/app.py verify-simulator \
   --run-dir artifacts/runtime-run \
   --profile ci \
