@@ -29,9 +29,30 @@ def _build_i_am_packet(device_instance: int) -> bytes:
     return bvlc + payload
 
 
+def _bvlc_original_unicast(npdu_and_apdu: bytes) -> bytes:
+    total = 4 + len(npdu_and_apdu)
+    return b"\x81\x0a" + total.to_bytes(2, "big") + npdu_and_apdu
+
+
 class _FakeBipUdpServer:
-    def __init__(self, device_instance: int) -> None:
+    """Minimal BACnet/IP UDP peer for loopback tests.
+
+    Responds to Who-Is with a standards-shaped I-Am (via bacpypes3 when available),
+    ReadProperty (presentValue) with encoded Complex ACKs, and WriteProperty with
+    Simple ACK. Falls back to a fixed I-Am-only pattern when bacpypes3 is missing.
+    """
+
+    def __init__(
+        self,
+        device_instance: int,
+        *,
+        analog_input_present: float = 21.5,
+        msv_present: int = 1,
+    ) -> None:
         self.device_instance = device_instance
+        self._ai_present = float(analog_input_present)
+        self._msv_present = int(msv_present)
+        self._lock = threading.Lock()
         self._stop = threading.Event()
         self._ready = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -46,6 +67,101 @@ class _FakeBipUdpServer:
         self._stop.set()
         self._thread.join(timeout=2)
 
+    def _iam_only(self, sock: socket.socket, addr: tuple[str, int]) -> None:
+        sock.sendto(_build_i_am_packet(self.device_instance), addr)
+
+    def _handle_bacpypes(self, sock: socket.socket, addr: tuple[str, int], apdu_bytes: bytes) -> None:
+        from bacpypes3.apdu import (
+            APDU,
+            ConfirmedRequestPDU,
+            ConfirmedServiceChoice,
+            IAmRequest,
+            ReadPropertyACK,
+            ReadPropertyRequest,
+            SimpleAckPDU,
+            UnconfirmedRequestPDU,
+            UnconfirmedServiceChoice,
+            WritePropertyRequest,
+        )
+        from bacpypes3.basetypes import PropertyIdentifier, Segmentation
+        from bacpypes3.constructeddata import Any
+        from bacpypes3.primitivedata import ObjectIdentifier, Real, Unsigned
+        from bacpypes3.pdu import IPv4Address, PDU
+
+        src = IPv4Address(f"{addr[0]}:{addr[1]}")
+        inc = APDU.decode(PDU(apdu_bytes))
+        inc.pduSource = src
+
+        if isinstance(inc, UnconfirmedRequestPDU):
+            if int(inc.apduService) == int(UnconfirmedServiceChoice.whoIs):
+                iam = IAmRequest(
+                    iAmDeviceIdentifier=ObjectIdentifier(("device", self.device_instance)),
+                    maxAPDULengthAccepted=Unsigned(1476),
+                    segmentationSupported=Segmentation("noSegmentation"),
+                    vendorID=Unsigned(0),
+                    destination=src,
+                )
+                apdu_wire = iam.encode().encode().pduData
+                sock.sendto(_bvlc_original_unicast(b"\x01\x00" + apdu_wire), addr)
+            return
+
+        if not isinstance(inc, ConfirmedRequestPDU):
+            return
+
+        svc = int(inc.apduService)
+        if svc == int(ConfirmedServiceChoice.readProperty):
+            req = ReadPropertyRequest.decode(inc)
+            if str(req.propertyIdentifier) != "present-value":
+                return
+            ot = int(req.objectIdentifier[0])
+            oi = int(req.objectIdentifier[1])
+            with self._lock:
+                ai_val = self._ai_present
+                msv_val = self._msv_present
+            if ot == 0 and oi == 2:
+                payload = Any(Real(ai_val))
+            elif ot == 19 and oi == 50:
+                payload = Any(Unsigned(msv_val))
+            else:
+                return
+            ack = ReadPropertyACK(
+                objectIdentifier=req.objectIdentifier,
+                propertyIdentifier=req.propertyIdentifier,
+                propertyValue=payload,
+            )
+            inner = ack.encode()
+            inner.apduInvokeID = inc.apduInvokeID
+            inner.apduSeg = 0
+            inner.apduMor = 0
+            inner.set_context(inc)
+            wire = inner.encode().pduData
+            sock.sendto(_bvlc_original_unicast(b"\x01\x00" + wire), addr)
+            return
+
+        if svc == int(ConfirmedServiceChoice.writeProperty):
+            wreq = WritePropertyRequest.decode(inc)
+            if str(wreq.propertyIdentifier) != "present-value":
+                return
+            if int(wreq.objectIdentifier[0]) != 19 or int(wreq.objectIdentifier[1]) != 50:
+                return
+            new_val = int(wreq.propertyValue.cast_out(Unsigned))
+            with self._lock:
+                self._msv_present = new_val
+            sack = SimpleAckPDU(service_choice=ConfirmedServiceChoice.writeProperty, context=inc)
+            wire = sack.encode().pduData
+            sock.sendto(_bvlc_original_unicast(b"\x01\x00" + wire), addr)
+
+    def _extract_apdu(self, data: bytes) -> bytes | None:
+        if len(data) < 4 or data[0] != 0x81 or data[1] not in (0x0A, 0x0B):
+            return None
+        length = int.from_bytes(data[2:4], "big")
+        if length > len(data) or length < 4 + 2:
+            return None
+        inner = data[4:length]
+        if len(inner) < 2:
+            return None
+        return inner[2:]
+
     def _run(self) -> None:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
@@ -55,10 +171,19 @@ class _FakeBipUdpServer:
             self._ready.set()
             while not self._stop.is_set():
                 try:
-                    _data, addr = sock.recvfrom(2048)
+                    data, addr = sock.recvfrom(2048)
                 except socket.timeout:
                     continue
-                sock.sendto(_build_i_am_packet(self.device_instance), addr)
+                apdu_bytes = self._extract_apdu(data)
+                if apdu_bytes is None:
+                    continue
+                try:
+                    self._handle_bacpypes(sock, addr, apdu_bytes)
+                except ModuleNotFoundError:
+                    self._iam_only(sock, addr)
+                except Exception:
+                    if apdu_bytes and apdu_bytes[0] == 0x10:
+                        self._iam_only(sock, addr)
         finally:
             sock.close()
 
@@ -325,6 +450,172 @@ class RuntimeCliTests(unittest.TestCase):
         )
         self.assertEqual(2, result.returncode)
         self.assertIn("commissioning_read_allowlist", result.stdout)
+
+    def test_bacnet_read_ok_with_fake_bacnet_server(self) -> None:
+        server = _FakeBipUdpServer(device_instance=21001, analog_input_present=21.5)
+        server.start()
+        try:
+            time.sleep(0.05)
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            csv_path = self.run_dir / "controllers-local.csv"
+            with csv_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=[
+                        "controller_label",
+                        "profile_id",
+                        "bacnet_device_instance",
+                        "bacnet_ip",
+                        "bacnet_port",
+                        "building_floor",
+                        "notes",
+                    ],
+                )
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "controller_label": "FCU-LOCAL",
+                        "profile_id": "fcu_2pipe_chw_electric_heat_v1",
+                        "bacnet_device_instance": "21001",
+                        "bacnet_ip": "127.0.0.1",
+                        "bacnet_port": str(server.port),
+                        "building_floor": "L01",
+                        "notes": "test",
+                    }
+                )
+
+            init_result = _run_runtime(
+                "init-run",
+                "--run-dir",
+                str(self.run_dir),
+                "--job-id",
+                "job-bacnet-read-fake",
+                "--controllers-csv",
+                str(csv_path),
+                "--profiles-dir",
+                str(ROOT / "docs" / "examples"),
+                "--scenarios-dir",
+                str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+            )
+            self.assertEqual(0, init_result.returncode)
+            compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+            self.assertEqual(0, compile_result.returncode)
+
+            result = _run_runtime(
+                "bacnet-read",
+                "--run-dir",
+                str(self.run_dir),
+                "--controller-label",
+                "FCU-LOCAL",
+                "--object-id",
+                "ai_sat",
+                "--timeout-seconds",
+                "0.5",
+                "--retries",
+                "1",
+            )
+        finally:
+            server.stop()
+
+        self.assertEqual(0, result.returncode)
+        payload = json.loads(result.stdout)
+        self.assertEqual("read_ok", payload["status"])
+        self.assertIn("21.5", payload.get("read", {}).get("value_str", ""))
+
+    def test_dry_run_bacnet_write_execute_ok_with_fake_bacnet_server(self) -> None:
+        server = _FakeBipUdpServer(device_instance=21001, msv_present=1)
+        server.start()
+        try:
+            time.sleep(0.05)
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            csv_path = self.run_dir / "controllers-local.csv"
+            with csv_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=[
+                        "controller_label",
+                        "profile_id",
+                        "bacnet_device_instance",
+                        "bacnet_ip",
+                        "bacnet_port",
+                        "building_floor",
+                        "notes",
+                    ],
+                )
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "controller_label": "FCU-LOCAL",
+                        "profile_id": "fcu_2pipe_chw_electric_heat_v1",
+                        "bacnet_device_instance": "21001",
+                        "bacnet_ip": "127.0.0.1",
+                        "bacnet_port": str(server.port),
+                        "building_floor": "L01",
+                        "notes": "test",
+                    }
+                )
+
+            init_result = _run_runtime(
+                "init-run",
+                "--run-dir",
+                str(self.run_dir),
+                "--job-id",
+                "job-bacnet-write-exec",
+                "--controllers-csv",
+                str(csv_path),
+                "--profiles-dir",
+                str(ROOT / "docs" / "examples"),
+                "--scenarios-dir",
+                str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+            )
+            self.assertEqual(0, init_result.returncode)
+            compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+            self.assertEqual(0, compile_result.returncode)
+
+            write_result = _run_runtime(
+                "dry-run-bacnet-write",
+                "--run-dir",
+                str(self.run_dir),
+                "--controller-label",
+                "FCU-LOCAL",
+                "--object-id",
+                "msv_test_mode",
+                "--value",
+                "3",
+                "--technician-name",
+                "Alex Tech",
+                "--note",
+                "Execute against fake device",
+                "--execute",
+                "--timeout-seconds",
+                "0.5",
+                "--retries",
+                "1",
+            )
+            self.assertEqual(0, write_result.returncode)
+            write_payload = json.loads(write_result.stdout)
+            self.assertEqual("write_ok", write_payload["status"])
+
+            read_result = _run_runtime(
+                "bacnet-read",
+                "--run-dir",
+                str(self.run_dir),
+                "--controller-label",
+                "FCU-LOCAL",
+                "--object-id",
+                "msv_test_mode",
+                "--timeout-seconds",
+                "0.5",
+                "--retries",
+                "1",
+            )
+        finally:
+            server.stop()
+
+        self.assertEqual(0, read_result.returncode)
+        read_payload = json.loads(read_result.stdout)
+        self.assertEqual("read_ok", read_payload["status"])
+        self.assertIn("3", read_payload.get("read", {}).get("value_str", ""))
 
     def test_export_run_summary_requires_runtime_job(self) -> None:
         init_result = _run_runtime(
