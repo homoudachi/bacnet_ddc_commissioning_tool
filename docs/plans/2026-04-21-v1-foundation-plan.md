@@ -11,9 +11,9 @@ Move this repository from "requirements and examples only" to a working baseline
 
 ## Current status
 
-- This repo currently contains docs and examples only (no runtime, no CI pipeline).
+- **2026-04-23:** Runnable Python CLIs, unit tests, and GitHub Actions exist; see `README.md` and `docs/project.md`. The checklist below is still useful for remaining v1 gaps (stack ADRs, portable packaging, full flow engine).
 - Product intent is tracked in `docs/project.md`.
-- This plan is the active execution sequence for first implementation.
+- This plan remains the high-level execution sequence; treat unchecked items as backlog unless superseded by newer ADRs.
 
 ## Recommended sequencing (authoritative)
 

@@ -42,7 +42,25 @@ python3 tools/runtime/app.py init-flow \
   --run-dir artifacts/runtime-run \
   --controller-label FCU-01A
 
-# 3b) Re-initialize after a mistake (backs up prior state to state/flow_backups/, logs flow_reinitialized)
+# 3a) Inspect flow state (JSON on stdout); logs flows_listed / flow_viewed
+python3 tools/runtime/app.py list-flows --run-dir artifacts/runtime-run
+python3 tools/runtime/app.py show-flow \
+  --run-dir artifacts/runtime-run \
+  --controller-label FCU-01A
+
+# 3b) Operator-entered session values (requires init-flow); state/sessions/<label>.json
+python3 tools/runtime/app.py set-session-value \
+  --run-dir artifacts/runtime-run \
+  --controller-label FCU-01A \
+  --key rat_degC \
+  --value "22.5" \
+  --technician-name "Alex Tech" \
+  --note "Manual RAT"
+python3 tools/runtime/app.py show-session \
+  --run-dir artifacts/runtime-run \
+  --controller-label FCU-01A
+
+# 3c) Re-initialize after a mistake (backs up prior state to state/flow_backups/, logs flow_reinitialized)
 python3 tools/runtime/app.py init-flow \
   --run-dir artifacts/runtime-run \
   --controller-label FCU-01A \
@@ -50,13 +68,13 @@ python3 tools/runtime/app.py init-flow \
   --reset-technician-name "Lead Tech" \
   --reset-reason "Wrong unit selected; restarting flow from profile defaults"
 
-# 3c) Export one JSON rollup for the run (after compile-import): controllers, flow presence, next open step
+# 3d) Export one JSON rollup for the run (after compile-import): controllers, flow presence, next open step
 python3 tools/runtime/app.py export-run-summary --run-dir artifacts/runtime-run
 # Optional: --output-json artifacts/runtime-run/artifacts/my-summary.json
 # Optional: embed full blobs for single-file handoff (larger JSON):
 #   --embed-import-report --embed-bip-list-summary
 
-# 3d) BACnet WriteProperty (profile-driven allowlist + BACpypes3)
+# 3e) BACnet WriteProperty (profile-driven allowlist + BACpypes3)
 # Unit profile JSON must include commissioning_write_allowlist: ["msv_test_mode", ...]
 # Default: dry-run uses minimal Who-Is probe only (no BACpypes3 write).
 python3 tools/runtime/app.py dry-run-bacnet-write \
@@ -80,11 +98,13 @@ python3 tools/runtime/app.py record-step \
 
 # Init-flow: second init for the same controller without --force is rejected (avoids silent overwrite).
 # Record-step rule enforcement:
-# - A step cannot be marked passed/manual_passed until all prior steps are completed
+# - Outcomes use passed, manual_passed, failed, or skipped (pending is not recordable)
+# - passed/manual_passed/failed require prior steps to be passed, manual_passed, or skipped (a prior failed blocks until resolved)
 # - A step can only be marked skipped if that step is explicitly skippable in profile flow
-# - A step with explicit requires_step_ids dependencies cannot pass until those dependencies complete
+# - A step with explicit requires_step_ids dependencies cannot pass/fail until those dependencies complete
 # - Every transition appends step history with previous_status/attempted_status/new_status/reason_code
 # - Rejected transitions are logged as flow_step_rejected with machine-readable rejection reason codes
+# - list-flows / show-flow append flows_listed / flow_viewed; session commands append session_value_set / session_viewed
 
 # 5) Verify one simulator scenario
 python3 tools/runtime/app.py verify-simulator \

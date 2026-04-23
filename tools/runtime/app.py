@@ -70,6 +70,14 @@ def _flow_state_path(run_dir: Path, controller_label: str) -> Path:
     return _flows_dir(run_dir) / f"{controller_label}.json"
 
 
+def _sessions_dir(run_dir: Path) -> Path:
+    return run_dir / "state" / "sessions"
+
+
+def _session_state_path(run_dir: Path, controller_label: str) -> Path:
+    return _sessions_dir(run_dir) / f"{controller_label}.json"
+
+
 def _flow_backups_dir(run_dir: Path) -> Path:
     return run_dir / "state" / "flow_backups"
 
@@ -84,6 +92,11 @@ def _step_status_counts(steps: list[dict]) -> dict[str, int]:
 
 def _sequencing_complete_statuses() -> frozenset[str]:
     return frozenset({"passed", "manual_passed", "skipped"})
+
+
+def _is_sequencing_complete_status(status: str) -> bool:
+    """Prior steps must reach this before later steps can record pass/fail/skip outcomes."""
+    return status in _sequencing_complete_statuses()
 
 
 def _next_open_step(steps: list[dict]) -> dict | None:
@@ -117,13 +130,22 @@ def _validate_step_transition(
     requested_status: str,
 ) -> dict[str, str] | None:
     """Return reason dict when transition is invalid, otherwise None."""
+    if requested_status == "pending":
+        return {
+            "reason_code": "pending_not_recordable",
+            "message": (
+                "cannot record step with status 'pending'; "
+                "use passed, failed, skipped, or manual_passed to record outcomes"
+            ),
+        }
+
     if requested_status == "skipped" and step.get("skippable") is not True:
         return {
             "reason_code": "step_not_skippable",
             "message": f"step '{step.get('step_id')}' is not skippable",
         }
 
-    if requested_status in {"passed", "manual_passed"}:
+    if requested_status in {"passed", "manual_passed", "failed"}:
         step_id = step.get("step_id")
         requires_step_ids = step.get("requires_step_ids", [])
         if isinstance(requires_step_ids, list):
@@ -157,7 +179,7 @@ def _validate_step_transition(
             }
         for prev in steps[:current_index]:
             prev_status = str(prev.get("status", "pending"))
-            if not _is_terminal_prereq_status(prev_status):
+            if not _is_sequencing_complete_status(prev_status):
                 return {
                     "reason_code": "prior_step_incomplete",
                     "message": (
@@ -175,6 +197,7 @@ def _normalize_rejection_reason(reason_code: str) -> str:
         "dependency_missing_from_flow": "DEPENDENCY_UNSATISFIED",
         "prior_step_incomplete": "PREREQ_ORDER",
         "step_not_found_in_sequence": "PREREQ_ORDER",
+        "pending_not_recordable": "INVALID_TRANSITION",
     }
     return mapping.get(reason_code, "INVALID_TRANSITION")
 
@@ -376,6 +399,150 @@ def cmd_init_flow(args: argparse.Namespace) -> int:
         f"flow_initialized=true controller_label={args.controller_label} "
         f"steps={len(steps)}"
     )
+    return 0
+
+
+def cmd_list_flows(args: argparse.Namespace) -> int:
+    run_dir = args.run_dir
+    logs_path = run_dir / "logs" / "events.jsonl"
+    flows_root = _flows_dir(run_dir)
+    flows: list[dict] = []
+
+    if flows_root.is_dir():
+        for path in sorted(flows_root.glob("*.json")):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            label = str(data.get("controller_label", "")).strip()
+            if not label:
+                label = path.stem
+            steps = data.get("steps", [])
+            if not isinstance(steps, list):
+                steps = []
+            flows.append(
+                {
+                    "controller_label": label,
+                    "profile_id": data.get("profile_id"),
+                    "flow_state_json": str(path.resolve()),
+                    "step_count": len(steps),
+                    "status_counts": _step_status_counts(steps),
+                }
+            )
+
+    payload = {"flow_count": len(flows), "flows": flows}
+    _append_event(
+        logs_path,
+        "flows_listed",
+        {
+            "flow_count": len(flows),
+            "controller_labels": [row["controller_label"] for row in flows],
+        },
+    )
+    print(json.dumps(payload, sort_keys=True))
+    return 0
+
+
+def cmd_show_flow(args: argparse.Namespace) -> int:
+    run_dir = args.run_dir
+    logs_path = run_dir / "logs" / "events.jsonl"
+    flow_state_path = _flow_state_path(run_dir, args.controller_label)
+    if not flow_state_path.is_file():
+        print(
+            f"error: flow state not found for controller_label={args.controller_label}"
+        )
+        return 2
+
+    flow_state = json.loads(flow_state_path.read_text(encoding="utf-8"))
+    _append_event(
+        logs_path,
+        "flow_viewed",
+        {
+            "controller_label": args.controller_label,
+            "flow_state_json": str(flow_state_path.resolve()),
+        },
+    )
+    print(json.dumps(flow_state, sort_keys=True))
+    return 0
+
+
+def cmd_set_session_value(args: argparse.Namespace) -> int:
+    run_dir = args.run_dir
+    logs_path = run_dir / "logs" / "events.jsonl"
+    flow_state_path = _flow_state_path(run_dir, args.controller_label)
+    if not flow_state_path.is_file():
+        print(
+            "error: commissioning flow not initialized; run init-flow first "
+            f"(missing {flow_state_path})"
+        )
+        return 2
+
+    key = str(args.key).strip()
+    if not key:
+        print("error: session key must be non-empty")
+        return 2
+    if len(key) > 128:
+        print("error: session key exceeds maximum length (128)")
+        return 2
+
+    session_path = _session_state_path(run_dir, args.controller_label)
+    session_path.parent.mkdir(parents=True, exist_ok=True)
+    if session_path.is_file():
+        session_state = json.loads(session_path.read_text(encoding="utf-8"))
+    else:
+        session_state = {
+            "controller_label": args.controller_label,
+            "updated_at": _utc_timestamp(),
+            "values": {},
+        }
+
+    if not isinstance(session_state.get("values"), dict):
+        session_state["values"] = {}
+
+    session_state["values"][key] = {
+        "value": str(args.value),
+        "technician_name": args.technician_name,
+        "note": args.note,
+        "ts": _utc_timestamp(),
+    }
+    session_state["updated_at"] = _utc_timestamp()
+    session_path.write_text(json.dumps(session_state, indent=2), encoding="utf-8")
+
+    _append_event(
+        logs_path,
+        "session_value_set",
+        {
+            "controller_label": args.controller_label,
+            "session_key": key,
+            "session_state_json": str(session_path.resolve()),
+        },
+    )
+    print(
+        f"session_value_set=true controller_label={args.controller_label} key={key}"
+    )
+    return 0
+
+
+def cmd_show_session(args: argparse.Namespace) -> int:
+    run_dir = args.run_dir
+    logs_path = run_dir / "logs" / "events.jsonl"
+    session_path = _session_state_path(run_dir, args.controller_label)
+    if not session_path.is_file():
+        print(
+            f"error: session state not found for controller_label={args.controller_label}"
+        )
+        return 2
+
+    session_state = json.loads(session_path.read_text(encoding="utf-8"))
+    _append_event(
+        logs_path,
+        "session_viewed",
+        {
+            "controller_label": args.controller_label,
+            "session_state_json": str(session_path.resolve()),
+        },
+    )
+    print(json.dumps(session_state, sort_keys=True))
     return 0
 
 
@@ -1007,6 +1174,49 @@ def build_parser() -> argparse.ArgumentParser:
         help="With --force, why the prior flow state is being discarded.",
     )
     init_flow.set_defaults(handler=cmd_init_flow)
+
+    list_flows = subparsers.add_parser(
+        "list-flows",
+        help="List commissioning flow state files for this run (summary JSON).",
+    )
+    list_flows.add_argument("--run-dir", required=True, type=Path)
+    list_flows.set_defaults(handler=cmd_list_flows)
+
+    show_flow = subparsers.add_parser(
+        "show-flow",
+        help="Print full commissioning flow JSON for one controller.",
+    )
+    show_flow.add_argument("--run-dir", required=True, type=Path)
+    show_flow.add_argument("--controller-label", required=True)
+    show_flow.set_defaults(handler=cmd_show_flow)
+
+    set_session = subparsers.add_parser(
+        "set-session-value",
+        help="Store operator-entered session value for a controller (e.g. manual RAT).",
+    )
+    set_session.add_argument("--run-dir", required=True, type=Path)
+    set_session.add_argument("--controller-label", required=True)
+    set_session.add_argument(
+        "--key",
+        required=True,
+        help="Session field key (e.g. rat_degC).",
+    )
+    set_session.add_argument(
+        "--value",
+        required=True,
+        help="Value to store (string; caller may pass numeric text).",
+    )
+    set_session.add_argument("--technician-name", required=True)
+    set_session.add_argument("--note", default="")
+    set_session.set_defaults(handler=cmd_set_session_value)
+
+    show_session = subparsers.add_parser(
+        "show-session",
+        help="Print session values JSON for one controller.",
+    )
+    show_session.add_argument("--run-dir", required=True, type=Path)
+    show_session.add_argument("--controller-label", required=True)
+    show_session.set_defaults(handler=cmd_show_session)
 
     record_step = subparsers.add_parser(
         "record-step", help="Record technician signoff for a commissioning step."
