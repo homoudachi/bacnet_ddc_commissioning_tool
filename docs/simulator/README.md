@@ -84,6 +84,20 @@ CI run may pass with `known_unavailable` only when explicitly marked in scenario
 
 ## Runbook
 
+### 0) Verify list-first gate locally (CLI smoke test)
+
+```bash
+python3 tools/simulator/list_verifier.py \
+  --controllers-csv docs/examples/site-controllers.template.csv \
+  --scenario-json docs/examples/simulator-scenarios/happy-path.example.json \
+  --strict
+```
+
+Expected summary includes:
+
+- `found=3 total=3 unresolved=0 strict_pass=true`
+- `reachable_verified=3`
+
 ### 1) Render and inspect topology
 
 ```bash
@@ -134,6 +148,7 @@ Use this checklist in order:
 
 - Topology spec: `docker/simulator/docker-compose.yml`
 - Simulator planning sequence: `docs/plans/2026-04-21-bacnet-simulator-plan.md`
+- Verifier CLI: `tools/simulator/list_verifier.py`
 - Product record: `docs/project.md`
 
 ## Verification status (2026-04-21)

@@ -12,4 +12,6 @@ Use when a choice is **non-obvious** or you will forget **why** you chose it.
 
 | ADR | Title | Status |
 |-----|-------|--------|
-| — | _(none yet; Phase 0 of [v1 foundation plan](../plans/2026-04-21-v1-foundation-plan.md) should add the first ADRs)_ | — |
+| [0001](0001-simulator-verification-cli-stack.md) | Simulator verifier implementation stack (Python 3 CLI baseline) | Accepted |
+| [0002](0002-list-schema-and-identity-contract.md) | Controller list schema and identity verification contract | Accepted |
+| [0003](0003-ci-gating-policy-for-list-verification.md) | CI strict/non-strict gating policy for row classifications | Accepted |
