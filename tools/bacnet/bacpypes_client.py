@@ -64,7 +64,8 @@ async def _write_present_value_async(
             return {"status": "blocked_probe_failed", "message": "no I-Am from target"}
 
         dest = IPv4Address(target_address)
-        obj_tag = f"{_object_type_tag(object_type)} {object_instance}"
+        # ObjectIdentifier parsing expects "type,instance" (not a space separator).
+        obj_tag = f"{_object_type_tag(object_type)},{object_instance}"
         # MSV / AV / AO present-value uses Unsigned in standard profiles for these writes.
         result = await asyncio.wait_for(
             app.write_property(dest, obj_tag, "presentValue", Unsigned(value)),
@@ -115,7 +116,7 @@ async def _read_present_value_async(
             return {"status": "blocked_probe_failed", "message": "no I-Am from target"}
 
         dest = IPv4Address(target_address)
-        obj_tag = f"{_object_type_tag(object_type)} {object_instance}"
+        obj_tag = f"{_object_type_tag(object_type)},{object_instance}"
         value = await asyncio.wait_for(
             app.read_property(dest, obj_tag, property_name),
             timeout=apdu_timeout,
