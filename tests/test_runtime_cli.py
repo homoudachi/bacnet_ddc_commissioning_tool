@@ -359,3 +359,96 @@ class RuntimeCliTests(unittest.TestCase):
         events = [json.loads(line)["event"] for line in lines]
         self.assertIn("flow_initialized", events)
         self.assertIn("flow_step_recorded", events)
+
+    def test_record_step_rejects_out_of_order_transition(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-flow-ordering",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+        init_flow_result = _run_runtime(
+            "init-flow",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+        )
+        self.assertEqual(0, init_flow_result.returncode)
+
+        # Attempt to complete step 2 before step 1.
+        result = _run_runtime(
+            "record-step",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+            "--step-id",
+            "confirm_tachometer_reference_half_flow",
+            "--status",
+            "passed",
+            "--technician-name",
+            "Alex Tech",
+            "--note",
+            "Tried to skip ahead",
+        )
+
+        self.assertEqual(2, result.returncode)
+        self.assertIn("invalid step transition", result.stdout)
+        self.assertIn("cannot be marked passed before", result.stdout)
+
+    def test_record_step_rejects_skip_when_step_not_marked_skippable(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-flow-skip-rule",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+        init_flow_result = _run_runtime(
+            "init-flow",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+        )
+        self.assertEqual(0, init_flow_result.returncode)
+
+        result = _run_runtime(
+            "record-step",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+            "--step-id",
+            "half_design_airflow_auto",
+            "--status",
+            "skipped",
+            "--technician-name",
+            "Alex Tech",
+            "--note",
+            "Skipping first step",
+        )
+
+        self.assertEqual(2, result.returncode)
+        self.assertIn("invalid step transition", result.stdout)
+        self.assertIn("is not skippable", result.stdout)

@@ -70,6 +70,37 @@ def _flow_state_path(run_dir: Path, controller_label: str) -> Path:
     return _flows_dir(run_dir) / f"{controller_label}.json"
 
 
+def _is_terminal_prereq_status(status: str) -> bool:
+    return status in {"passed", "manual_passed", "skipped"}
+
+
+def _validate_step_transition(
+    steps: list[dict],
+    step: dict,
+    requested_status: str,
+) -> str | None:
+    """Return error string when transition is invalid, otherwise None."""
+    if requested_status == "skipped" and not bool(step.get("skippable", False)):
+        return f"step '{step.get('step_id')}' is not skippable"
+
+    if requested_status in {"passed", "manual_passed"}:
+        step_id = step.get("step_id")
+        current_index = next(
+            (idx for idx, item in enumerate(steps) if item.get("step_id") == step_id),
+            None,
+        )
+        if current_index is None:
+            return f"step '{step_id}' not found in flow sequence"
+        for prev in steps[:current_index]:
+            prev_status = str(prev.get("status", "pending"))
+            if not _is_terminal_prereq_status(prev_status):
+                return (
+                    f"step '{step_id}' cannot be marked {requested_status} "
+                    f"before '{prev.get('step_id')}' is completed"
+                )
+    return None
+
+
 def cmd_init_run(args: argparse.Namespace) -> int:
     run_dir = args.run_dir
     artifacts_dir = run_dir / "artifacts"
@@ -250,6 +281,16 @@ def cmd_record_step(args: argparse.Namespace) -> int:
             break
     if step is None:
         print(f"error: step_id not found in flow state: {args.step_id}")
+        return 2
+
+    steps = flow_state.get("steps", [])
+    transition_error = _validate_step_transition(
+        steps=steps,
+        step=step,
+        requested_status=args.status,
+    )
+    if transition_error is not None:
+        print(f"error: invalid step transition: {transition_error}")
         return 2
 
     record = {

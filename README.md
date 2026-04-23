@@ -51,6 +51,10 @@ python3 tools/runtime/app.py record-step \
   --technician-name "Alex Tech" \
   --note "Reached target airflow in tolerance"
 
+# Record-step rule enforcement:
+# - A step cannot be marked passed/manual_passed until all prior steps are completed
+# - A step can only be marked skipped if that step is explicitly skippable in profile flow
+
 # 5) Verify one simulator scenario
 python3 tools/runtime/app.py verify-simulator \
   --run-dir artifacts/runtime-run \
