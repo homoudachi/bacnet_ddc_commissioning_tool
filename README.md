@@ -2,7 +2,7 @@
 
 ## Documentation
 
-- **Current repo status (2026-04-21):** docs-first project with early runnable tooling (simulator verifier/orchestrator and import compiler). There is no full end-user commissioning application yet.
+- **Current repo status (2026-04-23):** docs-first project with early runnable tooling (simulator verifier/orchestrator, import compiler, and a Python runtime CLI for run state, flow sign-off, and BACnet/IP probes). There is no full end-user commissioning application yet.
 - **[Living project doc](docs/project.md)** — product requirements, commissioning flows, examples, import direction, and reports (update as the product evolves).
 - **[ADRs](docs/adr/)** — short decision records when choices are non-obvious.
 - **[Slice plans](docs/plans/)** — time-boxed implementation plans; archive or remove when the slice ships.
@@ -52,9 +52,11 @@ python3 tools/runtime/app.py record-step \
   --note "Reached target airflow in tolerance"
 
 # Record-step rule enforcement:
-# - A step cannot be marked passed/manual_passed until all prior steps are completed
+# - Outcomes are recorded with passed, manual_passed, failed, or skipped (pending is not recordable)
+# - A step cannot be marked passed/manual_passed/failed until all prior steps reach a completed outcome
+#   (passed, manual_passed, or skipped); a prior step that failed blocks later steps until it is resolved
 # - A step can only be marked skipped if that step is explicitly skippable in profile flow
-# - A step with explicit requires_step_ids dependencies cannot pass until those dependencies complete
+# - A step with explicit requires_step_ids dependencies cannot pass/fail until those dependencies complete
 # - Every transition appends step history with previous_status/attempted_status/new_status/reason_code
 # - Rejected transitions are logged as flow_step_rejected with machine-readable rejection reason codes
 

@@ -2,10 +2,10 @@
 
 Audience: future you. Update when intent, behavior, or exports change.
 
-## Project maturity snapshot (2026-04-21)
+## Project maturity snapshot (2026-04-23)
 
-- Repository state: **documentation and examples only** (no runnable app, build script, or CI pipeline yet).
-- This document is the source of truth for product intent until implementation starts.
+- Repository state: **documentation plus early Python tooling** (simulator list verification, import compiler, runtime CLI skeleton under `tools/` with unit tests under `tests/`). No Windows portable build or full commissioning UI yet.
+- This document is the source of truth for product intent; runnable commands should stay aligned with [`README.md`](../README.md).
 - Active implementation roadmap lives in: [`docs/plans/2026-04-21-v1-foundation-plan.md`](plans/2026-04-21-v1-foundation-plan.md).
 
 ## Goal
@@ -189,11 +189,13 @@ Add **model, firmware, B/IP address + Device ID** per bench controller when you 
 
 ## How to run / verify
 
-_(Fill in after the first runnable build.)_
+From the repository root, run the Python unit tests (no BACnet hardware required):
 
 ```bash
-# e.g. build portable exe, run smoke tests
+python3 -m unittest discover -s tests -p 'test_*.py'
 ```
+
+Runtime CLI entrypoint and example workflow: see **[README.md](../README.md)** (init-run → compile-import → init-flow → record-step, plus simulator and BACnet/IP verification commands).
 
 ## Definition of done (reuse)
 
