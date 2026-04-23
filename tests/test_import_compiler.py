@@ -1,0 +1,230 @@
+import csv
+import json
+import pathlib
+import subprocess
+import sys
+import unittest
+
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+COMPILER = ROOT / "tools" / "import" / "compile_job.py"
+FIXTURES = ROOT / "tests" / "fixtures"
+
+
+def _write_csv(path: pathlib.Path, rows: list[dict[str, str]]) -> None:
+    fieldnames = [
+        "controller_label",
+        "profile_id",
+        "bacnet_device_instance",
+        "bacnet_ip",
+        "bacnet_port",
+        "building_floor",
+        "notes",
+    ]
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+
+
+def _write_profile(path: pathlib.Path, profile_id: str, display_name: str) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": "0.1-example",
+                "profile_id": profile_id,
+                "display_name": display_name,
+                "objects": [
+                    {"id": "msv_test_mode"},
+                    {"id": "ai_sat"},
+                    {"id": "av_supply_fan_command"},
+                ],
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
+def _run_compiler(
+    controllers_csv: pathlib.Path,
+    profiles_dir: pathlib.Path,
+    output_json: pathlib.Path,
+    report_json: pathlib.Path,
+) -> subprocess.CompletedProcess[str]:
+    cmd = [
+        sys.executable,
+        str(COMPILER),
+        "--controllers-csv",
+        str(controllers_csv),
+        "--profiles-dir",
+        str(profiles_dir),
+        "--output-json",
+        str(output_json),
+        "--report-json",
+        str(report_json),
+    ]
+    return subprocess.run(cmd, capture_output=True, text=True, check=False)
+
+
+class ImportCompilerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        FIXTURES.mkdir(parents=True, exist_ok=True)
+        self.profiles_dir = FIXTURES / "profiles"
+        self.profiles_dir.mkdir(parents=True, exist_ok=True)
+
+    def test_compile_job_happy_path_writes_runtime_model(self) -> None:
+        controllers = FIXTURES / "controllers-compile-happy.csv"
+        output_json = FIXTURES / "runtime-job-happy.json"
+        report_json = FIXTURES / "runtime-job-happy-report.json"
+
+        _write_csv(
+            controllers,
+            [
+                {
+                    "controller_label": "FCU-01A",
+                    "profile_id": "fcu_2pipe_chw_electric_heat_v1",
+                    "bacnet_device_instance": "21001",
+                    "bacnet_ip": "192.168.1.50",
+                    "bacnet_port": "47808",
+                    "building_floor": "L01",
+                    "notes": "example row",
+                },
+                {
+                    "controller_label": "HRV-01",
+                    "profile_id": "hrv_counterflow_erv_v1",
+                    "bacnet_device_instance": "22001",
+                    "bacnet_ip": "192.168.1.60",
+                    "bacnet_port": "47808",
+                    "building_floor": "Roof",
+                    "notes": "example row",
+                },
+            ],
+        )
+        _write_profile(
+            self.profiles_dir / "unit-profile-fcu.example.json",
+            profile_id="fcu_2pipe_chw_electric_heat_v1",
+            display_name="FCU example",
+        )
+        _write_profile(
+            self.profiles_dir / "unit-profile-hrv.example.json",
+            profile_id="hrv_counterflow_erv_v1",
+            display_name="HRV example",
+        )
+
+        result = _run_compiler(controllers, self.profiles_dir, output_json, report_json)
+
+        self.assertEqual(0, result.returncode)
+        self.assertIn("compile_ok=true", result.stdout)
+        runtime = json.loads(output_json.read_text(encoding="utf-8"))
+        self.assertEqual(2, runtime["summary"]["controller_count"])
+        self.assertEqual(2, len(runtime["controllers"]))
+        self.assertEqual("FCU example", runtime["controllers"][0]["profile"]["display_name"])
+        report = json.loads(report_json.read_text(encoding="utf-8"))
+        self.assertEqual([], report["errors"])
+
+    def test_compile_fails_when_profile_is_missing(self) -> None:
+        controllers = FIXTURES / "controllers-compile-missing-profile.csv"
+        output_json = FIXTURES / "runtime-job-missing-profile.json"
+        report_json = FIXTURES / "runtime-job-missing-profile-report.json"
+
+        _write_csv(
+            controllers,
+            [
+                {
+                    "controller_label": "FCU-01A",
+                    "profile_id": "missing_profile_id",
+                    "bacnet_device_instance": "21001",
+                    "bacnet_ip": "192.168.1.50",
+                    "bacnet_port": "47808",
+                    "building_floor": "L01",
+                    "notes": "example row",
+                }
+            ],
+        )
+        _write_profile(
+            self.profiles_dir / "unit-profile-fcu.example.json",
+            profile_id="fcu_2pipe_chw_electric_heat_v1",
+            display_name="FCU example",
+        )
+
+        result = _run_compiler(controllers, self.profiles_dir, output_json, report_json)
+
+        self.assertEqual(2, result.returncode)
+        self.assertIn("compile_ok=false", result.stdout)
+        report = json.loads(report_json.read_text(encoding="utf-8"))
+        self.assertEqual("missing_profile", report["errors"][0]["code"])
+
+    def test_compile_fails_on_duplicate_device_instance(self) -> None:
+        controllers = FIXTURES / "controllers-compile-duplicate-instance.csv"
+        output_json = FIXTURES / "runtime-job-duplicate-instance.json"
+        report_json = FIXTURES / "runtime-job-duplicate-instance-report.json"
+
+        _write_csv(
+            controllers,
+            [
+                {
+                    "controller_label": "FCU-01A",
+                    "profile_id": "fcu_2pipe_chw_electric_heat_v1",
+                    "bacnet_device_instance": "21001",
+                    "bacnet_ip": "192.168.1.50",
+                    "bacnet_port": "47808",
+                    "building_floor": "L01",
+                    "notes": "example row",
+                },
+                {
+                    "controller_label": "FCU-01B",
+                    "profile_id": "fcu_2pipe_chw_electric_heat_v1",
+                    "bacnet_device_instance": "21001",
+                    "bacnet_ip": "192.168.1.51",
+                    "bacnet_port": "47808",
+                    "building_floor": "L01",
+                    "notes": "duplicate instance",
+                },
+            ],
+        )
+        _write_profile(
+            self.profiles_dir / "unit-profile-fcu.example.json",
+            profile_id="fcu_2pipe_chw_electric_heat_v1",
+            display_name="FCU example",
+        )
+
+        result = _run_compiler(controllers, self.profiles_dir, output_json, report_json)
+
+        self.assertEqual(2, result.returncode)
+        report = json.loads(report_json.read_text(encoding="utf-8"))
+        codes = {entry["code"] for entry in report["errors"]}
+        self.assertIn("duplicate_bacnet_device_instance", codes)
+
+    def test_compile_fails_on_invalid_bacnet_port(self) -> None:
+        controllers = FIXTURES / "controllers-compile-invalid-port.csv"
+        output_json = FIXTURES / "runtime-job-invalid-port.json"
+        report_json = FIXTURES / "runtime-job-invalid-port-report.json"
+
+        _write_csv(
+            controllers,
+            [
+                {
+                    "controller_label": "FCU-01A",
+                    "profile_id": "fcu_2pipe_chw_electric_heat_v1",
+                    "bacnet_device_instance": "21001",
+                    "bacnet_ip": "192.168.1.50",
+                    "bacnet_port": "not-a-port",
+                    "building_floor": "L01",
+                    "notes": "invalid port",
+                }
+            ],
+        )
+        _write_profile(
+            self.profiles_dir / "unit-profile-fcu.example.json",
+            profile_id="fcu_2pipe_chw_electric_heat_v1",
+            display_name="FCU example",
+        )
+
+        result = _run_compiler(controllers, self.profiles_dir, output_json, report_json)
+
+        self.assertEqual(2, result.returncode)
+        report = json.loads(report_json.read_text(encoding="utf-8"))
+        self.assertEqual("invalid_bacnet_port", report["errors"][0]["code"])
+
