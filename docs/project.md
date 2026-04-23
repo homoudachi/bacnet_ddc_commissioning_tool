@@ -48,7 +48,7 @@ These notes apply to the **current** `tools/runtime/app.py` BACnet helpers (`pro
 
 - **File:** `artifacts/commissioning_report.json` (append-only JSON document: `schema_version`, `job_id`, `entries[]`).
 - **Population:** When **`record-step`** records **`passed`** or **`manual_passed`** and the step has **`step_type: bacnet_point_checkout`** or **`run_point_checkout_on_pass: true`**, the runtime runs **`point_checkout`** BACnet reads **before** persisting the step. If any read fails, **`record-step` exits 2** and the step stays at its prior status. On success, an entry with **`kind: point_checkout_after_step`** is appended (includes **`report_ref`** when set on the profile step, read summary, artifact path to timestamped **`bacnet_point_checkout/*.json`**).
-- **Export:** **`export-commissioning-report`** prints the file or copies it with **`--output-json`**.
+- **Export:** **`export-commissioning-report`** prints the file or copies it with **`--output-json`**. With **`--allow-empty`** and **`--output-json`** only, writes a minimal stub when no report exists yet (for pipelines that always expect a file).
 - **Binding:** The client binds **`0.0.0.0:<bacnet_bind_port>`** (default **0** = ephemeral). Multi-homed hosts and **host firewalls** can block replies or change source address selection; operators may need to open **UDP 47808** (or the site port) inbound/outbound and align subnets with the panel vendor’s guidance.
 - **Safety:** Writes are limited to **`commissioning_write_allowlist`** and profile **`writable`** objects; reads use **`commissioning_read_allowlist`**. This is **not** full “per commissioning mode” interlocks—that remains product/policy work on top of the allowlists.
 

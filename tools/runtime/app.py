@@ -770,15 +770,41 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
     run_dir = args.run_dir
     logs_path = run_dir / "logs" / "events.jsonl"
     src = _commissioning_report_path(run_dir)
+    out_path = getattr(args, "output_json", None)
     if not src.is_file():
+        if bool(getattr(args, "allow_empty", False)) and out_path:
+            config = _parse_run_config(run_dir)
+            job_id = str(config.get("job_id", "")).strip() or "unknown-job"
+            stub = json.dumps(
+                {
+                    "schema_version": "0.1-commissioning-report",
+                    "job_id": job_id,
+                    "entries": [],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            out_path = Path(out_path)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(stub + "\n", encoding="utf-8")
+            _append_event(
+                logs_path,
+                "commissioning_report_exported_empty_stub",
+                {"output_json": str(out_path.resolve())},
+            )
+            print(
+                f"commissioning_report_exported=true output_json={out_path.resolve()} "
+                "stub=true entries=0"
+            )
+            return 0
         print(
             f"error: commissioning report not found at {src}; "
-            "nothing recorded yet (e.g. record-step with BACnet point checkout gate)"
+            "nothing recorded yet (e.g. record-step with BACnet point checkout gate). "
+            "Use --allow-empty with --output-json to write an empty stub for tooling."
         )
         return 2
 
     text = src.read_text(encoding="utf-8")
-    out_path = getattr(args, "output_json", None)
     if out_path:
         out_path = Path(out_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1745,6 +1771,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-json",
         type=Path,
         help="Optional copy destination; default prints to stdout.",
+    )
+    export_cr.add_argument(
+        "--allow-empty",
+        action="store_true",
+        help="With --output-json only: if no report exists yet, write an empty stub JSON.",
     )
     export_cr.set_defaults(handler=cmd_export_commissioning_report)
 

@@ -2578,3 +2578,284 @@ class RuntimeCliTests(unittest.TestCase):
             self.assertTrue(export_path.exists())
         finally:
             server.stop()
+
+    def test_export_commissioning_report_errors_when_missing(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-cr-missing",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        r = _run_runtime("export-commissioning-report", "--run-dir", str(self.run_dir))
+        self.assertEqual(2, r.returncode)
+        self.assertIn("commissioning report not found", r.stdout)
+
+    def test_export_commissioning_report_allow_empty_stub(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-cr-stub",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        out = self.run_dir / "artifacts" / "cr-stub.json"
+        r = _run_runtime(
+            "export-commissioning-report",
+            "--run-dir",
+            str(self.run_dir),
+            "--output-json",
+            str(out),
+            "--allow-empty",
+        )
+        self.assertEqual(0, r.returncode)
+        self.assertTrue(out.exists())
+        doc = json.loads(out.read_text(encoding="utf-8"))
+        self.assertEqual([], doc.get("entries", []))
+        self.assertEqual("job-cr-stub", doc.get("job_id"))
+
+    def test_record_step_point_checkout_failure_leaves_step_pending(self) -> None:
+        from test_import_compiler import _write_profile
+
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        profiles_dir = self.run_dir / "profiles-fail"
+        profiles_dir.mkdir(parents=True, exist_ok=True)
+        _write_profile(
+            profiles_dir / "unit-profile-fail.json",
+            profile_id="fcu_fail_v1",
+            display_name="Fail test",
+            read_allowlist=["ai_sat", "msv_test_mode"],
+            point_checkout=[
+                {"object_id": "ai_sat", "property": "presentValue"},
+            ],
+            commissioning_flow=[
+                {
+                    "step_id": "gate_fail",
+                    "label": "Gate",
+                    "step_type": "bacnet_point_checkout",
+                }
+            ],
+        )
+        csv_path = self.run_dir / "controllers-fail.csv"
+        with csv_path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(
+                handle,
+                fieldnames=[
+                    "controller_label",
+                    "profile_id",
+                    "bacnet_device_instance",
+                    "bacnet_ip",
+                    "bacnet_port",
+                    "building_floor",
+                    "notes",
+                ],
+            )
+            writer.writeheader()
+            writer.writerow(
+                {
+                    "controller_label": "FCU-FAIL",
+                    "profile_id": "fcu_fail_v1",
+                    "bacnet_device_instance": "21001",
+                    "bacnet_ip": "127.0.0.1",
+                    "bacnet_port": "1",
+                    "building_floor": "L01",
+                    "notes": "no listener",
+                }
+            )
+
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-fail",
+            "--controllers-csv",
+            str(csv_path),
+            "--profiles-dir",
+            str(profiles_dir),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+        init_flow = _run_runtime(
+            "init-flow",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-FAIL",
+        )
+        self.assertEqual(0, init_flow.returncode)
+
+        rec = _run_runtime(
+            "record-step",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-FAIL",
+            "--step-id",
+            "gate_fail",
+            "--status",
+            "passed",
+            "--technician-name",
+            "Alex Tech",
+            "--note",
+            "should fail BACnet",
+            "--bacnet-timeout-seconds",
+            "0.05",
+            "--bacnet-retries",
+            "1",
+        )
+        self.assertEqual(2, rec.returncode)
+        self.assertIn("BACnet point checkout failed", rec.stdout)
+
+        flow_path = self.run_dir / "state" / "flows" / "FCU-FAIL.json"
+        flow_state = json.loads(flow_path.read_text(encoding="utf-8"))
+        step = [s for s in flow_state["steps"] if s["step_id"] == "gate_fail"][0]
+        self.assertEqual("pending", step["status"])
+        report_path = self.run_dir / "artifacts" / "commissioning_report.json"
+        self.assertFalse(report_path.exists())
+
+    def test_record_step_run_point_checkout_on_pass_after_prior_pass(self) -> None:
+        from test_import_compiler import _write_profile
+
+        server = _FakeBipUdpServer(device_instance=21001, analog_input_present=19.0, msv_present=2)
+        server.start()
+        try:
+            time.sleep(0.05)
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            profiles_dir = self.run_dir / "profiles-chain"
+            profiles_dir.mkdir(parents=True, exist_ok=True)
+            _write_profile(
+                profiles_dir / "unit-profile-chain.json",
+                profile_id="fcu_chain_v1",
+                display_name="Chain",
+                read_allowlist=["ai_sat", "msv_test_mode"],
+                point_checkout=[
+                    {"object_id": "ai_sat", "property": "presentValue"},
+                    {"object_id": "msv_test_mode", "property": "presentValue"},
+                ],
+                commissioning_flow=[
+                    {"step_id": "prep", "label": "Prep"},
+                    {
+                        "step_id": "readout",
+                        "label": "Readout",
+                        "run_point_checkout_on_pass": True,
+                        "report_ref": "chain.after_prep",
+                    },
+                ],
+            )
+            csv_path = self.run_dir / "controllers-chain.csv"
+            with csv_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=[
+                        "controller_label",
+                        "profile_id",
+                        "bacnet_device_instance",
+                        "bacnet_ip",
+                        "bacnet_port",
+                        "building_floor",
+                        "notes",
+                    ],
+                )
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "controller_label": "FCU-CHAIN",
+                        "profile_id": "fcu_chain_v1",
+                        "bacnet_device_instance": "21001",
+                        "bacnet_ip": "127.0.0.1",
+                        "bacnet_port": str(server.port),
+                        "building_floor": "L01",
+                        "notes": "",
+                    }
+                )
+
+            init_result = _run_runtime(
+                "init-run",
+                "--run-dir",
+                str(self.run_dir),
+                "--job-id",
+                "job-chain",
+                "--controllers-csv",
+                str(csv_path),
+                "--profiles-dir",
+                str(profiles_dir),
+                "--scenarios-dir",
+                str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+            )
+            self.assertEqual(0, init_result.returncode)
+            compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+            self.assertEqual(0, compile_result.returncode)
+            self.assertEqual(
+                0,
+                _run_runtime(
+                    "init-flow",
+                    "--run-dir",
+                    str(self.run_dir),
+                    "--controller-label",
+                    "FCU-CHAIN",
+                ).returncode,
+            )
+            self.assertEqual(
+                0,
+                _run_runtime(
+                    "record-step",
+                    "--run-dir",
+                    str(self.run_dir),
+                    "--controller-label",
+                    "FCU-CHAIN",
+                    "--step-id",
+                    "prep",
+                    "--status",
+                    "passed",
+                    "--technician-name",
+                    "Alex Tech",
+                    "--note",
+                    "prep ok",
+                ).returncode,
+            )
+            self.assertEqual(
+                0,
+                _run_runtime(
+                    "record-step",
+                    "--run-dir",
+                    str(self.run_dir),
+                    "--controller-label",
+                    "FCU-CHAIN",
+                    "--step-id",
+                    "readout",
+                    "--status",
+                    "passed",
+                    "--technician-name",
+                    "Alex Tech",
+                    "--note",
+                    "with checkout",
+                    "--bacnet-timeout-seconds",
+                    "0.5",
+                    "--bacnet-retries",
+                    "1",
+                ).returncode,
+            )
+            report_path = self.run_dir / "artifacts" / "commissioning_report.json"
+            doc = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual(1, len(doc["entries"]))
+            self.assertEqual("chain.after_prep", doc["entries"][0]["report_ref"])
+        finally:
+            server.stop()

@@ -118,6 +118,7 @@ python3 tools/runtime/app.py record-step \
 # 4b) Export append-only commissioning report (after gated record-step or future writers)
 # python3 tools/runtime/app.py export-commissioning-report --run-dir artifacts/runtime-run
 # python3 tools/runtime/app.py export-commissioning-report --run-dir artifacts/runtime-run --output-json my-report.json
+# Optional: --allow-empty with --output-json writes {"entries":[]} stub when no report yet (CI / templates)
 
 # Init-flow: second init for the same controller without --force is rejected (avoids silent overwrite).
 # Record-step rule enforcement:
