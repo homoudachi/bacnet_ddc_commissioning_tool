@@ -3241,3 +3241,493 @@ class RuntimeCliTests(unittest.TestCase):
             self.assertIn("av_electric_heat_command", csv_text)
         finally:
             server.stop()
+
+    def test_bacnet_modulation_sweep_multi_percent_session_rat(self) -> None:
+        server = _FakeBipUdpServer(
+            device_instance=21001,
+            analog_input_present=23.5,
+            msv_present=1,
+            av_heat_present=10.0,
+        )
+        server.start()
+        try:
+            time.sleep(0.05)
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            profiles_dir = self.run_dir / "profiles-sweep-rat"
+            profiles_dir.mkdir(parents=True, exist_ok=True)
+            (profiles_dir / "unit-sweep-rat.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "0.1-example",
+                        "profile_id": "fcu_sweep_rat_v1",
+                        "display_name": "Sweep RAT session",
+                        "commissioning_write_allowlist": ["av_electric_heat_command"],
+                        "commissioning_read_allowlist": [
+                            "ai_sat",
+                            "av_electric_heat_command",
+                        ],
+                        "objects": [
+                            {
+                                "id": "ai_sat",
+                                "bacnet": {"object_type": "analogInput", "instance": 2},
+                                "writable": False,
+                            },
+                            {
+                                "id": "av_electric_heat_command",
+                                "bacnet": {"object_type": "analogValue", "instance": 4},
+                                "writable": True,
+                            },
+                        ],
+                        "commissioning_flow": [
+                            {
+                                "step_id": "heating_test",
+                                "label": "Heating",
+                                "report_ref": "thermal_tests_for_report.heating",
+                                "actions": [
+                                    {
+                                        "type": "modulate_actuator_log_sat_for_report",
+                                        "command_object_id": "av_electric_heat_command",
+                                        "result_supply_temperature_object_id": "ai_sat",
+                                        "result_return_temperature_object_id": "ai_rat_missing",
+                                        "session_return_air_temperature_key": "rat_degC",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            csv_path = self.run_dir / "controllers-sweep-rat.csv"
+            with csv_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=[
+                        "controller_label",
+                        "profile_id",
+                        "bacnet_device_instance",
+                        "bacnet_ip",
+                        "bacnet_port",
+                        "building_floor",
+                        "notes",
+                    ],
+                )
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "controller_label": "FCU-RAT",
+                        "profile_id": "fcu_sweep_rat_v1",
+                        "bacnet_device_instance": "21001",
+                        "bacnet_ip": "127.0.0.1",
+                        "bacnet_port": str(server.port),
+                        "building_floor": "L01",
+                        "notes": "",
+                    }
+                )
+            self.assertEqual(
+                0,
+                _run_runtime(
+                    "init-run",
+                    "--run-dir",
+                    str(self.run_dir),
+                    "--job-id",
+                    "job-sweep-rat",
+                    "--controllers-csv",
+                    str(csv_path),
+                    "--profiles-dir",
+                    str(profiles_dir),
+                    "--scenarios-dir",
+                    str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+                ).returncode,
+            )
+            self.assertEqual(0, _run_runtime("compile-import", "--run-dir", str(self.run_dir)).returncode)
+            self.assertEqual(
+                0,
+                _run_runtime(
+                    "init-flow",
+                    "--run-dir",
+                    str(self.run_dir),
+                    "--controller-label",
+                    "FCU-RAT",
+                ).returncode,
+            )
+            self.assertEqual(
+                0,
+                _run_runtime(
+                    "set-session-value",
+                    "--run-dir",
+                    str(self.run_dir),
+                    "--controller-label",
+                    "FCU-RAT",
+                    "--key",
+                    "rat_degC",
+                    "--value",
+                    "21.25",
+                    "--technician-name",
+                    "Alex Tech",
+                    "--note",
+                    "manual rat",
+                ).returncode,
+            )
+            sw = _run_runtime(
+                "bacnet-modulation-sweep",
+                "--run-dir",
+                str(self.run_dir),
+                "--controller-label",
+                "FCU-RAT",
+                "--step-id",
+                "heating_test",
+                "--command-percents",
+                "12,24",
+                "--dwell-seconds",
+                "0.05",
+                "--technician-name",
+                "Alex Tech",
+                "--note",
+                "multi",
+                "--timeout-seconds",
+                "0.5",
+                "--retries",
+                "1",
+            )
+            self.assertEqual(0, sw.returncode)
+            doc = json.loads(
+                (self.run_dir / "artifacts" / "commissioning_report.json").read_text(encoding="utf-8")
+            )
+            sweeps = [e for e in doc["entries"] if e.get("kind") == "thermal_modulation_sweep"]
+            self.assertEqual(2, len(sweeps))
+            self.assertEqual(12.0, sweeps[0]["command_percent"])
+            self.assertEqual(24.0, sweeps[1]["command_percent"])
+            rat_rows = [r for r in sweeps[0]["readings"] if r.get("logical_object_id") == "rat_degC"]
+            self.assertEqual(1, len(rat_rows))
+            self.assertEqual("read_ok", rat_rows[0]["status"])
+            self.assertEqual("21.25", rat_rows[0]["value_str"])
+            self.assertEqual("session", rat_rows[0].get("source"))
+        finally:
+            server.stop()
+
+    def test_record_step_modulation_on_pass_requires_percents(self) -> None:
+        from test_import_compiler import _write_profile
+
+        server = _FakeBipUdpServer(
+            device_instance=21001,
+            analog_input_present=20.0,
+            msv_present=1,
+            av_heat_present=5.0,
+        )
+        server.start()
+        try:
+            time.sleep(0.05)
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            profiles_dir = self.run_dir / "profiles-rec-mod"
+            profiles_dir.mkdir(parents=True, exist_ok=True)
+            _write_profile(
+                profiles_dir / "unit-rec-mod.json",
+                profile_id="fcu_rec_mod_v1",
+                display_name="Rec mod",
+                write_allowlist=["av_electric_heat_command"],
+                read_allowlist=["ai_sat", "av_electric_heat_command"],
+                objects=[
+                    {
+                        "id": "msv_test_mode",
+                        "writable": True,
+                        "bacnet": {"object_type": "multiStateValue", "instance": 50},
+                    },
+                    {
+                        "id": "ai_sat",
+                        "writable": False,
+                        "bacnet": {"object_type": "analogInput", "instance": 2},
+                    },
+                    {
+                        "id": "av_electric_heat_command",
+                        "writable": True,
+                        "bacnet": {"object_type": "analogValue", "instance": 4},
+                    },
+                ],
+                commissioning_flow=[
+                    {"step_id": "prep", "label": "Prep"},
+                    {
+                        "step_id": "heat",
+                        "label": "Heat",
+                        "actions": [
+                            {
+                                "type": "modulate_actuator_log_sat_for_report",
+                                "command_object_id": "av_electric_heat_command",
+                                "result_supply_temperature_object_id": "ai_sat",
+                            }
+                        ],
+                    },
+                ],
+            )
+            csv_path = self.run_dir / "controllers-rec-mod.csv"
+            with csv_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=[
+                        "controller_label",
+                        "profile_id",
+                        "bacnet_device_instance",
+                        "bacnet_ip",
+                        "bacnet_port",
+                        "building_floor",
+                        "notes",
+                    ],
+                )
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "controller_label": "FCU-REC",
+                        "profile_id": "fcu_rec_mod_v1",
+                        "bacnet_device_instance": "21001",
+                        "bacnet_ip": "127.0.0.1",
+                        "bacnet_port": str(server.port),
+                        "building_floor": "L01",
+                        "notes": "",
+                    }
+                )
+            self.assertEqual(
+                0,
+                _run_runtime(
+                    "init-run",
+                    "--run-dir",
+                    str(self.run_dir),
+                    "--job-id",
+                    "job-rec-mod",
+                    "--controllers-csv",
+                    str(csv_path),
+                    "--profiles-dir",
+                    str(profiles_dir),
+                    "--scenarios-dir",
+                    str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+                ).returncode,
+            )
+            self.assertEqual(0, _run_runtime("compile-import", "--run-dir", str(self.run_dir)).returncode)
+            self.assertEqual(
+                0,
+                _run_runtime(
+                    "init-flow",
+                    "--run-dir",
+                    str(self.run_dir),
+                    "--controller-label",
+                    "FCU-REC",
+                ).returncode,
+            )
+            self.assertEqual(
+                0,
+                _run_runtime(
+                    "record-step",
+                    "--run-dir",
+                    str(self.run_dir),
+                    "--controller-label",
+                    "FCU-REC",
+                    "--step-id",
+                    "prep",
+                    "--status",
+                    "passed",
+                    "--technician-name",
+                    "Alex Tech",
+                    "--note",
+                    "prep",
+                ).returncode,
+            )
+            bad = _run_runtime(
+                "record-step",
+                "--run-dir",
+                str(self.run_dir),
+                "--controller-label",
+                "FCU-REC",
+                "--step-id",
+                "heat",
+                "--status",
+                "passed",
+                "--technician-name",
+                "Alex Tech",
+                "--note",
+                "no percents",
+            )
+            self.assertEqual(2, bad.returncode)
+            self.assertIn("--modulation-command-percents", bad.stdout)
+            ok = _run_runtime(
+                "record-step",
+                "--run-dir",
+                str(self.run_dir),
+                "--controller-label",
+                "FCU-REC",
+                "--step-id",
+                "heat",
+                "--status",
+                "passed",
+                "--technician-name",
+                "Alex Tech",
+                "--note",
+                "with percents",
+                "--modulation-command-percents",
+                "15,30",
+                "--modulation-dwell-seconds",
+                "0.05",
+                "--bacnet-timeout-seconds",
+                "0.5",
+                "--bacnet-retries",
+                "1",
+            )
+            self.assertEqual(0, ok.returncode)
+            doc = json.loads(
+                (self.run_dir / "artifacts" / "commissioning_report.json").read_text(encoding="utf-8")
+            )
+            sweeps = [e for e in doc["entries"] if e.get("kind") == "thermal_modulation_sweep"]
+            self.assertEqual(2, len(sweeps))
+            self.assertEqual("record_step", sweeps[0].get("trigger"))
+            flow_path = self.run_dir / "state" / "flows" / "FCU-REC.json"
+            heat = [s for s in json.loads(flow_path.read_text(encoding="utf-8"))["steps"] if s["step_id"] == "heat"][0]
+            self.assertIn("last_modulation_sweep", heat)
+            self.assertEqual(2, heat["last_modulation_sweep"]["sweep_steps"])
+        finally:
+            server.stop()
+
+    def test_record_step_skip_when_requires_session_flag(self) -> None:
+        from test_import_compiler import _write_profile
+
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        profiles_dir = self.run_dir / "profiles-skip-gate"
+        profiles_dir.mkdir(parents=True, exist_ok=True)
+        _write_profile(
+            profiles_dir / "unit-skip-gate.json",
+            profile_id="fcu_skip_gate_v1",
+            display_name="Skip gate",
+            read_allowlist=["ai_sat"],
+            commissioning_flow=[
+                {"step_id": "prep", "label": "Prep"},
+                {
+                    "step_id": "cool_plant",
+                    "label": "Cooling plant test",
+                    "skippable": True,
+                    "skip_when": ["chilled_water_not_ready", "plant_not_commissioned"],
+                },
+            ],
+        )
+        csv_path = self.run_dir / "controllers-skip-gate.csv"
+        with csv_path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(
+                handle,
+                fieldnames=[
+                    "controller_label",
+                    "profile_id",
+                    "bacnet_device_instance",
+                    "bacnet_ip",
+                    "bacnet_port",
+                    "building_floor",
+                    "notes",
+                ],
+            )
+            writer.writeheader()
+            writer.writerow(
+                {
+                    "controller_label": "FCU-SKIP",
+                    "profile_id": "fcu_skip_gate_v1",
+                    "bacnet_device_instance": "21001",
+                    "bacnet_ip": "192.168.1.50",
+                    "bacnet_port": "47808",
+                    "building_floor": "L01",
+                    "notes": "",
+                }
+            )
+        self.assertEqual(
+            0,
+            _run_runtime(
+                "init-run",
+                "--run-dir",
+                str(self.run_dir),
+                "--job-id",
+                "job-skip-gate",
+                "--controllers-csv",
+                str(csv_path),
+                "--profiles-dir",
+                str(profiles_dir),
+                "--scenarios-dir",
+                str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+            ).returncode,
+        )
+        self.assertEqual(0, _run_runtime("compile-import", "--run-dir", str(self.run_dir)).returncode)
+        self.assertEqual(
+            0,
+            _run_runtime(
+                "init-flow",
+                "--run-dir",
+                str(self.run_dir),
+                "--controller-label",
+                "FCU-SKIP",
+            ).returncode,
+        )
+        self.assertEqual(
+            0,
+            _run_runtime(
+                "record-step",
+                "--run-dir",
+                str(self.run_dir),
+                "--controller-label",
+                "FCU-SKIP",
+                "--step-id",
+                "prep",
+                "--status",
+                "passed",
+                "--technician-name",
+                "Alex Tech",
+                "--note",
+                "prep",
+            ).returncode,
+        )
+        blocked = _run_runtime(
+            "record-step",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-SKIP",
+            "--step-id",
+            "cool_plant",
+            "--status",
+            "skipped",
+            "--technician-name",
+            "Alex Tech",
+            "--note",
+            "no chw",
+        )
+        self.assertEqual(2, blocked.returncode)
+        self.assertIn("chilled_water_not_ready", blocked.stdout)
+        events = (self.run_dir / "logs" / "events.jsonl").read_text(encoding="utf-8").strip().splitlines()
+        rej = [json.loads(line) for line in events if json.loads(line).get("event") == "flow_step_rejected"]
+        self.assertEqual("SKIP_GATE", rej[-1]["reason_code"])
+        self.assertEqual(
+            0,
+            _run_runtime(
+                "set-session-value",
+                "--run-dir",
+                str(self.run_dir),
+                "--controller-label",
+                "FCU-SKIP",
+                "--key",
+                "chilled_water_not_ready",
+                "--value",
+                "true",
+                "--technician-name",
+                "Alex Tech",
+                "--note",
+                "plant down",
+            ).returncode,
+        )
+        allowed = _run_runtime(
+            "record-step",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-SKIP",
+            "--step-id",
+            "cool_plant",
+            "--status",
+            "skipped",
+            "--technician-name",
+            "Alex Tech",
+            "--note",
+            "skip with reason",
+        )
+        self.assertEqual(0, allowed.returncode)

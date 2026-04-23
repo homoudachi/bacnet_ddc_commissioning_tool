@@ -38,12 +38,15 @@ def _write_profile(
     read_allowlist: list[str] | None = None,
     point_checkout: list[dict] | None = None,
     commissioning_flow: list[dict] | None = None,
+    objects: list[dict] | None = None,
 ) -> None:
     data: dict = {
                 "schema_version": "0.1-example",
                 "profile_id": profile_id,
                 "display_name": display_name,
-                "objects": [
+                "objects": objects
+                if objects is not None
+                else [
                     {
                         "id": "msv_test_mode",
                         "writable": True,
@@ -268,6 +271,47 @@ class ImportCompilerTests(unittest.TestCase):
         self.assertEqual(
             "modulate_actuator_log_sat_for_report",
             flow[0]["actions"][0]["type"],
+        )
+
+    def test_compile_includes_skip_when_codes(self) -> None:
+        controllers = FIXTURES / "controllers-compile-skipwhen.csv"
+        output_json = FIXTURES / "runtime-job-skipwhen.json"
+        report_json = FIXTURES / "runtime-job-skipwhen-report.json"
+        _write_csv(
+            controllers,
+            [
+                {
+                    "controller_label": "FCU-SK",
+                    "profile_id": "profile_skipwhen",
+                    "bacnet_device_instance": "21001",
+                    "bacnet_ip": "192.168.1.50",
+                    "bacnet_port": "47808",
+                    "building_floor": "L01",
+                    "notes": "",
+                },
+            ],
+        )
+        _write_profile(
+            self.profiles_dir / "unit-profile-skipwhen.json",
+            profile_id="profile_skipwhen",
+            display_name="Skip when",
+            read_allowlist=["ai_sat"],
+            commissioning_flow=[
+                {
+                    "step_id": "cool_skip",
+                    "label": "Cool",
+                    "skippable": True,
+                    "skip_when": ["chilled_water_not_ready", "plant_not_commissioned"],
+                }
+            ],
+        )
+        result = _run_compiler(controllers, self.profiles_dir, output_json, report_json)
+        self.assertEqual(0, result.returncode)
+        runtime = json.loads(output_json.read_text(encoding="utf-8"))
+        flow = runtime["controllers"][0]["commissioning_flow"]
+        self.assertEqual(
+            ["chilled_water_not_ready", "plant_not_commissioned"],
+            flow[0].get("skip_when"),
         )
 
     def test_compile_fails_when_profile_is_missing(self) -> None:

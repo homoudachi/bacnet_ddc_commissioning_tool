@@ -16,10 +16,10 @@ The commissioning report file (`artifacts/commissioning_report.json`) started wi
    - **`append-commissioning-modulation-batch`** — one **`thermal_modulation_batch`** wrapping multiple samples from a JSON file (for scripted sweeps).
 3. Extend **`export-commissioning-report`** with **`--output-csv`** to flatten **`thermal_modulation_sample`**, **`thermal_modulation_batch`**, and **`thermal_modulation_sweep`** (extra columns `command_object_id`, `command_percent`, `dwell_seconds` where applicable).
 4. **`--allow-empty`** stub uses schema **0.2** for consistency.
-5. **`bacnet-modulation-sweep`** writes command percent then reads SAT/RAT/context per profile **`modulate_actuator_log_sat_for_report`** action (v1 slice; no automated multi-point sweep loop yet).
+5. **`bacnet-modulation-sweep`** writes command percent(s) then reads SAT/RAT/context per profile **`modulate_actuator_log_sat_for_report`** action. **`--command-percents`** runs one **`thermal_modulation_sweep`** entry per value. When BACnet RAT is absent or not in **`objects_by_id`**, **`session_return_air_temperature_key`** supplies a reading row with **`source: session`** (operator must **`set-session-value`**). **`record-step`** may run the same sweep on **`passed` / `manual_passed`** when **`--modulation-command-percents`** is supplied (or **`--no-run-modulation-on-pass`** to disable).
 
 ## Consequences
 
 - Operators or external scripts can log modulation **snapshots** without implementing the full step engine.
-- CSV is **modulation-only**; point-checkout entries remain JSON-only until a unified export schema is defined.
-- Full automation (writes + timed reads driven by profile actions) remains future work; these commands **read only** (writes stay on **`dry-run-bacnet-write --execute`** or future sweep command).
+- CSV is **modulation-only**; point-checkout entries remain JSON-only until a unified export schema is defined. Sweep rows may include **`read_source`** (`bacnet` / `session`).
+- **`append-commissioning-modulation-sample`** / **`append-commissioning-modulation-batch`** are read-only; **`bacnet-modulation-sweep`** performs allowlisted **WriteProperty** then reads. A full profile-driven step engine (dwell policies, aborts, UI) remains future work.

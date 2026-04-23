@@ -411,6 +411,15 @@ def _extract_commissioning_steps(profile: dict[str, Any]) -> list[dict[str, Any]
             "skippable": bool(item.get("skippable", False)),
             "requires_step_ids": requires_step_ids,
         }
+        raw_skip_when = item.get("skip_when")
+        if isinstance(raw_skip_when, list) and raw_skip_when:
+            skip_codes: list[str] = []
+            for code in raw_skip_when:
+                text = str(code).strip()
+                if text:
+                    skip_codes.append(text)
+            if skip_codes:
+                step_row["skip_when"] = skip_codes
         if report_ref:
             step_row["report_ref"] = report_ref
         raw_actions = item.get("actions")

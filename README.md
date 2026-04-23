@@ -114,6 +114,12 @@ python3 tools/runtime/app.py record-step \
 # When a profile step has step_type bacnet_point_checkout or run_point_checkout_on_pass,
 # passing the step runs profile point_checkout BACnet reads first; on failure the step is not recorded.
 # Optional: --bacnet-timeout-seconds 0.5 --bacnet-retries 1 --bacnet-bind-port 0 --apdu-timeout 15 [--bacnet-checkout-strict]
+# When a step defines modulate_actuator_log_sat_for_report, passing/manual-pass runs a BACnet sweep unless
+# --no-run-modulation-on-pass; provide --modulation-command-percents 0,50,100 (comma list) and optional
+# --modulation-dwell-seconds, --modulation-timeout-seconds, --modulation-retries, --modulation-bacnet-bind-port,
+# --modulation-apdu-timeout.
+# Skippable steps with profile skip_when: [...] require set-session-value on one listed key (truthy: true/1/yes)
+# before record-step --status skipped (CHW readiness gating).
 
 # 4b) Export append-only commissioning report (after gated record-step or future writers)
 # python3 tools/runtime/app.py export-commissioning-report --run-dir artifacts/runtime-run
@@ -135,12 +141,16 @@ python3 tools/runtime/app.py record-step \
 # python3 tools/runtime/app.py bacnet-modulation-sweep --run-dir artifacts/runtime-run \
 #   --controller-label FCU-01A --step-id heating_test --command-percent 50 \
 #   --dwell-seconds 0.5 --technician-name "Alex Tech" [--note "..."] [--report-ref override]
+# Multi-point sweep: --command-percents 0,50,100 (comma list; one report entry per value). Session RAT: when
+# BACnet RAT object_id is missing or not in profile, set session_return_air_temperature_key (e.g. rat_degC)
+# via set-session-value; sweep readings include source=session vs bacnet.
 
 # Init-flow: second init for the same controller without --force is rejected (avoids silent overwrite).
 # Record-step rule enforcement:
 # - Outcomes use passed, manual_passed, failed, or skipped (pending is not recordable)
 # - passed/manual_passed/failed require prior steps to be passed, manual_passed, or skipped (a prior failed blocks until resolved)
 # - A step can only be marked skipped if that step is explicitly skippable in profile flow
+# - skippable steps with skip_when require a truthy session value on one of the listed keys before skip
 # - A step with explicit requires_step_ids dependencies cannot pass/fail until those dependencies complete
 # - Every transition appends step history with previous_status/attempted_status/new_status/reason_code
 # - Rejected transitions are logged as flow_step_rejected with machine-readable rejection reason codes
