@@ -617,6 +617,79 @@ class RuntimeCliTests(unittest.TestCase):
         self.assertEqual("read_ok", read_payload["status"])
         self.assertIn("3", read_payload.get("read", {}).get("value_str", ""))
 
+    def test_bacnet_point_checkout_all_ok_with_fake_bacnet_server(self) -> None:
+        server = _FakeBipUdpServer(device_instance=21001, analog_input_present=22.0, msv_present=2)
+        server.start()
+        try:
+            time.sleep(0.05)
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            csv_path = self.run_dir / "controllers-local.csv"
+            with csv_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=[
+                        "controller_label",
+                        "profile_id",
+                        "bacnet_device_instance",
+                        "bacnet_ip",
+                        "bacnet_port",
+                        "building_floor",
+                        "notes",
+                    ],
+                )
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "controller_label": "FCU-LOCAL",
+                        "profile_id": "fcu_2pipe_chw_electric_heat_v1",
+                        "bacnet_device_instance": "21001",
+                        "bacnet_ip": "127.0.0.1",
+                        "bacnet_port": str(server.port),
+                        "building_floor": "L01",
+                        "notes": "test",
+                    }
+                )
+
+            init_result = _run_runtime(
+                "init-run",
+                "--run-dir",
+                str(self.run_dir),
+                "--job-id",
+                "job-point-checkout-fake",
+                "--controllers-csv",
+                str(csv_path),
+                "--profiles-dir",
+                str(ROOT / "docs" / "examples"),
+                "--scenarios-dir",
+                str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+            )
+            self.assertEqual(0, init_result.returncode)
+            compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+            self.assertEqual(0, compile_result.returncode)
+
+            result = _run_runtime(
+                "bacnet-point-checkout",
+                "--run-dir",
+                str(self.run_dir),
+                "--controller-label",
+                "FCU-LOCAL",
+                "--timeout-seconds",
+                "0.5",
+                "--retries",
+                "1",
+            )
+        finally:
+            server.stop()
+
+        self.assertEqual(0, result.returncode)
+        payload = json.loads(result.stdout)
+        self.assertTrue(payload["all_read_ok"])
+        self.assertEqual(2, payload["point_count"])
+        statuses = [r.get("status") for r in payload.get("reads", [])]
+        self.assertEqual(["read_ok", "read_ok"], statuses)
+        self.assertIn("22.0", payload["reads"][0].get("read", {}).get("value_str", ""))
+        self.assertIn("2", payload["reads"][1].get("read", {}).get("value_str", ""))
+
     def test_export_run_summary_requires_runtime_job(self) -> None:
         init_result = _run_runtime(
             "init-run",

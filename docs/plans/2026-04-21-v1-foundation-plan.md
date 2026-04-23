@@ -62,7 +62,7 @@ Use this order to reduce rework and unblock parallel work later.
 ### Phase 3 — BACnet adapter + simulator-first development
 
 - [ ] Implement BACnet abstraction layer (read/write/subscribe/timeouts/retry policy).
-- [ ] Add simulator-backed integration tests for core read/write and mode transitions.
+- [x] Add simulator-backed integration tests for core read/write and mode transitions (loopback fake BACnet peer in `tests/test_runtime_cli.py` exercises `bacnet-read`, `dry-run-bacnet-write --execute`, and `bacnet-point-checkout` against BACpypes3-shaped frames).
 - [ ] Add commissioning safety constraints (write allowlist, per-mode restrictions, abort rules).
 - [ ] Document network assumptions and expected failure handling behavior.
 
