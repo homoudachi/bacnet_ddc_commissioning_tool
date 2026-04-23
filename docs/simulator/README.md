@@ -71,6 +71,13 @@ Minimum scenario set:
 4. **required_point_missing**: profile-required object missing or wrong type
 5. **chw_unavailable**: cooling plant unavailable path with skip reason flow
 
+Starter scenario fixtures in-repo:
+
+- `docs/examples/simulator-scenarios/happy-path.example.json`
+- `docs/examples/simulator-scenarios/identity-mismatch.example.json`
+- `docs/examples/simulator-scenarios/timeout-burst.example.json`
+- `docs/examples/simulator-scenarios/required-point-missing.example.json`
+
 ## CI pass/fail gates
 
 CI run fails if any of the following is true:
@@ -97,6 +104,39 @@ Expected summary includes:
 
 - `found=3 total=3 unresolved=0 strict_pass=true`
 - `reachable_verified=3`
+
+Machine-readable summary:
+
+```bash
+python3 tools/simulator/list_verifier.py \
+  --controllers-csv docs/examples/site-controllers.template.csv \
+  --scenario-json docs/examples/simulator-scenarios/identity-mismatch.example.json \
+  --strict \
+  --output json
+```
+
+### 0b) Run the orchestrator wrapper (profile + scenario)
+
+```bash
+python3 tools/simulator/orchestrator.py \
+  --controllers-csv docs/examples/site-controllers.template.csv \
+  --scenarios-dir docs/examples/simulator-scenarios \
+  --profile ci \
+  --scenario happy-path \
+  --strict
+```
+
+JSON output mode through orchestrator:
+
+```bash
+python3 tools/simulator/orchestrator.py \
+  --controllers-csv docs/examples/site-controllers.template.csv \
+  --scenarios-dir docs/examples/simulator-scenarios \
+  --profile ci \
+  --scenario identity-mismatch \
+  --strict \
+  --output json
+```
 
 ### 1) Render and inspect topology
 
@@ -149,6 +189,7 @@ Use this checklist in order:
 - Topology spec: `docker/simulator/docker-compose.yml`
 - Simulator planning sequence: `docs/plans/2026-04-21-bacnet-simulator-plan.md`
 - Verifier CLI: `tools/simulator/list_verifier.py`
+- Orchestrator wrapper: `tools/simulator/orchestrator.py`
 - Product record: `docs/project.md`
 
 ## Verification status (2026-04-21)

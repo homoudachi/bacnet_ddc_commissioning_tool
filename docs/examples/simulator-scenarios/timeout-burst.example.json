@@ -1,0 +1,16 @@
+{
+  "rows": [
+    {
+      "controller_label": "FCU-01A",
+      "status": "unreachable_timeout"
+    },
+    {
+      "controller_label": "FCU-01B",
+      "status": "reachable_verified"
+    },
+    {
+      "controller_label": "HRV-01",
+      "status": "reachable_verified"
+    }
+  ]
+}

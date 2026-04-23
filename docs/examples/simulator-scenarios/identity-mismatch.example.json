@@ -1,0 +1,16 @@
+{
+  "rows": [
+    {
+      "controller_label": "FCU-01A",
+      "status": "reachable_verified"
+    },
+    {
+      "controller_label": "FCU-01B",
+      "status": "identity_mismatch"
+    },
+    {
+      "controller_label": "HRV-01",
+      "status": "reachable_verified"
+    }
+  ]
+}

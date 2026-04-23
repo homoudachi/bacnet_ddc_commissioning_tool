@@ -46,6 +46,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--controllers-csv", required=True, type=Path)
     parser.add_argument("--scenario-json", required=True, type=Path)
     parser.add_argument(
+        "--output",
+        "--output-format",
+        dest="output",
+        choices=["text", "json"],
+        default="text",
+        help="Summary output format.",
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help="Fail for any non-reachable required row.",
@@ -136,8 +144,21 @@ def emit_summary(
     strict: bool,
     strict_pass: bool,
     status_counts: Counter[str],
+    output: str,
 ) -> None:
     found = total - unresolved
+    if output == "json":
+        payload = {
+            "found": found,
+            "total": total,
+            "unresolved": unresolved,
+            "strict_mode": strict,
+            "strict_pass": strict_pass,
+            "status_counts": dict(status_counts),
+        }
+        print(json.dumps(payload, sort_keys=True))
+        return
+
     print(
         f"found={found} total={total} unresolved={unresolved} "
         f"strict_pass={'true' if strict_pass else 'false'} "
@@ -168,6 +189,7 @@ def main() -> int:
         strict=args.strict,
         strict_pass=strict_pass,
         status_counts=status_counts,
+        output=args.output,
     )
     return 0 if strict_pass else 2
 

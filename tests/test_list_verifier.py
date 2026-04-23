@@ -46,6 +46,24 @@ def _run_verifier(list_csv: pathlib.Path, scenario_json: pathlib.Path, strict: b
     return subprocess.run(cmd, capture_output=True, text=True, check=False)
 
 
+def _run_verifier_json(
+    list_csv: pathlib.Path, scenario_json: pathlib.Path, strict: bool = True
+) -> subprocess.CompletedProcess[str]:
+    cmd = [
+        sys.executable,
+        str(CLI),
+        "--controllers-csv",
+        str(list_csv),
+        "--scenario-json",
+        str(scenario_json),
+        "--output",
+        "json",
+    ]
+    if strict:
+        cmd.append("--strict")
+    return subprocess.run(cmd, capture_output=True, text=True, check=False)
+
+
 class ListVerifierCliTests(unittest.TestCase):
     def setUp(self) -> None:
         FIXTURES.mkdir(parents=True, exist_ok=True)
@@ -300,3 +318,49 @@ class ListVerifierCliTests(unittest.TestCase):
 
         self.assertEqual(2, result.returncode)
         self.assertIn("Missing required CSV columns", result.stdout)
+
+    def test_json_output_mode_emits_machine_readable_summary(self) -> None:
+        controllers = FIXTURES / "controllers-json-mode.csv"
+        scenario = FIXTURES / "scenario-json-mode.json"
+        _write_csv(
+            controllers,
+            [
+                {
+                    "controller_label": "FCU-01A",
+                    "profile_id": "fcu_2pipe_chw_electric_heat_v1",
+                    "bacnet_device_instance": "21001",
+                    "bacnet_ip": "192.168.1.50",
+                    "bacnet_port": "47808",
+                    "building_floor": "L01",
+                    "notes": "example row",
+                },
+                {
+                    "controller_label": "HRV-01",
+                    "profile_id": "hrv_counterflow_erv_v1",
+                    "bacnet_device_instance": "22001",
+                    "bacnet_ip": "192.168.1.60",
+                    "bacnet_port": "47808",
+                    "building_floor": "Roof",
+                    "notes": "example row",
+                },
+            ],
+        )
+        _write_json(
+            scenario,
+            {
+                "rows": [
+                    {"controller_label": "FCU-01A", "status": "reachable_verified"},
+                    {"controller_label": "HRV-01", "status": "identity_mismatch"},
+                ]
+            },
+        )
+
+        result = _run_verifier_json(controllers, scenario, strict=True)
+
+        self.assertEqual(2, result.returncode)
+        parsed = json.loads(result.stdout)
+        self.assertEqual(2, parsed["total"])
+        self.assertEqual(1, parsed["found"])
+        self.assertEqual(1, parsed["unresolved"])
+        self.assertFalse(parsed["strict_pass"])
+        self.assertEqual(1, parsed["status_counts"]["identity_mismatch"])
