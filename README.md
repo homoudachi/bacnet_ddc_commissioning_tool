@@ -2,7 +2,7 @@
 
 ## Documentation
 
-- **Current repo status (2026-04-21):** docs-first project with early runnable tooling (simulator verifier/orchestrator and import compiler). There is no full end-user commissioning application yet.
+- **Current repo status (2026-04-23):** docs-first project with early runnable tooling (simulator verifier/orchestrator, import compiler, and Python runtime CLI for run state, commissioning flow sign-off and inspection, and BACnet/IP probes). There is no full end-user commissioning application yet.
 - **[Living project doc](docs/project.md)** — product requirements, commissioning flows, examples, import direction, and reports (update as the product evolves).
 - **[ADRs](docs/adr/)** — short decision records when choices are non-obvious.
 - **[Slice plans](docs/plans/)** — time-boxed implementation plans; archive or remove when the slice ships.
@@ -42,6 +42,25 @@ python3 tools/runtime/app.py init-flow \
   --run-dir artifacts/runtime-run \
   --controller-label FCU-01A
 
+# 3b) Inspect flow state (JSON on stdout)
+python3 tools/runtime/app.py list-flows --run-dir artifacts/runtime-run
+python3 tools/runtime/app.py show-flow \
+  --run-dir artifacts/runtime-run \
+  --controller-label FCU-01A
+
+# 3c) Operator-entered session values (e.g. manual RAT when profile has no BACnet RAT)
+# Requires init-flow first; stored under state/sessions/<controller_label>.json
+python3 tools/runtime/app.py set-session-value \
+  --run-dir artifacts/runtime-run \
+  --controller-label FCU-01A \
+  --key rat_degC \
+  --value "22.5" \
+  --technician-name "Alex Tech" \
+  --note "Measured return air at grille"
+python3 tools/runtime/app.py show-session \
+  --run-dir artifacts/runtime-run \
+  --controller-label FCU-01A
+
 # 4) Record technician signoff for a step
 python3 tools/runtime/app.py record-step \
   --run-dir artifacts/runtime-run \
@@ -52,11 +71,15 @@ python3 tools/runtime/app.py record-step \
   --note "Reached target airflow in tolerance"
 
 # Record-step rule enforcement:
-# - A step cannot be marked passed/manual_passed until all prior steps are completed
+# - Outcomes are recorded with passed, manual_passed, failed, or skipped (pending is not recordable)
+# - A step cannot be marked passed/manual_passed/failed until all prior steps reach a completed outcome
+#   (passed, manual_passed, or skipped); a prior step that failed blocks later steps until it is resolved
 # - A step can only be marked skipped if that step is explicitly skippable in profile flow
-# - A step with explicit requires_step_ids dependencies cannot pass until those dependencies complete
+# - A step with explicit requires_step_ids dependencies cannot pass/fail until those dependencies complete
 # - Every transition appends step history with previous_status/attempted_status/new_status/reason_code
 # - Rejected transitions are logged as flow_step_rejected with machine-readable rejection reason codes
+# - list-flows / show-flow append flows_listed / flow_viewed to logs/events.jsonl
+# - set-session-value / show-session append session_value_set / session_viewed
 
 # 5) Verify one simulator scenario
 python3 tools/runtime/app.py verify-simulator \

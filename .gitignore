@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Runtime CLI tests use this path as a scratch run directory.
+tests/fixtures/runtime-run/
