@@ -54,6 +54,9 @@ python3 tools/runtime/app.py record-step \
 # Record-step rule enforcement:
 # - A step cannot be marked passed/manual_passed until all prior steps are completed
 # - A step can only be marked skipped if that step is explicitly skippable in profile flow
+# - A step with explicit requires_step_ids dependencies cannot pass until those dependencies complete
+# - Every transition appends step history with previous_status/attempted_status/new_status/reason_code
+# - Rejected transitions are logged as flow_step_rejected with machine-readable rejection reason codes
 
 # 5) Verify one simulator scenario
 python3 tools/runtime/app.py verify-simulator \

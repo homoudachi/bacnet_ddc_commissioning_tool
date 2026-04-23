@@ -352,13 +352,23 @@ class RuntimeCliTests(unittest.TestCase):
         self.assertEqual("passed", step["status"])
         self.assertEqual("Alex Tech", step["technician_name"])
         self.assertIn("Reached target airflow", step["note"])
+        self.assertIn("history", step)
+        self.assertGreaterEqual(len(step["history"]), 1)
+        self.assertEqual("pending", step["history"][-1]["previous_status"])
+        self.assertEqual("passed", step["history"][-1]["new_status"])
+        self.assertEqual("status_update", step["history"][-1]["reason_code"])
 
         lines = (
             self.run_dir / "logs" / "events.jsonl"
         ).read_text(encoding="utf-8").strip().splitlines()
-        events = [json.loads(line)["event"] for line in lines]
+        parsed_events = [json.loads(line) for line in lines]
+        events = [entry["event"] for entry in parsed_events]
         self.assertIn("flow_initialized", events)
         self.assertIn("flow_step_recorded", events)
+        flow_step_event = [entry for entry in parsed_events if entry["event"] == "flow_step_recorded"][-1]
+        self.assertEqual("pending", flow_step_event["previous_status"])
+        self.assertEqual("passed", flow_step_event["new_status"])
+        self.assertEqual("status_update", flow_step_event["reason_code"])
 
     def test_record_step_rejects_out_of_order_transition(self) -> None:
         init_result = _run_runtime(
@@ -407,6 +417,14 @@ class RuntimeCliTests(unittest.TestCase):
         self.assertIn("invalid step transition", result.stdout)
         self.assertIn("cannot be marked passed before", result.stdout)
 
+        lines = (
+            self.run_dir / "logs" / "events.jsonl"
+        ).read_text(encoding="utf-8").strip().splitlines()
+        parsed_events = [json.loads(line) for line in lines]
+        rejection_events = [entry for entry in parsed_events if entry["event"] == "flow_step_rejected"]
+        self.assertGreaterEqual(len(rejection_events), 1)
+        self.assertEqual("PREREQ_ORDER", rejection_events[-1]["reason_code"])
+
     def test_record_step_rejects_skip_when_step_not_marked_skippable(self) -> None:
         init_result = _run_runtime(
             "init-run",
@@ -452,6 +470,14 @@ class RuntimeCliTests(unittest.TestCase):
         self.assertEqual(2, result.returncode)
         self.assertIn("invalid step transition", result.stdout)
         self.assertIn("is not skippable", result.stdout)
+
+        lines = (
+            self.run_dir / "logs" / "events.jsonl"
+        ).read_text(encoding="utf-8").strip().splitlines()
+        parsed_events = [json.loads(line) for line in lines]
+        rejection_events = [entry for entry in parsed_events if entry["event"] == "flow_step_rejected"]
+        self.assertGreaterEqual(len(rejection_events), 1)
+        self.assertEqual("STEP_NOT_SKIPPABLE", rejection_events[-1]["reason_code"])
 
     def test_record_step_rejects_when_explicit_dependency_not_satisfied(self) -> None:
         init_result = _run_runtime(
@@ -508,3 +534,11 @@ class RuntimeCliTests(unittest.TestCase):
         self.assertEqual(2, result.returncode)
         self.assertIn("invalid step transition", result.stdout)
         self.assertIn("requires completed dependency", result.stdout)
+
+        lines = (
+            self.run_dir / "logs" / "events.jsonl"
+        ).read_text(encoding="utf-8").strip().splitlines()
+        parsed_events = [json.loads(line) for line in lines]
+        rejection_events = [entry for entry in parsed_events if entry["event"] == "flow_step_rejected"]
+        self.assertGreaterEqual(len(rejection_events), 1)
+        self.assertEqual("DEPENDENCY_UNSATISFIED", rejection_events[-1]["reason_code"])

@@ -85,10 +85,13 @@ def _validate_step_transition(
     steps: list[dict],
     step: dict,
     requested_status: str,
-) -> str | None:
-    """Return error string when transition is invalid, otherwise None."""
-    if requested_status == "skipped" and not bool(step.get("skippable", False)):
-        return f"step '{step.get('step_id')}' is not skippable"
+) -> dict[str, str] | None:
+    """Return reason dict when transition is invalid, otherwise None."""
+    if requested_status == "skipped" and step.get("skippable") is not True:
+        return {
+            "reason_code": "step_not_skippable",
+            "message": f"step '{step.get('step_id')}' is not skippable",
+        }
 
     if requested_status in {"passed", "manual_passed"}:
         step_id = step.get("step_id")
@@ -97,30 +100,53 @@ def _validate_step_transition(
             for required_id in requires_step_ids:
                 required = _lookup_step_by_id(steps, str(required_id))
                 if required is None:
-                    return (
-                        f"step '{step_id}' requires completed dependency "
-                        f"'{required_id}' which is not present in flow"
-                    )
+                    return {
+                        "reason_code": "dependency_missing_from_flow",
+                        "message": (
+                            f"step '{step_id}' requires completed dependency "
+                            f"'{required_id}' which is not present in flow"
+                        ),
+                    }
                 required_status = str(required.get("status", "pending"))
                 if not _is_terminal_prereq_status(required_status):
-                    return (
-                        f"step '{step_id}' requires completed dependency "
-                        f"'{required_id}'"
-                    )
+                    return {
+                        "reason_code": "dependency_not_completed",
+                        "message": (
+                            f"step '{step_id}' requires completed dependency "
+                            f"'{required_id}'"
+                        ),
+                    }
         current_index = next(
             (idx for idx, item in enumerate(steps) if item.get("step_id") == step_id),
             None,
         )
         if current_index is None:
-            return f"step '{step_id}' not found in flow sequence"
+            return {
+                "reason_code": "step_not_found_in_sequence",
+                "message": f"step '{step_id}' not found in flow sequence",
+            }
         for prev in steps[:current_index]:
             prev_status = str(prev.get("status", "pending"))
             if not _is_terminal_prereq_status(prev_status):
-                return (
-                    f"step '{step_id}' cannot be marked {requested_status} "
-                    f"before '{prev.get('step_id')}' is completed"
-                )
+                return {
+                    "reason_code": "prior_step_incomplete",
+                    "message": (
+                        f"step '{step_id}' cannot be marked {requested_status} "
+                        f"before '{prev.get('step_id')}' is completed"
+                    ),
+                }
     return None
+
+
+def _normalize_rejection_reason(reason_code: str) -> str:
+    mapping = {
+        "step_not_skippable": "STEP_NOT_SKIPPABLE",
+        "dependency_not_completed": "DEPENDENCY_UNSATISFIED",
+        "dependency_missing_from_flow": "DEPENDENCY_UNSATISFIED",
+        "prior_step_incomplete": "PREREQ_ORDER",
+        "step_not_found_in_sequence": "PREREQ_ORDER",
+    }
+    return mapping.get(reason_code, "INVALID_TRANSITION")
 
 
 def cmd_init_run(args: argparse.Namespace) -> int:
@@ -250,12 +276,21 @@ def cmd_init_flow(args: argparse.Namespace) -> int:
         step_id = str(step.get("step_id", "")).strip()
         if not step_id:
             continue
+        requires_step_ids = []
+        if isinstance(step.get("requires_step_ids"), list):
+            for required_id in step["requires_step_ids"]:
+                text = str(required_id).strip()
+                if text:
+                    requires_step_ids.append(text)
         steps.append(
             {
                 "step_id": step_id,
                 "label": str(step.get("label", "")).strip(),
                 "status": "pending",
+                "skippable": step.get("skippable") is True,
+                "requires_step_ids": requires_step_ids,
                 "records": [],
+                "history": [],
             }
         )
 
@@ -311,8 +346,44 @@ def cmd_record_step(args: argparse.Namespace) -> int:
         step=step,
         requested_status=args.status,
     )
+    previous_status = str(step.get("status", "pending"))
     if transition_error is not None:
-        print(f"error: invalid step transition: {transition_error}")
+        normalized_reason = _normalize_rejection_reason(
+            transition_error.get("reason_code", "")
+        )
+        rejection_message = str(
+            transition_error.get("message", "invalid step transition")
+        )
+        history = step.setdefault("history", [])
+        history.append(
+            {
+                "ts": _utc_timestamp(),
+                "previous_status": previous_status,
+                "attempted_status": args.status,
+                "new_status": previous_status,
+                "reason_code": normalized_reason,
+                "rejection_reason_code": normalized_reason,
+                "rejected": True,
+                "message": rejection_message,
+            }
+        )
+        flow_state_path.write_text(json.dumps(flow_state, indent=2), encoding="utf-8")
+        _append_event(
+            logs_path,
+            "flow_step_rejected",
+            {
+                "controller_label": args.controller_label,
+                "step_id": args.step_id,
+                "previous_status": previous_status,
+                "attempted_status": args.status,
+                "reason_code": normalized_reason,
+                "rejection_reason_code": normalized_reason,
+                "rejection_message": rejection_message,
+                "technician_name": args.technician_name,
+                "flow_state_json": str(flow_state_path.resolve()),
+            },
+        )
+        print(f"error: invalid step transition: {rejection_message}")
         return 2
 
     record = {
@@ -323,6 +394,17 @@ def cmd_record_step(args: argparse.Namespace) -> int:
     }
     records = step.setdefault("records", [])
     records.append(record)
+    history = step.setdefault("history", [])
+    history.append(
+        {
+            "ts": _utc_timestamp(),
+            "previous_status": previous_status,
+            "attempted_status": args.status,
+            "new_status": args.status,
+            "reason_code": "status_update",
+            "rejected": False,
+        }
+    )
     step["status"] = args.status
     step["technician_name"] = args.technician_name
     step["note"] = args.note
@@ -335,6 +417,9 @@ def cmd_record_step(args: argparse.Namespace) -> int:
             "controller_label": args.controller_label,
             "step_id": args.step_id,
             "status": args.status,
+            "previous_status": previous_status,
+            "new_status": args.status,
+            "reason_code": "status_update",
             "technician_name": args.technician_name,
             "flow_state_json": str(flow_state_path.resolve()),
         },
