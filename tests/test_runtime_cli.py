@@ -521,6 +521,118 @@ class RuntimeCliTests(unittest.TestCase):
         payload = json.loads(result.stdout)
         self.assertEqual("read_ok", payload["status"])
         self.assertIn("21.5", payload.get("read", {}).get("value_str", ""))
+        timeouts = payload.get("bacnet_timeouts", {})
+        self.assertEqual(3.0, timeouts.get("who_is_timeout_seconds"))
+        self.assertEqual(8.0, timeouts.get("apdu_timeout_seconds"))
+
+    def test_bacnet_read_rejects_invalid_apdu_timeout(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-bacnet-apdu-invalid",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+
+        result = _run_runtime(
+            "bacnet-read",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+            "--object-id",
+            "ai_sat",
+            "--apdu-timeout",
+            "0",
+        )
+        self.assertEqual(2, result.returncode)
+        self.assertIn("apdu-timeout", result.stdout)
+
+    def test_bacnet_read_custom_apdu_timeout_with_fake_server(self) -> None:
+        server = _FakeBipUdpServer(device_instance=21001, analog_input_present=21.5)
+        server.start()
+        try:
+            time.sleep(0.05)
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            csv_path = self.run_dir / "controllers-local.csv"
+            with csv_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=[
+                        "controller_label",
+                        "profile_id",
+                        "bacnet_device_instance",
+                        "bacnet_ip",
+                        "bacnet_port",
+                        "building_floor",
+                        "notes",
+                    ],
+                )
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "controller_label": "FCU-LOCAL",
+                        "profile_id": "fcu_2pipe_chw_electric_heat_v1",
+                        "bacnet_device_instance": "21001",
+                        "bacnet_ip": "127.0.0.1",
+                        "bacnet_port": str(server.port),
+                        "building_floor": "L01",
+                        "notes": "test",
+                    }
+                )
+
+            init_result = _run_runtime(
+                "init-run",
+                "--run-dir",
+                str(self.run_dir),
+                "--job-id",
+                "job-bacnet-read-apdu",
+                "--controllers-csv",
+                str(csv_path),
+                "--profiles-dir",
+                str(ROOT / "docs" / "examples"),
+                "--scenarios-dir",
+                str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+            )
+            self.assertEqual(0, init_result.returncode)
+            compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+            self.assertEqual(0, compile_result.returncode)
+
+            result = _run_runtime(
+                "bacnet-read",
+                "--run-dir",
+                str(self.run_dir),
+                "--controller-label",
+                "FCU-LOCAL",
+                "--object-id",
+                "ai_sat",
+                "--timeout-seconds",
+                "0.5",
+                "--retries",
+                "1",
+                "--apdu-timeout",
+                "15",
+            )
+        finally:
+            server.stop()
+
+        self.assertEqual(0, result.returncode)
+        payload = json.loads(result.stdout)
+        self.assertEqual("read_ok", payload["status"])
+        self.assertEqual(15.0, payload.get("bacnet_timeouts", {}).get("apdu_timeout_seconds"))
+        artifact = self.run_dir / "artifacts" / "bacnet_reads" / "FCU-LOCAL-ai_sat.json"
+        self.assertTrue(artifact.exists())
+        saved = json.loads(artifact.read_text(encoding="utf-8"))
+        self.assertEqual(15.0, saved.get("bacnet_timeouts", {}).get("apdu_timeout_seconds"))
 
     def test_dry_run_bacnet_write_execute_ok_with_fake_bacnet_server(self) -> None:
         server = _FakeBipUdpServer(device_instance=21001, msv_present=1)
@@ -591,10 +703,22 @@ class RuntimeCliTests(unittest.TestCase):
                 "0.5",
                 "--retries",
                 "1",
+                "--apdu-timeout",
+                "12",
             )
             self.assertEqual(0, write_result.returncode)
             write_payload = json.loads(write_result.stdout)
             self.assertEqual("write_ok", write_payload["status"])
+            self.assertEqual(
+                {"who_is_timeout_seconds": 3.0, "apdu_timeout_seconds": 12.0},
+                write_payload.get("bacnet_timeouts"),
+            )
+            plan_path = (
+                self.run_dir / "artifacts" / "bacnet_write_plans" / "FCU-LOCAL-msv_test_mode.json"
+            )
+            self.assertTrue(plan_path.exists())
+            plan_saved = json.loads(plan_path.read_text(encoding="utf-8"))
+            self.assertEqual(12.0, plan_saved.get("bacnet_timeouts", {}).get("apdu_timeout_seconds"))
 
             read_result = _run_runtime(
                 "bacnet-read",
@@ -616,6 +740,36 @@ class RuntimeCliTests(unittest.TestCase):
         read_payload = json.loads(read_result.stdout)
         self.assertEqual("read_ok", read_payload["status"])
         self.assertIn("3", read_payload.get("read", {}).get("value_str", ""))
+
+    def test_bacnet_point_checkout_rejects_invalid_apdu_timeout(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-point-apdu-invalid",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+
+        result = _run_runtime(
+            "bacnet-point-checkout",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+            "--apdu-timeout",
+            "-1",
+        )
+        self.assertEqual(2, result.returncode)
+        self.assertIn("apdu-timeout", result.stdout)
 
     def test_bacnet_point_checkout_all_ok_with_fake_bacnet_server(self) -> None:
         server = _FakeBipUdpServer(device_instance=21001, analog_input_present=22.0, msv_present=2)
@@ -677,6 +831,8 @@ class RuntimeCliTests(unittest.TestCase):
                 "0.5",
                 "--retries",
                 "1",
+                "--apdu-timeout",
+                "9",
             )
         finally:
             server.stop()
@@ -687,6 +843,8 @@ class RuntimeCliTests(unittest.TestCase):
         self.assertEqual(2, payload["point_count"])
         statuses = [r.get("status") for r in payload.get("reads", [])]
         self.assertEqual(["read_ok", "read_ok"], statuses)
+        for row in payload["reads"]:
+            self.assertEqual(9.0, row.get("bacnet_timeouts", {}).get("apdu_timeout_seconds"))
         self.assertIn("22.0", payload["reads"][0].get("read", {}).get("value_str", ""))
         self.assertIn("2", payload["reads"][1].get("read", {}).get("value_str", ""))
 

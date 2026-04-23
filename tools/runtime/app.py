@@ -849,6 +849,15 @@ def cmd_dry_run_bacnet_write(args: argparse.Namespace) -> int:
             args.timeout_seconds, args.retries
         )
         try:
+            apdu_timeout = bacnet_ad.commissioning_apdu_timeout_seconds(args.apdu_timeout)
+        except (TypeError, ValueError) as err:
+            print(f"error: invalid --apdu-timeout: {err}")
+            return 2
+        result["bacnet_timeouts"] = {
+            "who_is_timeout_seconds": who_is_timeout,
+            "apdu_timeout_seconds": apdu_timeout,
+        }
+        try:
             exec_result = bacnet_ad.write_present_value(
                 bind_port=bind_port,
                 target_address=bacnet_ad.format_ipv4_target(host, port),
@@ -857,7 +866,7 @@ def cmd_dry_run_bacnet_write(args: argparse.Namespace) -> int:
                 object_instance=object_instance,
                 value=int(args.value),
                 who_is_timeout=who_is_timeout,
-                apdu_timeout=bacnet_ad.commissioning_apdu_timeout_seconds(),
+                apdu_timeout=apdu_timeout,
             )
         except (OSError, RuntimeError) as err:
             print(f"error: failed to load BACnet stack: {err}")
@@ -912,6 +921,7 @@ def _bacnet_read_one(
     timeout_seconds: float,
     retries: int,
     bacnet_bind_port: int,
+    apdu_timeout_override: float | None = None,
 ) -> dict:
     """Perform one BACnet read; returns result dict (may set status read_ok / blocked / errors)."""
     object_id = str(object_id).strip()
@@ -1004,6 +1014,19 @@ def _bacnet_read_one(
     except ValueError:
         bind_port = 0
     who_is_timeout = bacnet_ad.effective_who_is_timeout(timeout_seconds, retries)
+    try:
+        apdu_timeout = bacnet_ad.commissioning_apdu_timeout_seconds(apdu_timeout_override)
+    except ValueError as err:
+        return {
+            "controller_label": controller_label,
+            "profile_object_id": object_id,
+            "status": "config_error",
+            "message": str(err),
+        }
+    result["bacnet_timeouts"] = {
+        "who_is_timeout_seconds": who_is_timeout,
+        "apdu_timeout_seconds": apdu_timeout,
+    }
     prop = str(property_name or "presentValue").strip() or "presentValue"
     try:
         read_result = bacnet_ad.read_present_value(
@@ -1014,7 +1037,7 @@ def _bacnet_read_one(
             object_instance=object_instance,
             property_name=prop,
             who_is_timeout=who_is_timeout,
-            apdu_timeout=bacnet_ad.commissioning_apdu_timeout_seconds(),
+            apdu_timeout=apdu_timeout,
         )
     except (OSError, RuntimeError) as err:
         result["status"] = "client_load_failed"
@@ -1056,6 +1079,12 @@ def cmd_bacnet_read(args: argparse.Namespace) -> int:
     except ValueError:
         bind_port = 0
 
+    try:
+        _bacnet_adapter().commissioning_apdu_timeout_seconds(args.apdu_timeout)
+    except (TypeError, ValueError) as err:
+        print(f"error: invalid --apdu-timeout: {err}")
+        return 2
+
     result = _bacnet_read_one(
         controller_label=args.controller_label,
         target=target,
@@ -1064,6 +1093,7 @@ def cmd_bacnet_read(args: argparse.Namespace) -> int:
         timeout_seconds=args.timeout_seconds,
         retries=args.retries,
         bacnet_bind_port=bind_port,
+        apdu_timeout_override=args.apdu_timeout,
     )
     if result.get("status") == "config_error":
         print(f"error: {result.get('message', 'invalid configuration')}")
@@ -1130,6 +1160,12 @@ def cmd_bacnet_point_checkout(args: argparse.Namespace) -> int:
     except ValueError:
         bind_port = 0
 
+    try:
+        _bacnet_adapter().commissioning_apdu_timeout_seconds(args.apdu_timeout)
+    except (TypeError, ValueError) as err:
+        print(f"error: invalid --apdu-timeout: {err}")
+        return 2
+
     rows: list[dict] = []
     strict = bool(getattr(args, "strict", False))
     all_ok = True
@@ -1148,6 +1184,7 @@ def cmd_bacnet_point_checkout(args: argparse.Namespace) -> int:
             timeout_seconds=args.timeout_seconds,
             retries=args.retries,
             bacnet_bind_port=bind_port,
+            apdu_timeout_override=args.apdu_timeout,
         )
         rows.append(one)
         if one.get("status") != "read_ok":
@@ -1574,6 +1611,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Local UDP bind port for BACpypes3 client (0 = OS-assigned).",
     )
     dry_write.add_argument(
+        "--apdu-timeout",
+        type=float,
+        default=None,
+        help="BACpypes3 confirmed service timeout in seconds for --execute (default: adapter default, typically 8).",
+    )
+    dry_write.add_argument(
         "--execute",
         action="store_true",
         help="Send WriteProperty via BACpypes3 (requires pip install -r requirements.txt).",
@@ -1604,6 +1647,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=0,
         help="Local UDP bind port for BACpypes3 client (0 = OS-assigned).",
     )
+    bacnet_read.add_argument(
+        "--apdu-timeout",
+        type=float,
+        default=None,
+        help="BACpypes3 ReadProperty timeout in seconds (default: adapter default, typically 8).",
+    )
     bacnet_read.set_defaults(handler=cmd_bacnet_read)
 
     point_checkout = subparsers.add_parser(
@@ -1619,6 +1668,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=0,
         help="Local UDP bind port for BACpypes3 client (0 = OS-assigned).",
+    )
+    point_checkout.add_argument(
+        "--apdu-timeout",
+        type=float,
+        default=None,
+        help="BACpypes3 ReadProperty timeout in seconds for each checkout read (default: adapter default).",
     )
     point_checkout.add_argument(
         "--strict",

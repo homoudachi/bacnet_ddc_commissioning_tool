@@ -93,15 +93,15 @@ python3 tools/runtime/app.py dry-run-bacnet-write \
   --technician-name "Alex Tech" \
   --note "Arm test mode state 3 (profile-defined meaning)"
 # Live write (install: pip install -r requirements.txt):
-# python3 tools/runtime/app.py dry-run-bacnet-write ... --execute [--bacnet-bind-port 47809]
+# python3 tools/runtime/app.py dry-run-bacnet-write ... --execute [--bacnet-bind-port 47809] [--apdu-timeout 15]
 
 # 3f) ReadProperty (BACpypes3); object_id must be in profile commissioning_read_allowlist
 # python3 tools/runtime/app.py bacnet-read --run-dir artifacts/runtime-run \
-#   --controller-label FCU-01A --object-id ai_sat [--property presentValue]
+#   --controller-label FCU-01A --object-id ai_sat [--property presentValue] [--apdu-timeout 15]
 
 # 3g) Point checkout: read profile point_checkout[] in order (same allowlist rules per object)
 # python3 tools/runtime/app.py bacnet-point-checkout --run-dir artifacts/runtime-run \
-#   --controller-label FCU-01A [--strict] [--bacnet-bind-port 47809]
+#   --controller-label FCU-01A [--strict] [--bacnet-bind-port 47809] [--apdu-timeout 15]
 
 # 4) Record technician signoff for a step
 python3 tools/runtime/app.py record-step \

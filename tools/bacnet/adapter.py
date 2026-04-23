@@ -9,6 +9,7 @@ modules remain the implementation; this module is the stable façade.
 from __future__ import annotations
 
 import importlib.util
+import math
 import sys
 from pathlib import Path
 from typing import Any, Callable
@@ -77,9 +78,18 @@ class CommissioningBACnetAdapter:
         )
 
     @classmethod
-    def commissioning_apdu_timeout_seconds(cls) -> float:
-        """APDU timeout for commissioning Read/WriteProperty."""
-        return float(cls.COMMISSIONING_APDU_TIMEOUT_SECONDS)
+    def commissioning_apdu_timeout_seconds(cls, override: float | None = None) -> float:
+        """APDU timeout for commissioning Read/WriteProperty (seconds).
+
+        When ``override`` is ``None``, returns the class default. Otherwise ``override``
+        must be a finite number ``> 0``.
+        """
+        if override is None:
+            return float(cls.COMMISSIONING_APDU_TIMEOUT_SECONDS)
+        t = float(override)
+        if not math.isfinite(t) or t <= 0:
+            raise ValueError("apdu_timeout must be a finite number > 0")
+        return t
 
     def probe_device(
         self,
