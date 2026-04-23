@@ -2,7 +2,7 @@
 
 ## Documentation
 
-- **Current repo status (2026-04-21):** docs-first project with early runnable tooling (simulator verifier/orchestrator and import compiler). There is no full end-user commissioning application yet.
+- **Current repo status (2026-04-23):** docs-first project with early runnable tooling (simulator verifier/orchestrator, import compiler, and Python runtime CLI). There is no full end-user commissioning application yet.
 - **[Living project doc](docs/project.md)** — product requirements, commissioning flows, examples, import direction, and reports (update as the product evolves).
 - **[ADRs](docs/adr/)** — short decision records when choices are non-obvious.
 - **[Slice plans](docs/plans/)** — time-boxed implementation plans; archive or remove when the slice ships.
@@ -42,6 +42,12 @@ python3 tools/runtime/app.py init-flow \
   --run-dir artifacts/runtime-run \
   --controller-label FCU-01A
 
+# 3b) Inspect flow state (JSON on stdout)
+python3 tools/runtime/app.py list-flows --run-dir artifacts/runtime-run
+python3 tools/runtime/app.py show-flow \
+  --run-dir artifacts/runtime-run \
+  --controller-label FCU-01A
+
 # 4) Record technician signoff for a step
 python3 tools/runtime/app.py record-step \
   --run-dir artifacts/runtime-run \
@@ -57,6 +63,7 @@ python3 tools/runtime/app.py record-step \
 # - A step with explicit requires_step_ids dependencies cannot pass until those dependencies complete
 # - Every transition appends step history with previous_status/attempted_status/new_status/reason_code
 # - Rejected transitions are logged as flow_step_rejected with machine-readable rejection reason codes
+# - list-flows / show-flow append flows_listed / flow_viewed to logs/events.jsonl
 
 # 5) Verify one simulator scenario
 python3 tools/runtime/app.py verify-simulator \

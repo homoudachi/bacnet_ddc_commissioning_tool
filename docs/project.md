@@ -2,10 +2,10 @@
 
 Audience: future you. Update when intent, behavior, or exports change.
 
-## Project maturity snapshot (2026-04-21)
+## Project maturity snapshot (2026-04-23)
 
-- Repository state: **documentation and examples only** (no runnable app, build script, or CI pipeline yet).
-- This document is the source of truth for product intent until implementation starts.
+- Repository state: **documentation plus Python CLIs** under `tools/` (simulator list verification, import compiler, runtime commissioning/run helpers) with unit tests under `tests/`. No Windows portable build or full operator UI yet.
+- This document is the source of truth for product intent; keep it aligned with [`README.md`](../README.md) when behavior changes.
 - Active implementation roadmap lives in: [`docs/plans/2026-04-21-v1-foundation-plan.md`](plans/2026-04-21-v1-foundation-plan.md).
 
 ## Goal
@@ -189,11 +189,11 @@ Add **model, firmware, B/IP address + Device ID** per bench controller when you 
 
 ## How to run / verify
 
-_(Fill in after the first runnable build.)_
-
 ```bash
-# e.g. build portable exe, run smoke tests
+python3 -m unittest discover -s tests -p 'test_*.py'
 ```
+
+Runtime workflow examples: [`README.md`](../README.md) (including `list-flows` and `show-flow` for commissioning flow JSON).
 
 ## Definition of done (reuse)
 
