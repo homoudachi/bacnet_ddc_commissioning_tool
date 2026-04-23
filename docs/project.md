@@ -4,7 +4,7 @@ Audience: future you. Update when intent, behavior, or exports change.
 
 ## Project maturity snapshot (2026-04-23)
 
-- Repository state: **documentation plus Python CLIs** under `tools/` (simulator list verification, import compiler, runtime commissioning and flow helpers) with unit tests under `tests/`. No Windows portable build or full operator UI yet.
+- Repository state: **documentation plus Python CLIs** under `tools/` (simulator list verification, import compiler, runtime commissioning and flow helpers, per-controller **session values** for operator-entered fields such as manual RAT) with unit tests under `tests/`. No Windows portable build or full operator UI yet.
 - This document is the source of truth for product intent; runnable commands should stay aligned with [`README.md`](../README.md).
 - Active implementation roadmap lives in: [`docs/plans/2026-04-21-v1-foundation-plan.md`](plans/2026-04-21-v1-foundation-plan.md).
 

@@ -48,6 +48,19 @@ python3 tools/runtime/app.py show-flow \
   --run-dir artifacts/runtime-run \
   --controller-label FCU-01A
 
+# 3c) Operator-entered session values (e.g. manual RAT when profile has no BACnet RAT)
+# Requires init-flow first; stored under state/sessions/<controller_label>.json
+python3 tools/runtime/app.py set-session-value \
+  --run-dir artifacts/runtime-run \
+  --controller-label FCU-01A \
+  --key rat_degC \
+  --value "22.5" \
+  --technician-name "Alex Tech" \
+  --note "Measured return air at grille"
+python3 tools/runtime/app.py show-session \
+  --run-dir artifacts/runtime-run \
+  --controller-label FCU-01A
+
 # 4) Record technician signoff for a step
 python3 tools/runtime/app.py record-step \
   --run-dir artifacts/runtime-run \
@@ -66,6 +79,7 @@ python3 tools/runtime/app.py record-step \
 # - Every transition appends step history with previous_status/attempted_status/new_status/reason_code
 # - Rejected transitions are logged as flow_step_rejected with machine-readable rejection reason codes
 # - list-flows / show-flow append flows_listed / flow_viewed to logs/events.jsonl
+# - set-session-value / show-session append session_value_set / session_viewed
 
 # 5) Verify one simulator scenario
 python3 tools/runtime/app.py verify-simulator \
