@@ -1,5 +1,6 @@
 import json
 import pathlib
+import shutil
 import subprocess
 import sys
 import unittest
@@ -19,6 +20,10 @@ class RuntimeCliTests(unittest.TestCase):
     def setUp(self) -> None:
         FIXTURES.mkdir(parents=True, exist_ok=True)
         self.run_dir = FIXTURES / "runtime-run"
+
+    def tearDown(self) -> None:
+        if self.run_dir.exists():
+            shutil.rmtree(self.run_dir)
 
     def test_init_run_creates_layout_config_and_log(self) -> None:
         result = _run_runtime(
@@ -86,6 +91,255 @@ class RuntimeCliTests(unittest.TestCase):
         ).read_text(encoding="utf-8").strip().splitlines()
         events = [json.loads(line)["event"] for line in lines]
         self.assertIn("import_compiled", events)
+
+    def test_export_run_summary_requires_runtime_job(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-export-no-compile",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        out_path = self.run_dir / "artifacts" / "custom-summary.json"
+        result = _run_runtime(
+            "export-run-summary",
+            "--run-dir",
+            str(self.run_dir),
+            "--output-json",
+            str(out_path),
+        )
+        self.assertEqual(2, result.returncode)
+        self.assertIn("compile-import", result.stdout)
+
+    def test_export_run_summary_after_compile_and_init_flow(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-export-summary",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+
+        result = _run_runtime("export-run-summary", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, result.returncode)
+        default_path = self.run_dir / "artifacts" / "run-summary.json"
+        self.assertTrue(default_path.exists())
+        summary = json.loads(default_path.read_text(encoding="utf-8"))
+        self.assertEqual("0.1-run-summary", summary["schema_version"])
+        self.assertEqual("job-export-summary", summary["job_id"])
+        self.assertEqual(3, len(summary["controllers"]))
+        for row in summary["controllers"]:
+            self.assertFalse(row["flow_initialized"])
+            self.assertIsNone(row["next_open_step"])
+
+        init_flow = _run_runtime(
+            "init-flow",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+        )
+        self.assertEqual(0, init_flow.returncode)
+        record = _run_runtime(
+            "record-step",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+            "--step-id",
+            "half_design_airflow_auto",
+            "--status",
+            "passed",
+            "--technician-name",
+            "Alex Tech",
+            "--note",
+            "ok",
+        )
+        self.assertEqual(0, record.returncode)
+
+        out2 = self.run_dir / "artifacts" / "summary-after-step.json"
+        result2 = _run_runtime(
+            "export-run-summary",
+            "--run-dir",
+            str(self.run_dir),
+            "--output-json",
+            str(out2),
+        )
+        self.assertEqual(0, result2.returncode)
+        summary2 = json.loads(out2.read_text(encoding="utf-8"))
+        fcu = [r for r in summary2["controllers"] if r["controller_label"] == "FCU-01A"][0]
+        self.assertTrue(fcu["flow_initialized"])
+        self.assertEqual("confirm_tachometer_reference_half_flow", fcu["next_open_step"]["step_id"])
+        self.assertEqual("pending", fcu["next_open_step"]["status"])
+
+        log_lines = (
+            self.run_dir / "logs" / "events.jsonl"
+        ).read_text(encoding="utf-8").strip().splitlines()
+        events = [json.loads(line)["event"] for line in log_lines]
+        self.assertIn("run_summary_exported", events)
+
+    def test_init_flow_rejects_second_init_without_force(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-init-twice",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+        first = _run_runtime(
+            "init-flow",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+        )
+        self.assertEqual(0, first.returncode)
+        second = _run_runtime(
+            "init-flow",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+        )
+        self.assertEqual(2, second.returncode)
+        self.assertIn("already exists", second.stdout)
+
+    def test_init_flow_force_replaces_state_and_backups_prior(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-init-force",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+        first = _run_runtime(
+            "init-flow",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+        )
+        self.assertEqual(0, first.returncode)
+        record = _run_runtime(
+            "record-step",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+            "--step-id",
+            "half_design_airflow_auto",
+            "--status",
+            "passed",
+            "--technician-name",
+            "Alex Tech",
+            "--note",
+            "first run",
+        )
+        self.assertEqual(0, record.returncode)
+
+        second = _run_runtime(
+            "init-flow",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+            "--force",
+            "--reset-technician-name",
+            "Lead Tech",
+            "--reset-reason",
+            "Wrong controller row; restarting commissioning",
+        )
+        self.assertEqual(0, second.returncode)
+
+        flow_state = json.loads(
+            (self.run_dir / "state" / "flows" / "FCU-01A.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual("pending", flow_state["steps"][0]["status"])
+        backups = list((self.run_dir / "state" / "flow_backups").glob("FCU-01A-*.json"))
+        self.assertEqual(1, len(backups))
+        prior = json.loads(backups[0].read_text(encoding="utf-8"))
+        self.assertEqual("passed", prior["steps"][0]["status"])
+
+        log_lines = (
+            self.run_dir / "logs" / "events.jsonl"
+        ).read_text(encoding="utf-8").strip().splitlines()
+        events = [json.loads(line)["event"] for line in log_lines]
+        self.assertIn("flow_reinitialized", events)
+
+    def test_init_flow_force_requires_audit_fields(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-init-force-audit",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+        first = _run_runtime(
+            "init-flow",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+        )
+        self.assertEqual(0, first.returncode)
+
+        bad = _run_runtime(
+            "init-flow",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+            "--force",
+            "--reset-technician-name",
+            "",
+            "--reset-reason",
+            "",
+        )
+        self.assertEqual(2, bad.returncode)
+        self.assertIn("--reset-technician-name", bad.stdout)
 
     def test_verify_simulator_writes_artifact_and_logs_event(self) -> None:
         init_result = _run_runtime(

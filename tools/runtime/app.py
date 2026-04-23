@@ -70,6 +70,36 @@ def _flow_state_path(run_dir: Path, controller_label: str) -> Path:
     return _flows_dir(run_dir) / f"{controller_label}.json"
 
 
+def _flow_backups_dir(run_dir: Path) -> Path:
+    return run_dir / "state" / "flow_backups"
+
+
+def _step_status_counts(steps: list[dict]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in steps:
+        status = str(item.get("status", "pending"))
+        counts[status] = counts.get(status, 0) + 1
+    return counts
+
+
+def _sequencing_complete_statuses() -> frozenset[str]:
+    return frozenset({"passed", "manual_passed", "skipped"})
+
+
+def _next_open_step(steps: list[dict]) -> dict | None:
+    """First step not in a sequencing-complete terminal state (for operator 'next' hint)."""
+    complete = _sequencing_complete_statuses()
+    for item in steps:
+        status = str(item.get("status", "pending"))
+        if status not in complete:
+            return {
+                "step_id": item.get("step_id"),
+                "label": item.get("label"),
+                "status": status,
+            }
+    return None
+
+
 def _is_terminal_prereq_status(status: str) -> bool:
     return status in {"passed", "manual_passed", "skipped"}
 
@@ -270,6 +300,37 @@ def cmd_init_flow(args: argparse.Namespace) -> int:
         print(f"error: controller not found in runtime job: {args.controller_label}")
         return 2
 
+    if flow_state_path.is_file() and not bool(getattr(args, "force", False)):
+        print(
+            "error: commissioning flow state already exists for this controller; "
+            "use init-flow --force with --reset-technician-name and --reset-reason to replace"
+        )
+        return 2
+
+    if flow_state_path.is_file() and bool(getattr(args, "force", False)):
+        tech = str(getattr(args, "reset_technician_name", "") or "").strip()
+        reason = str(getattr(args, "reset_reason", "") or "").strip()
+        if not tech or not reason:
+            print(
+                "error: --force requires non-empty --reset-technician-name and --reset-reason"
+            )
+            return 2
+        backup_dir = _flow_backups_dir(run_dir)
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        stamp = _utc_timestamp().replace(":", "-")
+        backup_path = backup_dir / f"{args.controller_label}-{stamp}.json"
+        backup_path.write_bytes(flow_state_path.read_bytes())
+        _append_event(
+            logs_path,
+            "flow_reinitialized",
+            {
+                "controller_label": args.controller_label,
+                "previous_flow_backup_json": str(backup_path.resolve()),
+                "reset_technician_name": tech,
+                "reset_reason": reason,
+            },
+        )
+
     step_defs = target.get("commissioning_flow", [])
     steps = []
     for step in step_defs:
@@ -315,6 +376,78 @@ def cmd_init_flow(args: argparse.Namespace) -> int:
         f"flow_initialized=true controller_label={args.controller_label} "
         f"steps={len(steps)}"
     )
+    return 0
+
+
+def cmd_export_run_summary(args: argparse.Namespace) -> int:
+    run_dir = args.run_dir
+    logs_path = run_dir / "logs" / "events.jsonl"
+    output_json = args.output_json or (run_dir / "artifacts" / "run-summary.json")
+    config = _parse_run_config(run_dir)
+    runtime_job_path = run_dir / "state" / "runtime-job.json"
+    if not runtime_job_path.is_file():
+        print(
+            f"error: runtime job missing at {runtime_job_path}; run compile-import first"
+        )
+        return 2
+
+    runtime_job = json.loads(runtime_job_path.read_text(encoding="utf-8"))
+    import_report_path = run_dir / "state" / "import-report.json"
+    import_report = None
+    if import_report_path.is_file():
+        import_report = json.loads(import_report_path.read_text(encoding="utf-8"))
+
+    bip_summary_path = run_dir / "artifacts" / "bip" / "list-summary.json"
+    bip_list_summary = None
+    if bip_summary_path.is_file():
+        bip_list_summary = json.loads(bip_summary_path.read_text(encoding="utf-8"))
+
+    controllers_out: list[dict] = []
+    for row in runtime_job.get("controllers", []):
+        label = str(row.get("controller_label", "")).strip()
+        flow_path = _flow_state_path(run_dir, label)
+        entry: dict = {
+            "controller_label": label,
+            "profile_id": row.get("profile_id"),
+            "flow_initialized": flow_path.is_file(),
+            "flow_state_json": str(flow_path.resolve()) if flow_path.is_file() else None,
+            "step_count": None,
+            "status_counts": None,
+            "next_open_step": None,
+        }
+        if flow_path.is_file():
+            try:
+                flow_state = json.loads(flow_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                flow_state = {}
+            steps = flow_state.get("steps", [])
+            if not isinstance(steps, list):
+                steps = []
+            entry["step_count"] = len(steps)
+            entry["status_counts"] = _step_status_counts(steps)
+            entry["next_open_step"] = _next_open_step(steps)
+        controllers_out.append(entry)
+
+    summary = {
+        "schema_version": "0.1-run-summary",
+        "generated_at": _utc_timestamp(),
+        "job_id": config.get("job_id"),
+        "run_dir": str(run_dir.resolve()),
+        "runtime_job_json": str(runtime_job_path.resolve()),
+        "import_report_present": import_report is not None,
+        "import_compile_ok": import_report.get("compile_ok") if import_report else None,
+        "bip_list_summary_present": bip_list_summary is not None,
+        "controllers": controllers_out,
+    }
+
+    output_json.parent.mkdir(parents=True, exist_ok=True)
+    output_json.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    _append_event(
+        logs_path,
+        "run_summary_exported",
+        {"summary_json": str(output_json.resolve())},
+    )
+    print(f"run_summary_exported=true summary_json={output_json.resolve()}")
     return 0
 
 
@@ -591,6 +724,18 @@ def build_parser() -> argparse.ArgumentParser:
     compile_import.add_argument("--run-dir", required=True, type=Path)
     compile_import.set_defaults(handler=cmd_compile_import)
 
+    export_summary = subparsers.add_parser(
+        "export-run-summary",
+        help="Write aggregated run summary JSON (controllers, flow hints, import/BIP flags).",
+    )
+    export_summary.add_argument("--run-dir", required=True, type=Path)
+    export_summary.add_argument(
+        "--output-json",
+        type=Path,
+        help="Destination JSON (default: <run-dir>/artifacts/run-summary.json).",
+    )
+    export_summary.set_defaults(handler=cmd_export_run_summary)
+
     verify_sim = subparsers.add_parser(
         "verify-simulator", help="Run simulator verification for one scenario."
     )
@@ -642,6 +787,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     init_flow.add_argument("--run-dir", required=True, type=Path)
     init_flow.add_argument("--controller-label", required=True)
+    init_flow.add_argument(
+        "--force",
+        action="store_true",
+        help="Replace existing flow state; requires reset audit fields and backs up prior file.",
+    )
+    init_flow.add_argument(
+        "--reset-technician-name",
+        default="",
+        help="With --force, who authorized replacing existing flow state.",
+    )
+    init_flow.add_argument(
+        "--reset-reason",
+        default="",
+        help="With --force, why the prior flow state is being discarded.",
+    )
     init_flow.set_defaults(handler=cmd_init_flow)
 
     record_step = subparsers.add_parser(
