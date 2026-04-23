@@ -53,6 +53,18 @@ python3 tools/runtime/app.py init-flow \
 # 3c) Export one JSON rollup for the run (after compile-import): controllers, flow presence, next open step
 python3 tools/runtime/app.py export-run-summary --run-dir artifacts/runtime-run
 # Optional: --output-json artifacts/runtime-run/artifacts/my-summary.json
+# Optional: embed full blobs for single-file handoff (larger JSON):
+#   --embed-import-report --embed-bip-list-summary
+
+# 3d) Dry-run allowlisted BACnet WriteProperty intent (Who-Is probe only; no write PDU sent)
+# Requires compile-import; object_id must be allowlisted (e.g. msv_test_mode) and writable in profile.
+python3 tools/runtime/app.py dry-run-bacnet-write \
+  --run-dir artifacts/runtime-run \
+  --controller-label FCU-01A \
+  --object-id msv_test_mode \
+  --value 3 \
+  --technician-name "Alex Tech" \
+  --note "Arm test mode state 3 (profile-defined meaning)"
 
 # 4) Record technician signoff for a step
 python3 tools/runtime/app.py record-step \
