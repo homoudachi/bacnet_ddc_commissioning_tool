@@ -111,6 +111,13 @@ python3 tools/runtime/app.py record-step \
   --status passed \
   --technician-name "Alex Tech" \
   --note "Reached target airflow in tolerance"
+# When a profile step has step_type bacnet_point_checkout or run_point_checkout_on_pass,
+# passing the step runs profile point_checkout BACnet reads first; on failure the step is not recorded.
+# Optional: --bacnet-timeout-seconds 0.5 --bacnet-retries 1 --bacnet-bind-port 0 --apdu-timeout 15 [--bacnet-checkout-strict]
+
+# 4b) Export append-only commissioning report (after gated record-step or future writers)
+# python3 tools/runtime/app.py export-commissioning-report --run-dir artifacts/runtime-run
+# python3 tools/runtime/app.py export-commissioning-report --run-dir artifacts/runtime-run --output-json my-report.json
 
 # Init-flow: second init for the same controller without --force is rejected (avoids silent overwrite).
 # Record-step rule enforcement:

@@ -2454,3 +2454,127 @@ class RuntimeCliTests(unittest.TestCase):
         )
         self.assertEqual(2, second.returncode)
         self.assertIn("before 'half_design_airflow_auto' is completed", second.stdout)
+
+    def test_record_step_bacnet_point_checkout_gate_and_commissioning_report(self) -> None:
+        from test_import_compiler import _write_profile
+
+        server = _FakeBipUdpServer(device_instance=21001, analog_input_present=21.0, msv_present=1)
+        server.start()
+        try:
+            time.sleep(0.05)
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            profiles_dir = self.run_dir / "profiles-local"
+            profiles_dir.mkdir(parents=True, exist_ok=True)
+            _write_profile(
+                profiles_dir / "unit-profile-gate.json",
+                profile_id="fcu_gate_v1",
+                display_name="Gate test",
+                read_allowlist=["ai_sat", "msv_test_mode"],
+                point_checkout=[
+                    {"object_id": "ai_sat", "property": "presentValue"},
+                    {"object_id": "msv_test_mode", "property": "presentValue"},
+                ],
+                commissioning_flow=[
+                    {
+                        "step_id": "gate_point_checkout",
+                        "label": "Gate",
+                        "step_type": "bacnet_point_checkout",
+                        "report_ref": "test.gate",
+                    }
+                ],
+            )
+            csv_path = self.run_dir / "controllers-gate.csv"
+            with csv_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=[
+                        "controller_label",
+                        "profile_id",
+                        "bacnet_device_instance",
+                        "bacnet_ip",
+                        "bacnet_port",
+                        "building_floor",
+                        "notes",
+                    ],
+                )
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "controller_label": "FCU-GATE",
+                        "profile_id": "fcu_gate_v1",
+                        "bacnet_device_instance": "21001",
+                        "bacnet_ip": "127.0.0.1",
+                        "bacnet_port": str(server.port),
+                        "building_floor": "L01",
+                        "notes": "gate",
+                    }
+                )
+
+            init_result = _run_runtime(
+                "init-run",
+                "--run-dir",
+                str(self.run_dir),
+                "--job-id",
+                "job-gate",
+                "--controllers-csv",
+                str(csv_path),
+                "--profiles-dir",
+                str(profiles_dir),
+                "--scenarios-dir",
+                str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+            )
+            self.assertEqual(0, init_result.returncode)
+            compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+            self.assertEqual(0, compile_result.returncode)
+
+            init_flow = _run_runtime(
+                "init-flow",
+                "--run-dir",
+                str(self.run_dir),
+                "--controller-label",
+                "FCU-GATE",
+            )
+            self.assertEqual(0, init_flow.returncode)
+
+            rec = _run_runtime(
+                "record-step",
+                "--run-dir",
+                str(self.run_dir),
+                "--controller-label",
+                "FCU-GATE",
+                "--step-id",
+                "gate_point_checkout",
+                "--status",
+                "passed",
+                "--technician-name",
+                "Alex Tech",
+                "--note",
+                "Gate with BACnet",
+                "--bacnet-timeout-seconds",
+                "0.5",
+                "--bacnet-retries",
+                "1",
+            )
+            self.assertEqual(0, rec.returncode)
+
+            report_path = self.run_dir / "artifacts" / "commissioning_report.json"
+            self.assertTrue(report_path.exists())
+            report_doc = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual(1, len(report_doc.get("entries", [])))
+            ent = report_doc["entries"][0]
+            self.assertEqual("point_checkout_after_step", ent["kind"])
+            self.assertEqual("test.gate", ent["report_ref"])
+            self.assertTrue(ent["all_read_ok"])
+
+            export_path = self.run_dir / "artifacts" / "commissioning-report-copy.json"
+            ex = _run_runtime(
+                "export-commissioning-report",
+                "--run-dir",
+                str(self.run_dir),
+                "--output-json",
+                str(export_path),
+            )
+            self.assertEqual(0, ex.returncode)
+            self.assertTrue(export_path.exists())
+        finally:
+            server.stop()

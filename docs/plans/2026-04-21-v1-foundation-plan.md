@@ -74,7 +74,7 @@ Use this order to reduce rework and unblock parallel work later.
 
 ### Phase 4 — commissioning flow engine (v1 slices)
 
-- [x] Implement point checkout flow — **v1:** **`bacnet-point-checkout`** reads profile `point_checkout[]` with allowlist enforcement; **guided UI / step linkage** to commissioning_flow still future.
+- [x] Implement point checkout flow — **v1:** **`bacnet-point-checkout`** CLI; **`record-step`** can run the same reads when a profile step uses **`step_type: bacnet_point_checkout`** or **`run_point_checkout_on_pass`**; results append **`artifacts/commissioning_report.json`**; **guided UI** still future.
 - [ ] Implement airflow adjustment + technician confirmation checkpoints.
 - [ ] Implement cooling valve stroke test (no CHW) with mandatory human confirmation records.
 - [ ] Implement heating/cooling modulation test scaffolds with skippable/manual-pass controls.
@@ -89,6 +89,7 @@ Use this order to reduce rework and unblock parallel work later.
 
 - [ ] Implement report model for unified heating/cooling output tables (SAT + RAT + command + time/step).
 - [x] Export CSV first — **partial:** **`export-run-summary --output-csv`** (controller × flow status rollup); **not** yet the unified modulation table contract.
+- [x] **Partial:** append-only **`export-commissioning-report`** / **`artifacts/commissioning_report.json`** for **point checkout after step** rows (`report_ref` when present); **not** yet full thermal modulation time-series.
 - [ ] Then PDF/XLSX from same normalized dataset.
 - [ ] Package portable Windows executable and document signing/release process.
 - [ ] Add release checklist and smoke-test matrix.

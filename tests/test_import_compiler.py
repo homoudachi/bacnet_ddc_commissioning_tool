@@ -37,6 +37,7 @@ def _write_profile(
     write_allowlist: list[str] | None = None,
     read_allowlist: list[str] | None = None,
     point_checkout: list[dict] | None = None,
+    commissioning_flow: list[dict] | None = None,
 ) -> None:
     data: dict = {
                 "schema_version": "0.1-example",
@@ -69,6 +70,8 @@ def _write_profile(
         data["commissioning_read_allowlist"] = read_allowlist
     if point_checkout is not None:
         data["point_checkout"] = point_checkout
+    if commissioning_flow is not None:
+        data["commissioning_flow"] = commissioning_flow
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
@@ -168,6 +171,56 @@ class ImportCompilerTests(unittest.TestCase):
         self.assertTrue(fcu_objs["msv_test_mode"]["writable"])
         report = json.loads(report_json.read_text(encoding="utf-8"))
         self.assertEqual([], report["errors"])
+
+    def test_compile_includes_commissioning_step_metadata(self) -> None:
+        controllers = FIXTURES / "controllers-compile-stepmeta.csv"
+        output_json = FIXTURES / "runtime-job-stepmeta.json"
+        report_json = FIXTURES / "runtime-job-stepmeta-report.json"
+        _write_csv(
+            controllers,
+            [
+                {
+                    "controller_label": "FCU-X",
+                    "profile_id": "profile_stepmeta",
+                    "bacnet_device_instance": "21001",
+                    "bacnet_ip": "192.168.1.50",
+                    "bacnet_port": "47808",
+                    "building_floor": "L01",
+                    "notes": "",
+                },
+            ],
+        )
+        _write_profile(
+            self.profiles_dir / "unit-profile-stepmeta.json",
+            profile_id="profile_stepmeta",
+            display_name="Step meta test",
+            read_allowlist=["ai_sat"],
+            point_checkout=[{"object_id": "ai_sat", "property": "presentValue"}],
+            commissioning_flow=[
+                {
+                    "step_id": "gate_point_checkout",
+                    "label": "BACnet point checkout gate",
+                    "step_type": "bacnet_point_checkout",
+                    "report_ref": "test.point_checkout_gate",
+                },
+                {
+                    "step_id": "normal_step",
+                    "label": "Normal",
+                    "run_point_checkout_on_pass": True,
+                    "report_ref": "test.after_pass",
+                },
+            ],
+        )
+        result = _run_compiler(controllers, self.profiles_dir, output_json, report_json)
+        self.assertEqual(0, result.returncode)
+        runtime = json.loads(output_json.read_text(encoding="utf-8"))
+        flow = runtime["controllers"][0]["commissioning_flow"]
+        self.assertEqual(2, len(flow))
+        self.assertEqual("bacnet_point_checkout", flow[0]["step_type"])
+        self.assertEqual("test.point_checkout_gate", flow[0]["report_ref"])
+        self.assertFalse(flow[0]["run_point_checkout_on_pass"])
+        self.assertTrue(flow[1]["run_point_checkout_on_pass"])
+        self.assertEqual("test.after_pass", flow[1]["report_ref"])
 
     def test_compile_fails_when_profile_is_missing(self) -> None:
         controllers = FIXTURES / "controllers-compile-missing-profile.csv"

@@ -399,14 +399,21 @@ def _extract_commissioning_steps(profile: dict[str, Any]) -> list[dict[str, Any]
                 dep_id = str(dep).strip()
                 if dep_id:
                     requires_step_ids.append(dep_id)
-        steps.append(
-            {
-                "step_id": step_id,
-                "label": label,
-                "skippable": bool(item.get("skippable", False)),
-                "requires_step_ids": requires_step_ids,
-            }
-        )
+        step_type = str(item.get("step_type", "")).strip() or "standard"
+        run_pc = item.get("run_point_checkout_on_pass")
+        run_point_checkout_on_pass = bool(run_pc) if run_pc is not None else False
+        report_ref = str(item.get("report_ref", "")).strip()
+        step_row: dict[str, Any] = {
+            "step_id": step_id,
+            "label": label,
+            "step_type": step_type,
+            "run_point_checkout_on_pass": run_point_checkout_on_pass,
+            "skippable": bool(item.get("skippable", False)),
+            "requires_step_ids": requires_step_ids,
+        }
+        if report_ref:
+            step_row["report_ref"] = report_ref
+        steps.append(step_row)
     return steps
 
 

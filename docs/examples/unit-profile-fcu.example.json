@@ -221,6 +221,14 @@
           "comment": "Same reporting columns as cooling: time, command %, SAT °C, RAT °C"
         }
       ]
+    },
+    {
+      "step_id": "post_commission_point_readout",
+      "label": "Optional BACnet point read-out (uses profile point_checkout)",
+      "description": "When passed via record-step, the runtime CLI runs profile point_checkout reads and appends artifacts/commissioning_report.json (v1 hook for report aggregation).",
+      "step_type": "bacnet_point_checkout",
+      "report_ref": "point_checkout.post_commission",
+      "skippable": true
     }
   ],
   "interlocks": [

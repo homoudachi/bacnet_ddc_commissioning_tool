@@ -461,17 +461,21 @@ def cmd_init_flow(args: argparse.Namespace) -> int:
                 text = str(required_id).strip()
                 if text:
                     requires_step_ids.append(text)
-        steps.append(
-            {
-                "step_id": step_id,
-                "label": str(step.get("label", "")).strip(),
-                "status": "pending",
-                "skippable": step.get("skippable") is True,
-                "requires_step_ids": requires_step_ids,
-                "records": [],
-                "history": [],
-            }
-        )
+        step_row = {
+            "step_id": step_id,
+            "label": str(step.get("label", "")).strip(),
+            "status": "pending",
+            "step_type": str(step.get("step_type", "standard")).strip() or "standard",
+            "run_point_checkout_on_pass": bool(step.get("run_point_checkout_on_pass")),
+            "skippable": step.get("skippable") is True,
+            "requires_step_ids": requires_step_ids,
+            "records": [],
+            "history": [],
+        }
+        report_ref = str(step.get("report_ref", "")).strip()
+        if report_ref:
+            step_row["report_ref"] = report_ref
+        steps.append(step_row)
 
     flow_state = {
         "controller_label": args.controller_label,
@@ -758,6 +762,37 @@ def cmd_export_run_summary(args: argparse.Namespace) -> int:
     print(f"run_summary_exported=true summary_json={output_json.resolve()}")
     if csv_path:
         print(f"run_summary_csv=true csv_path={csv_path.resolve()}")
+    return 0
+
+
+def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
+    """Print or copy the append-only commissioning report JSON for this run."""
+    run_dir = args.run_dir
+    logs_path = run_dir / "logs" / "events.jsonl"
+    src = _commissioning_report_path(run_dir)
+    if not src.is_file():
+        print(
+            f"error: commissioning report not found at {src}; "
+            "nothing recorded yet (e.g. record-step with BACnet point checkout gate)"
+        )
+        return 2
+
+    text = src.read_text(encoding="utf-8")
+    out_path = getattr(args, "output_json", None)
+    if out_path:
+        out_path = Path(out_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(text, encoding="utf-8")
+        _append_event(
+            logs_path,
+            "commissioning_report_exported",
+            {"output_json": str(out_path.resolve())},
+        )
+        print(f"commissioning_report_exported=true output_json={out_path.resolve()}")
+        return 0
+
+    print(text, end="")
+    _append_event(logs_path, "commissioning_report_printed", {})
     return 0
 
 
@@ -1134,6 +1169,73 @@ def cmd_bacnet_read(args: argparse.Namespace) -> int:
     return 0 if result.get("status") == "read_ok" else 2
 
 
+def _run_point_checkout_reads(
+    *,
+    controller_label: str,
+    target: dict,
+    timeout_seconds: float,
+    retries: int,
+    bacnet_bind_port: int,
+    apdu_timeout_override: float | None,
+    strict: bool,
+) -> tuple[list[dict], bool]:
+    """Execute profile ``point_checkout`` reads; returns (rows, all_read_ok)."""
+    checkout = target.get("point_checkout", [])
+    if not isinstance(checkout, list) or not checkout:
+        return [], False
+    rows: list[dict] = []
+    all_ok = True
+    for entry in checkout:
+        if not isinstance(entry, dict):
+            continue
+        oid = str(entry.get("object_id", "")).strip()
+        if not oid:
+            continue
+        prop = str(entry.get("property", "presentValue")).strip() or "presentValue"
+        one = _bacnet_read_one(
+            controller_label=controller_label,
+            target=target,
+            object_id=oid,
+            property_name=prop,
+            timeout_seconds=timeout_seconds,
+            retries=retries,
+            bacnet_bind_port=bacnet_bind_port,
+            apdu_timeout_override=apdu_timeout_override,
+        )
+        rows.append(one)
+        if one.get("status") != "read_ok":
+            all_ok = False
+            if strict:
+                break
+    return rows, all_ok
+
+
+def _commissioning_report_path(run_dir: Path) -> Path:
+    return run_dir / "artifacts" / "commissioning_report.json"
+
+
+def _append_commissioning_report_entry(run_dir: Path, entry: dict) -> Path:
+    """Append one entry to ``artifacts/commissioning_report.json`` (create if missing)."""
+    path = _commissioning_report_path(run_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    config = _parse_run_config(run_dir)
+    job_id = str(config.get("job_id", "")).strip() or "unknown-job"
+    if path.is_file():
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    else:
+        doc = {
+            "schema_version": "0.1-commissioning-report",
+            "job_id": job_id,
+            "entries": [],
+        }
+    if not isinstance(doc.get("entries"), list):
+        doc["entries"] = []
+    doc["job_id"] = job_id
+    doc["entries"].append(entry)
+    path.write_text(json.dumps(doc, indent=2, sort_keys=True), encoding="utf-8")
+    return path
+
+
 def cmd_bacnet_point_checkout(args: argparse.Namespace) -> int:
     run_dir = args.run_dir
     logs_path = run_dir / "logs" / "events.jsonl"
@@ -1168,31 +1270,16 @@ def cmd_bacnet_point_checkout(args: argparse.Namespace) -> int:
         print(f"error: invalid --apdu-timeout: {err}")
         return 2
 
-    rows: list[dict] = []
     strict = bool(getattr(args, "strict", False))
-    all_ok = True
-    for entry in checkout:
-        if not isinstance(entry, dict):
-            continue
-        oid = str(entry.get("object_id", "")).strip()
-        if not oid:
-            continue
-        prop = str(entry.get("property", "presentValue")).strip() or "presentValue"
-        one = _bacnet_read_one(
-            controller_label=args.controller_label,
-            target=target,
-            object_id=oid,
-            property_name=prop,
-            timeout_seconds=args.timeout_seconds,
-            retries=args.retries,
-            bacnet_bind_port=bind_port,
-            apdu_timeout_override=args.apdu_timeout,
-        )
-        rows.append(one)
-        if one.get("status") != "read_ok":
-            all_ok = False
-            if strict:
-                break
+    rows, all_ok = _run_point_checkout_reads(
+        controller_label=args.controller_label,
+        target=target,
+        timeout_seconds=args.timeout_seconds,
+        retries=args.retries,
+        bacnet_bind_port=bind_port,
+        apdu_timeout_override=args.apdu_timeout,
+        strict=strict,
+    )
 
     payload = {
         "controller_label": args.controller_label,
@@ -1225,6 +1312,7 @@ def cmd_record_step(args: argparse.Namespace) -> int:
     logs_path = run_dir / "logs" / "events.jsonl"
     flow_state_path = _flow_state_path(run_dir, args.controller_label)
     flow_state = json.loads(flow_state_path.read_text(encoding="utf-8"))
+    runtime_job_path = run_dir / "state" / "runtime-job.json"
 
     if flow_state.get("controller_label") != args.controller_label:
         print(
@@ -1288,12 +1376,115 @@ def cmd_record_step(args: argparse.Namespace) -> int:
         print(f"error: invalid step transition: {rejection_message}")
         return 2
 
+    run_bacnet_pc = str(args.status).strip() in {"passed", "manual_passed"} and (
+        step.get("run_point_checkout_on_pass") is True
+        or str(step.get("step_type", "")).strip() == "bacnet_point_checkout"
+    )
+    checkout_payload: dict | None = None
+    if run_bacnet_pc:
+        runtime_job = json.loads(runtime_job_path.read_text(encoding="utf-8"))
+        target = None
+        for controller in runtime_job.get("controllers", []):
+            if controller.get("controller_label") == args.controller_label:
+                target = controller
+                break
+        if target is None:
+            print(f"error: controller not found in runtime job: {args.controller_label}")
+            return 2
+        checkout = target.get("point_checkout", [])
+        if not isinstance(checkout, list) or not checkout:
+            print(
+                "error: point checkout step requires profile point_checkout list "
+                "(compile-import after profile edit)"
+            )
+            return 2
+        try:
+            bind_port = int(getattr(args, "bacnet_bind_port", 0) or 0)
+        except ValueError:
+            bind_port = 0
+        try:
+            _bacnet_adapter().commissioning_apdu_timeout_seconds(args.apdu_timeout)
+        except (TypeError, ValueError) as err:
+            print(f"error: invalid --apdu-timeout: {err}")
+            return 2
+        rows, all_ok = _run_point_checkout_reads(
+            controller_label=args.controller_label,
+            target=target,
+            timeout_seconds=float(args.bacnet_timeout_seconds),
+            retries=int(args.bacnet_retries),
+            bacnet_bind_port=bind_port,
+            apdu_timeout_override=args.apdu_timeout,
+            strict=bool(args.bacnet_checkout_strict),
+        )
+        out_dir = run_dir / "artifacts" / "bacnet_point_checkout"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        stamp = _utc_timestamp().replace(":", "-")
+        artifact = out_dir / f"{args.controller_label}-{args.step_id}-{stamp}.json"
+        checkout_payload = {
+            "controller_label": args.controller_label,
+            "step_id": args.step_id,
+            "trigger": "record_step",
+            "strict": bool(args.bacnet_checkout_strict),
+            "point_count": len(rows),
+            "all_read_ok": bool(all_ok),
+            "reads": rows,
+        }
+        artifact.write_text(
+            json.dumps(checkout_payload, indent=2, sort_keys=True), encoding="utf-8"
+        )
+        artifact_json = str(artifact.resolve())
+        if not all_ok:
+            print(
+                "error: BACnet point checkout failed for this step "
+                f"(artifact={artifact_json})"
+            )
+            return 2
+        report_ref = str(step.get("report_ref", "")).strip()
+        report_entry: dict = {
+            "ts": _utc_timestamp(),
+            "kind": "point_checkout_after_step",
+            "controller_label": args.controller_label,
+            "step_id": args.step_id,
+            "step_status": args.status,
+            "all_read_ok": bool(all_ok),
+            "read_summary": [
+                {
+                    "object_id": r.get("profile_object_id"),
+                    "status": r.get("status"),
+                    "property": r.get("property"),
+                }
+                for r in rows
+            ],
+            "artifact_json": artifact_json,
+        }
+        if report_ref:
+            report_entry["report_ref"] = report_ref
+        report_path = _append_commissioning_report_entry(run_dir, report_entry)
+        _append_event(
+            logs_path,
+            "flow_step_point_checkout",
+            {
+                "controller_label": args.controller_label,
+                "step_id": args.step_id,
+                "all_read_ok": bool(all_ok),
+                "artifact_json": artifact_json,
+                "commissioning_report_json": str(report_path.resolve()),
+            },
+        )
+        checkout_payload["artifact_json"] = artifact_json
+
     record = {
         "ts": _utc_timestamp(),
         "status": args.status,
         "technician_name": args.technician_name,
         "note": args.note,
     }
+    if checkout_payload is not None:
+        record["point_checkout"] = {
+            "all_read_ok": bool(checkout_payload["all_read_ok"]),
+            "artifact_json": str(checkout_payload.get("artifact_json", "")),
+            "point_count": int(checkout_payload["point_count"]),
+        }
     records = step.setdefault("records", [])
     records.append(record)
     history = step.setdefault("history", [])
@@ -1310,6 +1501,12 @@ def cmd_record_step(args: argparse.Namespace) -> int:
     step["status"] = args.status
     step["technician_name"] = args.technician_name
     step["note"] = args.note
+    if checkout_payload is not None:
+        step["last_point_checkout"] = {
+            "ts": _utc_timestamp(),
+            "all_read_ok": bool(checkout_payload["all_read_ok"]),
+            "artifact_json": str(checkout_payload.get("artifact_json", "")),
+        }
 
     flow_state_path.write_text(json.dumps(flow_state, indent=2), encoding="utf-8")
     _append_event(
@@ -1539,6 +1736,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     export_summary.set_defaults(handler=cmd_export_run_summary)
 
+    export_cr = subparsers.add_parser(
+        "export-commissioning-report",
+        help="Print or copy artifacts/commissioning_report.json (point checkout / future rows).",
+    )
+    export_cr.add_argument("--run-dir", required=True, type=Path)
+    export_cr.add_argument(
+        "--output-json",
+        type=Path,
+        help="Optional copy destination; default prints to stdout.",
+    )
+    export_cr.set_defaults(handler=cmd_export_commissioning_report)
+
     verify_sim = subparsers.add_parser(
         "verify-simulator", help="Run simulator verification for one scenario."
     )
@@ -1762,6 +1971,35 @@ def build_parser() -> argparse.ArgumentParser:
     )
     record_step.add_argument("--technician-name", required=True)
     record_step.add_argument("--note", default="")
+    record_step.add_argument(
+        "--bacnet-timeout-seconds",
+        type=float,
+        default=0.5,
+        help="Who-Is / probe timeout base for automatic point checkout after passed/manual_passed.",
+    )
+    record_step.add_argument(
+        "--bacnet-retries",
+        type=int,
+        default=1,
+        help="Retries for probe-derived Who-Is timeout when running automatic point checkout.",
+    )
+    record_step.add_argument(
+        "--bacnet-bind-port",
+        type=int,
+        default=0,
+        help="Local UDP bind port for BACpypes3 during automatic point checkout (0 = OS-assigned).",
+    )
+    record_step.add_argument(
+        "--apdu-timeout",
+        type=float,
+        default=None,
+        help="BACpypes3 ReadProperty timeout for automatic point checkout (default: adapter default).",
+    )
+    record_step.add_argument(
+        "--bacnet-checkout-strict",
+        action="store_true",
+        help="Stop point checkout after first failed read (default: run all points).",
+    )
     record_step.set_defaults(handler=cmd_record_step)
 
     return parser
