@@ -234,6 +234,7 @@ def compile_model(
                         "display_name": str(profile.get("display_name", "")).strip(),
                         "schema_version": str(profile.get("schema_version", "")).strip(),
                     },
+                    "objects_by_id": _extract_objects_by_id(profile),
                     "commissioning_flow": _extract_commissioning_steps(profile),
                     "bacnet": {
                         "device_instance": device_instance,
@@ -279,6 +280,34 @@ def build_outputs(
         "warnings": warnings,
     }
     return runtime_model, report, (0 if compile_ok else 2)
+
+
+def _extract_objects_by_id(profile: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Map profile logical object id -> minimal BACnet addressing for runtime tooling."""
+    out: dict[str, dict[str, Any]] = {}
+    raw = profile.get("objects")
+    if not isinstance(raw, list):
+        return out
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        oid = str(item.get("id", "")).strip()
+        if not oid:
+            continue
+        bacnet = item.get("bacnet") if isinstance(item.get("bacnet"), dict) else {}
+        object_type = str(bacnet.get("object_type", "")).strip()
+        instance = bacnet.get("instance")
+        if not object_type or instance is None:
+            continue
+        try:
+            inst_int = int(instance)
+        except (TypeError, ValueError):
+            continue
+        out[oid] = {
+            "bacnet": {"object_type": object_type, "instance": inst_int},
+            "writable": bool(item.get("writable")),
+        }
+    return out
 
 
 def _extract_commissioning_steps(profile: dict[str, Any]) -> list[dict[str, Any]]:

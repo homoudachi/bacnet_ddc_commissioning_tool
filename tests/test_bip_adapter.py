@@ -109,3 +109,26 @@ class BipAdapterTests(unittest.TestCase):
 
         self.assertEqual("unreachable_timeout", result["status"])
         self.assertGreaterEqual(elapsed, 0.15)
+
+    def test_plan_write_property_dry_run_allowed_after_probe(self) -> None:
+        server = _FakeBipServer(device_instance=21001, respond=True)
+        server.start()
+        try:
+            result = bip_adapter.plan_write_property(
+                host="127.0.0.1",
+                port=server.port,
+                expected_device_instance=21001,
+                object_type=19,
+                object_instance=50,
+                property_id=bip_adapter.BACNET_PROP_PRESENT_VALUE,
+                value=3,
+                timeout_seconds=0.5,
+                retries=1,
+                dry_run=True,
+            )
+        finally:
+            server.stop()
+
+        self.assertEqual("dry_run_allowed", result["status"])
+        self.assertTrue(result["dry_run"])
+        self.assertEqual("write_property_frame_not_sent", result.get("note"))

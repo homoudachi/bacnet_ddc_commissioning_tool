@@ -36,9 +36,24 @@ def _write_profile(path: pathlib.Path, profile_id: str, display_name: str) -> No
                 "profile_id": profile_id,
                 "display_name": display_name,
                 "objects": [
-                    {"id": "msv_test_mode"},
-                    {"id": "ai_sat"},
-                    {"id": "av_supply_fan_command"},
+                    {
+                        "id": "msv_test_mode",
+                        "writable": True,
+                        "bacnet": {
+                            "object_type": "multiStateValue",
+                            "instance": 50,
+                        },
+                    },
+                    {
+                        "id": "ai_sat",
+                        "writable": False,
+                        "bacnet": {"object_type": "analogInput", "instance": 2},
+                    },
+                    {
+                        "id": "av_supply_fan_command",
+                        "writable": True,
+                        "bacnet": {"object_type": "analogValue", "instance": 3},
+                    },
                 ],
             },
             indent=2,
@@ -121,6 +136,11 @@ class ImportCompilerTests(unittest.TestCase):
         self.assertEqual(2, runtime["summary"]["controller_count"])
         self.assertEqual(2, len(runtime["controllers"]))
         self.assertEqual("FCU example", runtime["controllers"][0]["profile"]["display_name"])
+        fcu_objs = runtime["controllers"][0].get("objects_by_id", {})
+        self.assertIn("msv_test_mode", fcu_objs)
+        self.assertEqual("multiStateValue", fcu_objs["msv_test_mode"]["bacnet"]["object_type"])
+        self.assertEqual(50, fcu_objs["msv_test_mode"]["bacnet"]["instance"])
+        self.assertTrue(fcu_objs["msv_test_mode"]["writable"])
         report = json.loads(report_json.read_text(encoding="utf-8"))
         self.assertEqual([], report["errors"])
 

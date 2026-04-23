@@ -19,6 +19,25 @@ NPDU_VERSION = 0x01
 APDU_TYPE_UNCONFIRMED_REQUEST = 0x10
 UNCONFIRMED_SERVICE_WHO_IS = 0x08
 
+# BACnet property identifier (subset).
+BACNET_PROP_PRESENT_VALUE = 85
+
+# BACnet object type numbers (subset used by profile compiler / runtime).
+_OBJECT_TYPE_NAME_TO_INT: dict[str, int] = {
+    "analogInput": 0,
+    "analogOutput": 1,
+    "analogValue": 2,
+    "binaryInput": 3,
+    "binaryOutput": 4,
+    "binaryValue": 5,
+    "multiStateValue": 19,
+}
+
+
+def object_type_name_to_int(name: str) -> int | None:
+    key = str(name).strip()
+    return _OBJECT_TYPE_NAME_TO_INT.get(key)
+
 
 @dataclass(frozen=True)
 class IAmFrame:
@@ -172,3 +191,67 @@ def probe_device(
         }
     finally:
         adapter.close()
+
+
+def plan_write_property(
+    host: str,
+    port: int,
+    expected_device_instance: int,
+    object_type: int,
+    object_instance: int,
+    property_id: int,
+    value: int,
+    timeout_seconds: float = 0.5,
+    retries: int = 1,
+    *,
+    dry_run: bool = True,
+) -> dict[str, object]:
+    """Validate reachability and (when dry_run) record an allowlisted write intent.
+
+    Live WriteProperty over BACnet/IP is not implemented in this repository slice;
+    ``dry_run=True`` returns a structured plan after a successful Who-Is/I-Am probe.
+    """
+    probe = probe_device(
+        host=host,
+        port=port,
+        expected_device_instance=expected_device_instance,
+        timeout_seconds=timeout_seconds,
+        retries=retries,
+    )
+    if probe.get("status") != "reachable_verified":
+        return {
+            "status": "blocked_probe_failed",
+            "dry_run": bool(dry_run),
+            "probe": probe,
+            "target": {
+                "object_type": object_type,
+                "object_instance": object_instance,
+                "property_id": property_id,
+                "value": value,
+            },
+        }
+    if not dry_run:
+        return {
+            "status": "not_implemented",
+            "dry_run": False,
+            "probe": probe,
+            "target": {
+                "object_type": object_type,
+                "object_instance": object_instance,
+                "property_id": property_id,
+                "value": value,
+            },
+            "message": "live BACnet WriteProperty is not implemented; use --dry-run",
+        }
+    return {
+        "status": "dry_run_allowed",
+        "dry_run": True,
+        "probe": probe,
+        "target": {
+            "object_type": object_type,
+            "object_instance": object_instance,
+            "property_id": property_id,
+            "value": value,
+        },
+        "note": "write_property_frame_not_sent",
+    }
