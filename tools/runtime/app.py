@@ -74,6 +74,11 @@ def _is_terminal_prereq_status(status: str) -> bool:
     return status in {"passed", "manual_passed", "skipped"}
 
 
+def _is_sequencing_complete_status(status: str) -> bool:
+    """Prior steps must reach this before later steps can record pass/fail/skip outcomes."""
+    return status in {"passed", "manual_passed", "skipped"}
+
+
 def _lookup_step_by_id(steps: list[dict], step_id: str) -> dict | None:
     for item in steps:
         if item.get("step_id") == step_id:
@@ -87,13 +92,22 @@ def _validate_step_transition(
     requested_status: str,
 ) -> dict[str, str] | None:
     """Return reason dict when transition is invalid, otherwise None."""
+    if requested_status == "pending":
+        return {
+            "reason_code": "pending_not_recordable",
+            "message": (
+                "cannot record step with status 'pending'; "
+                "use passed, failed, skipped, or manual_passed to record outcomes"
+            ),
+        }
+
     if requested_status == "skipped" and step.get("skippable") is not True:
         return {
             "reason_code": "step_not_skippable",
             "message": f"step '{step.get('step_id')}' is not skippable",
         }
 
-    if requested_status in {"passed", "manual_passed"}:
+    if requested_status in {"passed", "manual_passed", "failed"}:
         step_id = step.get("step_id")
         requires_step_ids = step.get("requires_step_ids", [])
         if isinstance(requires_step_ids, list):
@@ -127,7 +141,7 @@ def _validate_step_transition(
             }
         for prev in steps[:current_index]:
             prev_status = str(prev.get("status", "pending"))
-            if not _is_terminal_prereq_status(prev_status):
+            if not _is_sequencing_complete_status(prev_status):
                 return {
                     "reason_code": "prior_step_incomplete",
                     "message": (
@@ -145,6 +159,7 @@ def _normalize_rejection_reason(reason_code: str) -> str:
         "dependency_missing_from_flow": "DEPENDENCY_UNSATISFIED",
         "prior_step_incomplete": "PREREQ_ORDER",
         "step_not_found_in_sequence": "PREREQ_ORDER",
+        "pending_not_recordable": "INVALID_TRANSITION",
     }
     return mapping.get(reason_code, "INVALID_TRANSITION")
 

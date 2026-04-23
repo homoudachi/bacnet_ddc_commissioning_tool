@@ -891,3 +891,229 @@ class RuntimeCliTests(unittest.TestCase):
         )
         self.assertEqual(2, result.returncode)
         self.assertIn("flow state not found", result.stdout)
+
+    def test_record_step_rejects_pending_status_record(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-flow-pending-record",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+        init_flow_result = _run_runtime(
+            "init-flow",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+        )
+        self.assertEqual(0, init_flow_result.returncode)
+
+        result = _run_runtime(
+            "record-step",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+            "--step-id",
+            "half_design_airflow_auto",
+            "--status",
+            "pending",
+            "--technician-name",
+            "Alex Tech",
+            "--note",
+            "Trying to write pending",
+        )
+        self.assertEqual(2, result.returncode)
+        self.assertIn("cannot record step with status 'pending'", result.stdout)
+
+    def test_record_step_failed_requires_prior_steps_completed(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-flow-fail-order",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+        init_flow_result = _run_runtime(
+            "init-flow",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+        )
+        self.assertEqual(0, init_flow_result.returncode)
+
+        result = _run_runtime(
+            "record-step",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+            "--step-id",
+            "confirm_tachometer_reference_half_flow",
+            "--status",
+            "failed",
+            "--technician-name",
+            "Alex Tech",
+            "--note",
+            "Out of order fail",
+        )
+        self.assertEqual(2, result.returncode)
+        self.assertIn("invalid step transition", result.stdout)
+
+        lines = (
+            self.run_dir / "logs" / "events.jsonl"
+        ).read_text(encoding="utf-8").strip().splitlines()
+        parsed_events = [json.loads(line) for line in lines]
+        rejection_events = [entry for entry in parsed_events if entry["event"] == "flow_step_rejected"]
+        self.assertGreaterEqual(len(rejection_events), 1)
+        self.assertEqual("PREREQ_ORDER", rejection_events[-1]["reason_code"])
+
+    def test_record_step_failed_allowed_when_prerequisites_met(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-flow-fail-ok",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+        init_flow_result = _run_runtime(
+            "init-flow",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+        )
+        self.assertEqual(0, init_flow_result.returncode)
+
+        first = _run_runtime(
+            "record-step",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+            "--step-id",
+            "half_design_airflow_auto",
+            "--status",
+            "passed",
+            "--technician-name",
+            "Alex Tech",
+            "--note",
+            "Airflow ok",
+        )
+        self.assertEqual(0, first.returncode)
+
+        second = _run_runtime(
+            "record-step",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+            "--step-id",
+            "confirm_tachometer_reference_half_flow",
+            "--status",
+            "failed",
+            "--technician-name",
+            "Alex Tech",
+            "--note",
+            "Tachometer mismatch",
+        )
+        self.assertEqual(0, second.returncode)
+
+        flow_state = json.loads(
+            (self.run_dir / "state" / "flows" / "FCU-01A.json").read_text(encoding="utf-8")
+        )
+        step = [
+            s for s in flow_state["steps"] if s["step_id"] == "confirm_tachometer_reference_half_flow"
+        ][0]
+        self.assertEqual("failed", step["status"])
+        self.assertEqual("failed", step["history"][-1]["new_status"])
+
+    def test_record_step_prior_failed_blocks_later_steps(self) -> None:
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-flow-prior-fail-block",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+        init_flow_result = _run_runtime(
+            "init-flow",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+        )
+        self.assertEqual(0, init_flow_result.returncode)
+
+        fail_first = _run_runtime(
+            "record-step",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+            "--step-id",
+            "half_design_airflow_auto",
+            "--status",
+            "failed",
+            "--technician-name",
+            "Alex Tech",
+            "--note",
+            "Could not reach half design",
+        )
+        self.assertEqual(0, fail_first.returncode)
+
+        second = _run_runtime(
+            "record-step",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+            "--step-id",
+            "confirm_tachometer_reference_half_flow",
+            "--status",
+            "passed",
+            "--technician-name",
+            "Alex Tech",
+            "--note",
+            "Try after prior failed",
+        )
+        self.assertEqual(2, second.returncode)
+        self.assertIn("before 'half_design_airflow_auto' is completed", second.stdout)
