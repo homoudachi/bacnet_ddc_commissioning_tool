@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import html
 import json
 import importlib.util
 import subprocess
@@ -848,36 +849,129 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
     logs_path = run_dir / "logs" / "events.jsonl"
     src = _commissioning_report_path(run_dir)
     out_path = getattr(args, "output_json", None)
+    want_csv = bool(getattr(args, "output_csv", None))
+    want_csv_unified = bool(getattr(args, "output_csv_unified", None))
+    want_html = bool(getattr(args, "output_html", None))
+    allow_empty = bool(getattr(args, "allow_empty", False))
+
     if not src.is_file():
-        if bool(getattr(args, "allow_empty", False)) and out_path:
+        if allow_empty and (out_path or want_csv or want_csv_unified or want_html):
             config = _parse_run_config(run_dir)
             job_id = str(config.get("job_id", "")).strip() or "unknown-job"
-            stub = json.dumps(
-                {
-                    "schema_version": "0.2-commissioning-report",
-                    "job_id": job_id,
-                    "entries": [],
-                },
-                indent=2,
-                sort_keys=True,
-            )
-            out_path = Path(out_path)
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.write_text(stub + "\n", encoding="utf-8")
-            _append_event(
-                logs_path,
-                "commissioning_report_exported_empty_stub",
-                {"output_json": str(out_path.resolve())},
-            )
-            print(
-                f"commissioning_report_exported=true output_json={out_path.resolve()} "
-                "stub=true entries=0"
-            )
+            doc: dict = {
+                "schema_version": "0.2-commissioning-report",
+                "job_id": job_id,
+                "entries": [],
+            }
+            text = json.dumps(doc, indent=2, sort_keys=True) + "\n"
+            if out_path:
+                out_path = Path(out_path)
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                out_path.write_text(text, encoding="utf-8")
+                _append_event(
+                    logs_path,
+                    "commissioning_report_exported_empty_stub",
+                    {"output_json": str(out_path.resolve())},
+                )
+                print(
+                    f"commissioning_report_exported=true output_json={out_path.resolve()} "
+                    "stub=true entries=0"
+                )
+            if want_csv:
+                csv_path = Path(args.output_csv)
+                csv_path.parent.mkdir(parents=True, exist_ok=True)
+                fieldnames = [
+                    "entry_ts",
+                    "kind",
+                    "controller_label",
+                    "step_id",
+                    "report_ref",
+                    "technician_name",
+                    "command_object_id",
+                    "command_percent",
+                    "dwell_seconds",
+                    "object_id",
+                    "property",
+                    "status",
+                    "value_str",
+                    "read_source",
+                ]
+                with csv_path.open("w", newline="", encoding="utf-8") as handle:
+                    writer = csv.DictWriter(handle, fieldnames=fieldnames)
+                    writer.writeheader()
+                _append_event(
+                    logs_path,
+                    "commissioning_report_modulation_csv_exported",
+                    {"csv_path": str(csv_path.resolve())},
+                )
+                print(
+                    f"commissioning_report_modulation_csv=true csv_path={csv_path.resolve()}"
+                )
+            if want_csv_unified:
+                csv_unified = Path(args.output_csv_unified)
+                csv_unified.parent.mkdir(parents=True, exist_ok=True)
+                unified_fields = [
+                    "entry_ts",
+                    "kind",
+                    "controller_label",
+                    "step_id",
+                    "step_status",
+                    "report_ref",
+                    "technician_name",
+                    "note",
+                    "all_read_ok",
+                    "artifact_json",
+                    "command_object_id",
+                    "command_percent",
+                    "dwell_seconds",
+                    "sweep_index",
+                    "sweep_count",
+                    "trigger",
+                    "object_id",
+                    "property",
+                    "status",
+                    "value_str",
+                    "read_source",
+                ]
+                with csv_unified.open("w", newline="", encoding="utf-8") as handle:
+                    writer = csv.DictWriter(handle, fieldnames=unified_fields)
+                    writer.writeheader()
+                _append_event(
+                    logs_path,
+                    "commissioning_report_unified_csv_exported",
+                    {"csv_path": str(csv_unified.resolve())},
+                )
+                print(
+                    f"commissioning_report_unified_csv=true csv_path={csv_unified.resolve()}"
+                )
+            if want_html:
+                html_path = Path(args.output_html)
+                html_path.parent.mkdir(parents=True, exist_ok=True)
+                unified_rows = _commissioning_report_unified_csv_rows(doc)
+                html_body = _commissioning_report_unified_rows_to_html(
+                    job_id, str(doc.get("schema_version", "")), unified_rows
+                )
+                html_path.write_text(html_body, encoding="utf-8")
+                _append_event(
+                    logs_path,
+                    "commissioning_report_html_exported",
+                    {"html_path": str(html_path.resolve())},
+                )
+                print(
+                    f"commissioning_report_html=true html_path={html_path.resolve()}"
+                )
+            if not out_path and not want_csv and not want_csv_unified and not want_html:
+                print(
+                    "error: --allow-empty requires --output-json and/or "
+                    "--output-csv / --output-csv-unified / --output-html"
+                )
+                return 2
             return 0
         print(
             f"error: commissioning report not found at {src}; "
             "nothing recorded yet (e.g. record-step with BACnet point checkout gate). "
-            "Use --allow-empty with --output-json to write an empty stub for tooling."
+            "Use --allow-empty with --output-json and/or --output-csv / "
+            "--output-csv-unified / --output-html for empty outputs."
         )
         return 2
 
@@ -955,6 +1049,24 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
         print(
             f"commissioning_report_unified_csv=true csv_path={csv_unified.resolve()}"
         )
+
+    html_out = getattr(args, "output_html", None)
+    if html_out:
+        html_path = Path(html_out)
+        html_path.parent.mkdir(parents=True, exist_ok=True)
+        job_id = str(doc.get("job_id", "")).strip() or "unknown-job"
+        schema_v = str(doc.get("schema_version", "")).strip()
+        unified_rows = _commissioning_report_unified_csv_rows(doc)
+        html_body = _commissioning_report_unified_rows_to_html(
+            job_id, schema_v, unified_rows
+        )
+        html_path.write_text(html_body, encoding="utf-8")
+        _append_event(
+            logs_path,
+            "commissioning_report_html_exported",
+            {"html_path": str(html_path.resolve())},
+        )
+        print(f"commissioning_report_html=true html_path={html_path.resolve()}")
 
     if out_path:
         out_path = Path(out_path)
@@ -1727,6 +1839,97 @@ def _commissioning_report_unified_csv_rows(doc: dict) -> list[dict[str, str]]:
             continue
 
     return rows
+
+
+def _commissioning_report_unified_rows_to_html(
+    job_id: str, schema_version: str, rows: list[dict[str, str]]
+) -> str:
+    """Minimal printable HTML table from unified commissioning report rows."""
+    title = html.escape(f"Commissioning report — job {job_id}")
+    esc_job = html.escape(job_id)
+    esc_schema = html.escape(schema_version)
+    th = "".join(
+        f"<th>{html.escape(h)}</th>"
+        for h in (
+            "entry_ts",
+            "kind",
+            "controller_label",
+            "step_id",
+            "step_status",
+            "report_ref",
+            "technician_name",
+            "note",
+            "all_read_ok",
+            "command_object_id",
+            "command_percent",
+            "dwell_seconds",
+            "sweep_index",
+            "sweep_count",
+            "trigger",
+            "object_id",
+            "property",
+            "status",
+            "value_str",
+            "read_source",
+        )
+    )
+    body_rows: list[str] = []
+    for row in rows:
+        cells = "".join(
+            f"<td>{html.escape(str(row.get(k, '') or ''))}</td>"
+            for k in (
+                "entry_ts",
+                "kind",
+                "controller_label",
+                "step_id",
+                "step_status",
+                "report_ref",
+                "technician_name",
+                "note",
+                "all_read_ok",
+                "command_object_id",
+                "command_percent",
+                "dwell_seconds",
+                "sweep_index",
+                "sweep_count",
+                "trigger",
+                "object_id",
+                "property",
+                "status",
+                "value_str",
+                "read_source",
+            )
+        )
+        body_rows.append(f"<tr>{cells}</tr>")
+    tbody = "\n".join(body_rows) if body_rows else "<tr><td colspan=\"19\">(no entries)</td></tr>"
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>{title}</title>
+<style>
+body {{ font-family: system-ui, sans-serif; margin: 1rem; }}
+h1 {{ font-size: 1.1rem; }}
+.meta {{ color: #444; margin-bottom: 0.75rem; font-size: 0.9rem; }}
+table {{ border-collapse: collapse; width: 100%; font-size: 0.85rem; }}
+th, td {{ border: 1px solid #ccc; padding: 0.35rem 0.5rem; text-align: left; vertical-align: top; }}
+th {{ background: #f0f0f0; }}
+@media print {{ body {{ margin: 0; }} table {{ font-size: 0.75rem; }} }}
+</style>
+</head>
+<body>
+<h1>{title}</h1>
+<p class="meta">schema_version: {esc_schema} &middot; job_id: {esc_job} &middot; Print to PDF from browser (Ctrl+P).</p>
+<table>
+<thead><tr>{th}</tr></thead>
+<tbody>
+{tbody}
+</tbody>
+</table>
+</body>
+</html>
+"""
 
 
 def cmd_append_commissioning_modulation_sample(args: argparse.Namespace) -> int:
@@ -2955,7 +3158,11 @@ def build_parser() -> argparse.ArgumentParser:
     export_cr.add_argument(
         "--allow-empty",
         action="store_true",
-        help="With --output-json only: if no report exists yet, write an empty stub JSON.",
+        help=(
+            "If no report exists yet: with --output-json write empty stub JSON; "
+            "with --output-csv / --output-csv-unified / --output-html write headers-only "
+            "(or empty HTML table). At least one output path flag is required."
+        ),
     )
     export_cr.add_argument(
         "--output-csv",
@@ -2968,6 +3175,14 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Also write one CSV with point checkout + modulation rows "
             "(shared columns; unused fields empty per kind)."
+        ),
+    )
+    export_cr.add_argument(
+        "--output-html",
+        type=Path,
+        help=(
+            "Also write a simple HTML table (same rows as --output-csv-unified); "
+            "open in a browser and print to PDF (no extra Python deps)."
         ),
     )
     export_cr.set_defaults(handler=cmd_export_commissioning_report)

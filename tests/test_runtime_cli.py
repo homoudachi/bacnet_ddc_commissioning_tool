@@ -2638,6 +2638,23 @@ class RuntimeCliTests(unittest.TestCase):
             self.assertIn("thermal_modulation_sample", text)
             self.assertIn("step_status", text)
             self.assertIn("ai_sat", text)
+
+            html_path = self.run_dir / "artifacts" / "commissioning-unified.html"
+            h = _run_runtime(
+                "export-commissioning-report",
+                "--run-dir",
+                str(self.run_dir),
+                "--output-html",
+                str(html_path),
+            )
+            self.assertEqual(0, h.returncode)
+            html_text = html_path.read_text(encoding="utf-8")
+            self.assertIn("<!DOCTYPE html>", html_text)
+            self.assertIn("<table>", html_text)
+            self.assertIn("job-gate", html_text)
+            self.assertIn("point_checkout_after_step", html_text)
+            self.assertIn("thermal_modulation_sample", html_text)
+            self.assertIn("Print to PDF", html_text)
         finally:
             server.stop()
 
@@ -2689,6 +2706,18 @@ class RuntimeCliTests(unittest.TestCase):
         doc = json.loads(out.read_text(encoding="utf-8"))
         self.assertEqual([], doc.get("entries", []))
         self.assertEqual("job-cr-stub", doc.get("job_id"))
+
+        html_only = self.run_dir / "artifacts" / "empty-report.html"
+        r2 = _run_runtime(
+            "export-commissioning-report",
+            "--run-dir",
+            str(self.run_dir),
+            "--allow-empty",
+            "--output-html",
+            str(html_only),
+        )
+        self.assertEqual(0, r2.returncode)
+        self.assertIn("(no entries)", html_only.read_text(encoding="utf-8"))
 
     def test_record_step_point_checkout_failure_leaves_step_pending(self) -> None:
         from test_import_compiler import _write_profile
