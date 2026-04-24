@@ -161,6 +161,136 @@ def _next_open_step(steps: list[dict]) -> dict | None:
     return None
 
 
+def _find_modulate_actuator_action(step: dict) -> dict | None:
+    actions = step.get("actions")
+    if not isinstance(actions, list):
+        return None
+    for act in actions:
+        if isinstance(act, dict) and str(act.get("type", "")).strip() == "modulate_actuator_log_sat_for_report":
+            return act
+    return None
+
+
+def _find_automatic_airflow_adjustment(step: dict) -> dict | None:
+    actions = step.get("actions")
+    if not isinstance(actions, list):
+        return None
+    for act in actions:
+        if isinstance(act, dict) and str(act.get("type", "")).strip() == "automatic_airflow_adjustment":
+            return act
+    return None
+
+
+def _find_operator_confirm_tachometer(step: dict) -> dict | None:
+    actions = step.get("actions")
+    if not isinstance(actions, list):
+        return None
+    for act in actions:
+        if isinstance(act, dict) and str(act.get("type", "")).strip() == "operator_confirm_tachometer_reference":
+            return act
+    return None
+
+
+def _find_manual_airflow_verification(step: dict) -> dict | None:
+    actions = step.get("actions")
+    if not isinstance(actions, list):
+        return None
+    for act in actions:
+        if isinstance(act, dict) and str(act.get("type", "")).strip() == "manual_airflow_verification_assisted":
+            return act
+    return None
+
+
+def _suggested_cli_commands_for_step(step: dict) -> list[str]:
+    """Human-readable CLI hints for scripting operators (no subprocess)."""
+    out: list[str] = []
+    stype = str(step.get("step_type", "")).strip()
+    sid = str(step.get("step_id", "")).strip()
+    if stype == "bacnet_point_checkout":
+        out.append("bacnet-point-checkout --run-dir <run-dir> --controller-label <label>")
+    if _find_modulate_actuator_action(step) is not None:
+        out.append(
+            "bacnet-modulation-sweep --run-dir <run-dir> --controller-label <label> "
+            f"--step-id {sid or '<step_id>'} --modulation-command-percents ... "
+            "[--technician-name ...]"
+        )
+    if _find_automatic_airflow_adjustment(step) is not None:
+        out.append(
+            "commissioning-airflow-adjust-write --run-dir <run-dir> --controller-label <label> "
+            f"--step-id {sid or '<step_id>'} --fan-command-percent <0-100> --technician-name ..."
+        )
+    if _find_operator_confirm_tachometer(step) is not None:
+        out.append(
+            "commissioning-confirm-tachometer-reference --run-dir <run-dir> "
+            f"--controller-label <label> --step-id {sid or '<step_id>'} --technician-name ..."
+        )
+    if _find_manual_airflow_verification(step) is not None:
+        out.append(
+            "commissioning-record-manual-airflow --run-dir <run-dir> --controller-label <label> "
+            f"--step-id {sid or '<step_id>'} --branch-id <id> --measured-flow-L-s <n> --measurement-tool ..."
+        )
+    arms = str(step.get("arms_test_mode_state_key", "")).strip()
+    if arms == "chw_valve_stroke_no_plant":
+        out.append(
+            "commissioning-confirm-prompt --run-dir <run-dir> --controller-label <label> "
+            f"--step-id {sid or '<step_id>'} --prompt-id <id> --technician-name ..."
+        )
+    if not out:
+        out.append(
+            "record-step --run-dir <run-dir> --controller-label <label> "
+            f"--step-id {sid or '<step_id>'} --status passed|failed|skipped|manual_passed ..."
+        )
+    return out
+
+
+def _step_guidance_blocked_reasons(
+    step: dict, steps_by_id: dict[str, dict], session_vals: dict[str, str]
+) -> list[str]:
+    """Why a pending step may be blocked (prereqs / skip gates); empty if not blocked or not pending."""
+    complete = _sequencing_complete_statuses()
+    status = str(step.get("status", "pending"))
+    if status in complete:
+        return []
+    reasons: list[str] = []
+    raw_req = step.get("requires_step_ids")
+    if isinstance(raw_req, list):
+        for rid in raw_req:
+            rid_s = str(rid).strip()
+            if not rid_s:
+                continue
+            dep = steps_by_id.get(rid_s)
+            if dep is None:
+                reasons.append(f"missing_prerequisite_step:{rid_s}")
+                continue
+            dst = str(dep.get("status", "pending"))
+            if not _is_terminal_prereq_status(dst):
+                reasons.append(f"prerequisite_not_complete:{rid_s}({dst})")
+    if step.get("skippable") is True:
+        raw_sw = step.get("skip_when")
+        if isinstance(raw_sw, list) and raw_sw:
+            missing = []
+            for code in raw_sw:
+                c = str(code).strip()
+                if not c:
+                    continue
+                if not _session_flag_truthy(session_vals.get(c, "")):
+                    missing.append(c)
+            if missing:
+                reasons.append(f"skip_when_session_not_set:{','.join(missing)}")
+    return reasons
+
+
+def _flow_steps_by_id(steps: list[dict]) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    for item in steps:
+        if not isinstance(item, dict):
+            continue
+        sid = str(item.get("step_id", "")).strip()
+        if sid:
+            out[sid] = item
+    return out
+
+
 def _compact_flow_guidance(steps: list[dict]) -> dict[str, Any]:
     """Operator-oriented commissioning flow summary (CLI guided slice)."""
     complete = _sequencing_complete_statuses()
@@ -183,6 +313,11 @@ def _compact_flow_guidance(steps: list[dict]) -> dict[str, Any]:
         stype = str(item.get("step_type", "")).strip()
         if stype and stype != "standard":
             row["step_type"] = stype
+        raw_req = item.get("requires_step_ids")
+        if isinstance(raw_req, list):
+            req_ids = [str(x).strip() for x in raw_req if str(x).strip()]
+            if req_ids:
+                row["requires_step_ids"] = req_ids
         if item.get("skippable") is True:
             raw_sw = item.get("skip_when")
             if isinstance(raw_sw, list) and any(str(c).strip() for c in raw_sw):
@@ -196,6 +331,28 @@ def _compact_flow_guidance(steps: list[dict]) -> dict[str, Any]:
         "next_open_step": _next_open_step(steps),
         "steps": items,
     }
+
+
+def _enrich_guidance_for_operator_json(
+    base: dict[str, Any], steps: list[dict], session_vals: dict[str, str]
+) -> dict[str, Any]:
+    """Attach suggested_cli_commands and blocked_reasons per step."""
+    steps_by_id = _flow_steps_by_id([s for s in steps if isinstance(s, dict)])
+    out_steps: list[dict[str, Any]] = []
+    for row in base.get("steps", []):
+        if not isinstance(row, dict):
+            continue
+        sid = str(row.get("step_id", "")).strip()
+        full = steps_by_id.get(sid, {})
+        enriched = dict(row)
+        enriched["suggested_cli_commands"] = _suggested_cli_commands_for_step(full)
+        enriched["blocked_reasons"] = _step_guidance_blocked_reasons(
+            full, steps_by_id, session_vals
+        )
+        out_steps.append(enriched)
+    base = dict(base)
+    base["steps"] = out_steps
+    return base
 
 
 def _is_terminal_prereq_status(status: str) -> bool:
@@ -879,12 +1036,15 @@ def cmd_commissioning_guided_next(args: argparse.Namespace) -> int:
     session = _load_session_state(run_dir, args.controller_label)
     session_vals = _session_values_map(session) if session else {}
 
+    guidance_base = _compact_flow_guidance(steps)
+    guidance = _enrich_guidance_for_operator_json(guidance_base, steps, session_vals)
+
     payload: dict[str, Any] = {
         "controller_label": str(flow_state.get("controller_label", "")).strip()
         or args.controller_label,
         "profile_id": flow_state.get("profile_id"),
         "flow_state_json": str(flow_state_path.resolve()),
-        "guidance": _compact_flow_guidance(steps),
+        "guidance": guidance,
         "session_keys": sorted(session_vals.keys()),
     }
     _append_event(
@@ -1890,6 +2050,7 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
     want_pdf = bool(getattr(args, "output_pdf", None))
     want_customer_html = bool(getattr(args, "output_customer_html", None))
     want_customer_pdf = bool(getattr(args, "output_customer_pdf", None))
+    xlsx_extra_mod = bool(getattr(args, "xlsx_include_modulation", False))
     allow_empty = bool(getattr(args, "allow_empty", False))
 
     if not src.is_file():
@@ -1972,7 +2133,11 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
                 )
             if want_xlsx:
                 try:
-                    _write_commissioning_report_unified_xlsx(Path(args.output_xlsx), doc)
+                    _write_commissioning_report_unified_xlsx(
+                        Path(args.output_xlsx),
+                        doc,
+                        include_modulation_sheet=xlsx_extra_mod,
+                    )
                 except RuntimeError as err:
                     print(f"error: {err}")
                     return 2
@@ -1990,7 +2155,10 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
                 html_path.parent.mkdir(parents=True, exist_ok=True)
                 unified_rows = _commissioning_report_unified_csv_rows(doc)
                 html_body = _commissioning_report_unified_rows_to_html(
-                    job_id, str(doc.get("schema_version", "")), unified_rows
+                    job_id,
+                    str(doc.get("schema_version", "")),
+                    unified_rows,
+                    doc=doc,
                 )
                 html_path.write_text(html_body, encoding="utf-8")
                 _append_event(
@@ -2150,7 +2318,11 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
     xlsx_out = getattr(args, "output_xlsx", None)
     if xlsx_out:
         try:
-            _write_commissioning_report_unified_xlsx(Path(xlsx_out), doc)
+            _write_commissioning_report_unified_xlsx(
+                Path(xlsx_out),
+                doc,
+                include_modulation_sheet=xlsx_extra_mod,
+            )
         except RuntimeError as err:
             print(f"error: {err}")
             return 2
@@ -2170,7 +2342,7 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
         schema_v = str(doc.get("schema_version", "")).strip()
         unified_rows = _commissioning_report_unified_csv_rows(doc)
         html_body = _commissioning_report_unified_rows_to_html(
-            job_id, schema_v, unified_rows
+            job_id, schema_v, unified_rows, doc=doc
         )
         html_path.write_text(html_body, encoding="utf-8")
         _append_event(
@@ -2928,13 +3100,34 @@ tr:nth-child(even) td {{ background: #fafafa; }}
 """
 
 
+def _commissioning_report_modulation_notes_for_pdf(doc: dict, *, max_lines: int = 24) -> list[str]:
+    """Short lines from modulation-related report entries that carry operator notes."""
+    lines: list[str] = []
+    for ent in doc.get("entries", []) if isinstance(doc.get("entries"), list) else []:
+        if not isinstance(ent, dict):
+            continue
+        kind = str(ent.get("kind", "")).strip()
+        if not kind.startswith("thermal_modulation"):
+            continue
+        note = str(ent.get("note", "")).strip()
+        if not note:
+            continue
+        ts = str(ent.get("ts", "")).strip()
+        ctrl = str(ent.get("controller_label", "")).strip()
+        head = f"{ts} {ctrl}".strip()
+        lines.append(_pdf_cell_safe(f"{head} — {note}", 120))
+        if len(lines) >= max_lines:
+            break
+    return lines
+
+
 def _write_customer_modulation_pdf(
     path: Path,
     doc: dict,
     *,
     logo_image_path: Path | None = None,
 ) -> None:
-    """Landscape PDF with wider cells for customer modulation table only."""
+    """Landscape PDF: cover page, modulation table, optional notes (A1 polish)."""
     try:
         from fpdf import FPDF
         from fpdf.enums import XPos, YPos
@@ -2947,12 +3140,39 @@ def _write_customer_modulation_pdf(
     headers = list(COMMISSIONING_REPORT_CUSTOMER_MODULATION_FIELDNAMES)
     job_id = str(doc.get("job_id", "") or "unknown-job")
     schema_v = str(doc.get("schema_version", "") or "")
+    gen_ts = _utc_timestamp()
 
     pdf = FPDF(orientation="L", unit="mm", format="A4")
     pdf.set_auto_page_break(auto=True, margin=10)
-    pdf.add_page()
     margin_l = pdf.l_margin
     usable_w = pdf.w - margin_l - pdf.r_margin
+
+    # --- Cover (portrait-style title block on first landscape page)
+    pdf.add_page()
+    y0 = _pdf_draw_commissioning_logo_strip(
+        pdf,
+        logo_image_path=logo_image_path,
+        x=margin_l,
+        y=pdf.get_y(),
+    )
+    pdf.set_y(y0 + 4)
+    pdf.set_font("Helvetica", style="B", size=14)
+    pdf.set_text_color(30, 30, 30)
+    pdf.cell(0, 8, _pdf_cell_safe("Commissioning — thermal modulation summary", 80), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", size=10)
+    pdf.cell(0, 6, _pdf_cell_safe(f"job_id: {job_id}", 100), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 6, _pdf_cell_safe(f"schema_version: {schema_v}", 100), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 6, _pdf_cell_safe(f"generated_utc: {gen_ts}", 100), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(6)
+    pdf.set_font("Helvetica", size=9)
+    pdf.multi_cell(0, 5, _pdf_cell_safe(
+        "Following pages list sweep/sample/batch modulation rows exported from the commissioning report. "
+        "Use the integrator unified export for full audit columns.",
+        240,
+    ))
+
+    # --- Data table
+    pdf.add_page()
     y_after_logo = _pdf_draw_commissioning_logo_strip(
         pdf,
         logo_image_path=logo_image_path,
@@ -2960,7 +3180,6 @@ def _write_customer_modulation_pdf(
         y=pdf.get_y(),
     )
     pdf.set_y(y_after_logo)
-
     pdf.set_font("Helvetica", size=10)
     pdf.set_text_color(0, 0, 0)
     pdf.cell(
@@ -3004,10 +3223,22 @@ def _write_customer_modulation_pdf(
         pdf.set_font("Helvetica", size=9)
         pdf.cell(0, 6, "(no modulation entries)", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
+    note_lines = _commissioning_report_modulation_notes_for_pdf(doc)
+    if note_lines:
+        pdf.add_page()
+        pdf.set_font("Helvetica", style="B", size=11)
+        pdf.cell(0, 7, "Operator notes (modulation entries)", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(2)
+        pdf.set_font("Helvetica", size=8)
+        for line in note_lines:
+            pdf.multi_cell(0, 4, line)
+
     pdf.output(str(path))
 
 
-def _write_commissioning_report_unified_xlsx(path: Path, doc: dict) -> None:
+def _write_commissioning_report_unified_xlsx(
+    path: Path, doc: dict, *, include_modulation_sheet: bool = False
+) -> None:
     """Write unified commissioning rows to an ``.xlsx`` file (requires openpyxl)."""
     try:
         from openpyxl import Workbook
@@ -3025,6 +3256,14 @@ def _write_commissioning_report_unified_xlsx(path: Path, doc: dict) -> None:
     ws.append(list(COMMISSIONING_REPORT_UNIFIED_FIELDNAMES))
     for row in rows:
         ws.append([str(row.get(k, "") or "") for k in COMMISSIONING_REPORT_UNIFIED_FIELDNAMES])
+    if include_modulation_sheet:
+        mod_rows = _commissioning_report_modulation_rows(doc)
+        ws2 = wb.create_sheet(title="modulation")
+        ws2.append(list(COMMISSIONING_REPORT_CUSTOMER_MODULATION_FIELDNAMES))
+        for r in mod_rows:
+            ws2.append(
+                [str(r.get(k, "") or "") for k in COMMISSIONING_REPORT_CUSTOMER_MODULATION_FIELDNAMES]
+            )
     wb.save(path)
 
 
@@ -3542,8 +3781,106 @@ def _commissioning_report_unified_csv_rows(doc: dict) -> list[dict[str, str]]:
     return rows
 
 
+def _modulation_sweep_cmd_sat_series(
+    mod_rows: list[dict[str, str]],
+) -> dict[str, list[tuple[float, float]]]:
+    """Per controller: ordered (command_percent, ai_sat_degC) from thermal_modulation_sweep rows."""
+    from collections import defaultdict
+
+    groups: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for r in mod_rows:
+        if str(r.get("kind", "")).strip() != "thermal_modulation_sweep":
+            continue
+        ctrl = str(r.get("controller_label", "")).strip()
+        ts = str(r.get("entry_ts", "")).strip()
+        cmd_s = str(r.get("command_percent", "")).strip()
+        if not ctrl or not ts or not cmd_s:
+            continue
+        try:
+            cmd = float(cmd_s)
+        except ValueError:
+            continue
+        key = (ctrl, ts, cmd_s)
+        g = groups.setdefault(key, {"cmd": cmd, "sat": None})
+        oid = str(r.get("object_id", "")).strip()
+        if oid == "ai_sat" and str(r.get("status", "")).strip() == "read_ok":
+            vs = str(r.get("value_str", "")).strip()
+            try:
+                g["sat"] = float(vs)
+            except ValueError:
+                pass
+    by_ctrl: dict[str, list[tuple[float, float]]] = defaultdict(list)
+    for (ctrl, ts, _cmd_s) in sorted(groups.keys(), key=lambda k: (k[0], k[1])):
+        entry = groups[(ctrl, ts, _cmd_s)]
+        sat = entry.get("sat")
+        if sat is None:
+            continue
+        by_ctrl[ctrl].append((float(entry["cmd"]), float(sat)))
+    return dict(by_ctrl)
+
+
+def _svg_sparkline_cmd_vs_sat(
+    points: list[tuple[float, float]],
+    *,
+    width: int = 360,
+    height: int = 120,
+    pad: int = 12,
+) -> str:
+    """Inline SVG: X = command %, Y = SAT °C (simple polyline)."""
+    if len(points) < 2:
+        return ""
+    cmds = [p[0] for p in points]
+    sats = [p[1] for p in points]
+    cmin, cmax = min(cmds), max(cmds)
+    smin, smax = min(sats), max(sats)
+    if cmax <= cmin:
+        cmax = cmin + 1.0
+    if smax <= smin:
+        smax = smin + 0.1
+    inner_w = width - 2 * pad
+    inner_h = height - 2 * pad
+
+    def cx(x: float) -> float:
+        return pad + (x - cmin) / (cmax - cmin) * inner_w
+
+    def cy(y: float) -> float:
+        return pad + (1.0 - (y - smin) / (smax - smin)) * inner_h
+
+    pts = " ".join(f"{cx(c):.1f},{cy(s):.1f}" for c, s in points)
+    title = html.escape(f"command% {cmin:.0f}-{cmax:.0f} vs SAT °C {smin:.1f}-{smax:.1f}")
+    return (
+        f'<svg class="commissioning-mod-chart" xmlns="http://www.w3.org/2000/svg" '
+        f'role="img" aria-label="Modulation SAT vs command" width="{width}" height="{height}">'
+        f'<title>{title}</title>'
+        f'<rect x="0" y="0" width="{width}" height="{height}" fill="#fafafa" stroke="#ccc"/>'
+        f'<polyline fill="none" stroke="#1a5fb4" stroke-width="2" points="{pts}"/>'
+        f'<text x="{pad}" y="{height - 4}" font-size="10" fill="#333">'
+        f'X: command % &nbsp; Y: ai_sat °C</text></svg>'
+    )
+
+
+def _html_modulation_charts_section(doc: dict) -> str:
+    mod_rows = _commissioning_report_modulation_rows(doc)
+    series = _modulation_sweep_cmd_sat_series(mod_rows)
+    if not series:
+        return ""
+    parts: list[str] = [
+        '<section class="mod-charts"><h2>Modulation (command % vs SAT)</h2>',
+        '<p class="meta">From <code>thermal_modulation_sweep</code> rows with '
+        "<code>ai_sat</code> read_ok.</p>",
+    ]
+    for ctrl in sorted(series):
+        pts = series[ctrl]
+        svg = _svg_sparkline_cmd_vs_sat(pts)
+        if not svg:
+            continue
+        parts.append(f'<div class="mod-chart-block"><h3>{html.escape(ctrl)}</h3>{svg}</div>')
+    parts.append("</section>")
+    return "\n".join(parts)
+
+
 def _commissioning_report_unified_rows_to_html(
-    job_id: str, schema_version: str, rows: list[dict[str, str]]
+    job_id: str, schema_version: str, rows: list[dict[str, str]], *, doc: dict | None = None
 ) -> str:
     """Minimal printable HTML table from unified commissioning report rows."""
     title = html.escape(f"Commissioning report — job {job_id}")
@@ -3563,6 +3900,11 @@ def _commissioning_report_unified_rows_to_html(
         if body_rows
         else f"<tr><td colspan=\"{colspan}\">(no entries)</td></tr>"
     )
+    chart_block = ""
+    if doc is not None:
+        sec = _html_modulation_charts_section(doc)
+        if sec:
+            chart_block = f"\n{sec}\n"
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -3573,6 +3915,9 @@ def _commissioning_report_unified_rows_to_html(
 body {{ font-family: system-ui, sans-serif; margin: 1rem; }}
 h1 {{ font-size: 1.1rem; }}
 .meta {{ color: #444; margin-bottom: 0.75rem; font-size: 0.9rem; }}
+.mod-charts h2 {{ font-size: 1rem; margin-top: 1.25rem; }}
+.mod-charts h3 {{ font-size: 0.95rem; margin: 0.5rem 0 0.25rem; }}
+.mod-chart-block {{ margin-bottom: 1rem; }}
 table {{ border-collapse: collapse; width: 100%; font-size: 0.85rem; }}
 th, td {{ border: 1px solid #ccc; padding: 0.35rem 0.5rem; text-align: left; vertical-align: top; }}
 th {{ background: #f0f0f0; }}
@@ -3583,6 +3928,7 @@ tr:nth-child(even) td {{ background: #fafafa; }}
 <body>
 <h1>{title}</h1>
 <p class="meta">schema_version: {esc_schema} &middot; job_id: {esc_job} &middot; Print to PDF from browser (Ctrl+P).</p>
+{chart_block}
 <table>
 <thead><tr>{th}</tr></thead>
 <tbody>
@@ -3708,18 +4054,6 @@ def _resolve_profile_object_bacnet(
     if ot is None:
         return None
     return ot, inst
-
-
-def _find_modulate_actuator_action(step: dict) -> dict | None:
-    actions = step.get("actions")
-    if not isinstance(actions, list):
-        return None
-    for act in actions:
-        if not isinstance(act, dict):
-            continue
-        if str(act.get("type", "")).strip() == "modulate_actuator_log_sat_for_report":
-            return act
-    return None
 
 
 def _parse_modulation_command_percents(args: argparse.Namespace) -> list[float]:
@@ -4854,6 +5188,14 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help=(
             "Also write unified rows to an Excel workbook (.xlsx; requires openpyxl)."
+        ),
+    )
+    export_cr.add_argument(
+        "--xlsx-include-modulation",
+        action="store_true",
+        help=(
+            "With --output-xlsx: add a second sheet ``modulation`` with the same rows as "
+            "the customer modulation CSV (thermal_modulation_* only)."
         ),
     )
     export_cr.add_argument(

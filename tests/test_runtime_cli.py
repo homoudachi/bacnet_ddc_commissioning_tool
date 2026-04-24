@@ -1176,6 +1176,10 @@ class RuntimeCliTests(unittest.TestCase):
         log_tail = (self.run_dir / "logs" / "events.jsonl").read_text(encoding="utf-8")
         tail_events = [json.loads(x)["event"] for x in log_tail.strip().splitlines()]
         self.assertIn("commissioning_guided_next_viewed", tail_events)
+        gstep0 = g["guidance"]["steps"][0]
+        self.assertIn("suggested_cli_commands", gstep0)
+        self.assertTrue(len(gstep0["suggested_cli_commands"]) >= 1)
+        self.assertIn("blocked_reasons", gstep0)
 
     def test_show_flow_errors_when_controller_has_no_flow_state(self) -> None:
         init_result = _run_runtime(
@@ -2835,6 +2839,23 @@ class RuntimeCliTests(unittest.TestCase):
         )
         self.assertEqual(0, r4c.returncode)
         self.assertTrue(cust_pdf.read_bytes().startswith(b"%PDF"))
+
+        xlsx_mod = self.run_dir / "artifacts" / "empty-report-mod.xlsx"
+        r4d = _run_runtime(
+            "export-commissioning-report",
+            "--run-dir",
+            str(self.run_dir),
+            "--allow-empty",
+            "--output-xlsx",
+            str(xlsx_mod),
+            "--xlsx-include-modulation",
+        )
+        self.assertEqual(0, r4d.returncode)
+        from openpyxl import load_workbook
+
+        wb2 = load_workbook(xlsx_mod)
+        self.assertIn("modulation", wb2.sheetnames)
+        self.assertEqual("commissioning", wb2.sheetnames[0])
 
         uni_empty = self.run_dir / "artifacts" / "empty-unified.csv"
         r5 = _run_runtime(

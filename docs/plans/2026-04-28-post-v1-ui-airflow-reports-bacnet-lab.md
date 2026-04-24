@@ -16,10 +16,10 @@ These mostly extend **existing** CLI, exports, or profiles without new transport
 
 | # | Item | Why “easier” | Suggested approach | Done when |
 |---|------|----------------|-------------------|-----------|
-| A1 | **Customer PDF polish** (sections, title block, optional multi-sheet XLSX) | fpdf2 + openpyxl already in tree; layout code is local | Add optional `--output-pdf-sections` or a `customer` template mode: cover page (job_id, date, logo), then modulation table, then optional “notes” block; mirror section breaks in XLSX as extra sheets if useful | Golden PDF byte-compare or structural checks + manual visual once; docs in `docs/packaging/release-checklist.md` |
-| A2 | **Charts in HTML export** (not PDF first) | Browsers handle SVG/Canvas; no new Python chart deps if using simple SVG | For `--output-html`, embed inline SVG sparklines or small charts per controller (e.g. command % vs SAT from modulation rows) generated from the same normalized row list; print-to-PDF still works | HTML contains chart markup; one unittest with fixed rows asserts SVG path or data attributes |
-| A3 | **`commissioning-guided-next` → richer JSON** | Already shipped thin slice | Add `blocked_reasons` / `requires_step_ids` / next recommended CLI command name per step (string hints only, no new subprocess) | Tests + README example for scripting operators |
-| A4 | **Large-sheet compiler targets** | `benchmark_compile.py` exists | Define SLO table (e.g. 500 / 2000 rows) in docs; optional CI job on `workflow_dispatch` only to avoid slowing every PR; consider streaming CSV if memory becomes an issue | ADR or `docs/project.md` locks targets; benchmark script documented |
+| A1 | **Customer PDF polish** (sections, title block, optional multi-sheet XLSX) | fpdf2 + openpyxl already in tree; layout code is local | **`--output-customer-pdf`:** cover page (job_id, schema, generated UTC, logo) + modulation table + optional notes page from modulation entry `note` fields. **`--output-xlsx --xlsx-include-modulation`:** second sheet `modulation`. | Shipped **2026-04-28**; see `docs/packaging/release-checklist.md` |
+| A2 | **Charts in HTML export** (not PDF first) | Browsers handle SVG/Canvas; no new Python chart deps if using simple SVG | **`--output-html`:** after `thermal_modulation_sweep` rows with `ai_sat` read_ok, inline SVG per controller (command % vs SAT polyline). | Shipped **2026-04-28**; `tests/test_commissioning_html_modulation_charts.py` |
+| A3 | **`commissioning-guided-next` → richer JSON** | Already shipped thin slice | Each step includes **`suggested_cli_commands`** (strings) and **`blocked_reasons`** (prereq / `skip_when` gates); compact row already had **`requires_step_ids`** when present. | Shipped **2026-04-28**; `tests/test_runtime_cli.py` |
+| A4 | **Large-sheet compiler targets** | `benchmark_compile.py` exists | **SLO** documented in `docs/project.md` (developer machine, CPython 3.12); CI keeps **`--rows 120`** smoke. Optional `workflow_dispatch` benchmark: backlog unless CI noise is acceptable. | Shipped **2026-04-28** (doc targets); optional workflow still open |
 
 ---
 
@@ -67,3 +67,4 @@ These mostly extend **existing** CLI, exports, or profiles without new transport
 ## Revision
 
 - **2026-04-28:** Initial plan (tiered sequencing; BBMD deferred).
+- **2026-04-28:** Tier A items A1–A4 marked shipped in-repo (see foundation plan current status); Tier B/C unchanged.

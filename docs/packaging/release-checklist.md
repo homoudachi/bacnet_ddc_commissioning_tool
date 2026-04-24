@@ -27,7 +27,7 @@ Use before tagging a release or handing a **Windows exe** / **Python** drop to t
 | Airflow | `commissioning-airflow-adjust-write`, `commissioning-confirm-tachometer-reference` | Optional profile keys |
 | Manual airflow | `commissioning-record-manual-airflow` | Before pass on `manual_airflow_verification_assisted` steps |
 | Modulation | `bacnet-modulation-sweep` | After `init-flow` |
-| Report | `export-commissioning-report` CSV / unified / HTML / XLSX / PDF / customer HTML+PDF | Unified = all kinds; customer = modulation-only table |
+| Report | `export-commissioning-report` CSV / unified / HTML / XLSX / PDF / customer HTML+PDF | Unified HTML includes **modulation SVG charts** when sweep+SAT data exists; **`--xlsx-include-modulation`** adds **`modulation`** sheet; customer PDF = cover + table + notes |
 
 ## Known gaps (not blocking v1 CLI)
 

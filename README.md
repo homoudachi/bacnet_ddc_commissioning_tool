@@ -63,6 +63,11 @@ python3 tools/runtime/app.py show-flow \
   --run-dir artifacts/runtime-run \
   --controller-label FCU-01A
 
+# 3a2) Compact commissioning guidance (next step, per-step CLI hints, blocked_reasons)
+python3 tools/runtime/app.py commissioning-guided-next \
+  --run-dir artifacts/runtime-run \
+  --controller-label FCU-01A
+
 # 3b) Operator-entered session values (requires init-flow); state/sessions/<label>.json
 python3 tools/runtime/app.py set-session-value \
   --run-dir artifacts/runtime-run \
