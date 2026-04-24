@@ -8,6 +8,7 @@ import csv
 import html
 import json
 import importlib.util
+import shutil
 import subprocess
 import sys
 import time
@@ -288,6 +289,13 @@ def cmd_init_run(args: argparse.Namespace) -> int:
     }
     config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
     _append_event(log_path, "run_initialized", {"run_dir": str(run_dir.resolve())})
+    branding = _ensure_default_branding_placeholder(artifacts_dir)
+    if branding is not None and branding.is_file():
+        _append_event(
+            log_path,
+            "branding_placeholder_installed",
+            {"logo_png": str(branding.resolve())},
+        )
     print(f"run_initialized=true run_dir={run_dir}")
     return 0
 
@@ -1749,6 +1757,20 @@ def _pdf_cell_safe(text: str, max_len: int) -> str:
 def _commissioning_pdf_bundled_placeholder_logo() -> Path:
     """Neutral placeholder shipped in-repo (not a customer trademark)."""
     return ROOT / "docs" / "examples" / "branding" / "commissioning-logo-placeholder.png"
+
+
+def _ensure_default_branding_placeholder(artifacts_dir: Path) -> Path | None:
+    """Copy bundled neutral logo to ``artifacts/branding/logo.png`` when missing."""
+    src = _commissioning_pdf_bundled_placeholder_logo()
+    if not src.is_file():
+        return None
+    dest_dir = artifacts_dir / "branding"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / "logo.png"
+    if dest.is_file():
+        return dest
+    shutil.copy2(src, dest)
+    return dest
 
 
 def _resolve_commissioning_pdf_logo_path(

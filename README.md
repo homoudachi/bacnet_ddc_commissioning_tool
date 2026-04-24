@@ -132,7 +132,7 @@ python3 tools/runtime/app.py record-step \
 # Optional: --output-html report.html same data as unified CSV; open in browser → Print → Save as PDF
 # Optional: --output-xlsx report.xlsx same unified rows (needs: pip install -r requirements.txt)
 # Optional: --output-pdf report.pdf server-side PDF table (fpdf2)
-# Optional: --pdf-logo-image path/to/logo.png (else artifacts/branding/logo.png; else repo placeholder under docs/examples/branding/)
+# Optional: --pdf-logo-image path/to/logo.png (init-run seeds artifacts/branding/logo.png from neutral placeholder; override with your PNG)
 
 # 4c) Append thermal modulation sample (allowlisted BACnet reads → commissioning_report.json)
 # python3 tools/runtime/app.py append-commissioning-modulation-sample --run-dir artifacts/runtime-run \

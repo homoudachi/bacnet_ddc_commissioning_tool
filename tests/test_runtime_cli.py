@@ -259,6 +259,11 @@ class RuntimeCliTests(unittest.TestCase):
         first_event = json.loads(lines[0])
         self.assertEqual("run_initialized", first_event["event"])
 
+        logo = self.run_dir / "artifacts" / "branding" / "logo.png"
+        self.assertTrue(logo.is_file())
+        ref = ROOT / "docs" / "examples" / "branding" / "commissioning-logo-placeholder.png"
+        self.assertEqual(ref.stat().st_size, logo.stat().st_size)
+
     def test_compile_import_uses_run_config_and_writes_state_outputs(self) -> None:
         init_result = _run_runtime(
             "init-run",
