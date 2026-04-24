@@ -41,7 +41,7 @@ A **runnable** single-device simulator ships in this repository:
 - Image source: `docker/simulator/bacnet-device/` (Python + bacpypes3 UDP server)
 - Runbook: `docker/simulator/README.md`
 
-CI runs `tools/simulator/docker_bacnet_smoke.sh` (builds the image, starts the container, **`probe-bip`** against `FCU-DOCKER` on `127.0.0.1:47808`, then tears down).
+CI runs `tools/simulator/docker_bacnet_smoke.sh` (builds images, starts **two** sim containers on `127.0.0.1:47808` and `47809`, then **`verify-bip-list --strict`** for both controller rows, then tears down).
 
 ## Docker topology profiles (longer-term lab spec)
 
@@ -198,4 +198,4 @@ Use this checklist in order:
 
 ## Verification status
 
-- **2026-04-26:** `docker compose … --profile bacnet-dev up --build` + `tools/simulator/docker_bacnet_smoke.sh` exercises **`probe-bip`** against the container.
+- **2026-04-26:** `docker compose … --profile bacnet-dev up --build` + `tools/simulator/docker_bacnet_smoke.sh` exercises **`verify-bip-list --strict`** against two sim containers.

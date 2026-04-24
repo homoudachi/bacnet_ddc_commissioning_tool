@@ -10,7 +10,12 @@ From the repository root:
 docker compose -f docker/simulator/docker-compose.yml --profile bacnet-dev up -d --build
 ```
 
-The service listens on **UDP 47808** on the host loopback (`127.0.0.1:47808`).
+Services (profile **`bacnet-dev`**):
+
+| Container | Host UDP | Device instance | Notes |
+|-----------|----------|-----------------|--------|
+| `bacnet-fcu-sim` | `127.0.0.1:47808` | 21001 | Default SAT/MSV |
+| `bacnet-fcu-sim-02` | `127.0.0.1:47809` | 21002 | Different SAT/MSV via `SIM_*` env |
 
 ## Smoke test with the runtime CLI
 
@@ -25,14 +30,14 @@ python3 tools/runtime/app.py init-run \
 
 python3 tools/runtime/app.py compile-import --run-dir "$RUN"
 
-python3 tools/runtime/app.py probe-bip \
+python3 tools/runtime/app.py verify-bip-list \
   --run-dir "$RUN" \
-  --controller-label FCU-DOCKER \
+  --strict \
   --timeout-seconds 1.0 \
   --retries 2
 ```
 
-Expected: `reachable_verified` in the JSON output.
+Expected: `"strict_pass": true`, `"total": 2`, both controllers **`reachable_verified`**.
 
 ## Stop
 

@@ -3,7 +3,7 @@
 #
 # Quick start:
 #   docker compose -f docker/simulator/docker-compose.yml --profile bacnet-dev up -d --build
-#   python3 tools/runtime/app.py probe-bip --run-dir <run-dir> --controller-label FCU-DOCKER
+#   python3 tools/runtime/app.py verify-bip-list --run-dir <run-dir> --strict ...
 #   docker compose -f docker/simulator/docker-compose.yml --profile bacnet-dev down
 
 name: bacnet-simulator-lab
@@ -24,6 +24,22 @@ services:
       # SIM_AI_SAT: "21.5"
       # SIM_MSV_TEST_MODE: "1"
       # SIM_AO_CHW_VALVE: "0"
+    networks:
+      - bacnet_lab
+
+  bacnet-fcu-sim-02:
+    build:
+      context: ./bacnet-device
+      dockerfile: Dockerfile
+    image: bacnet-ddc-commissioning-tool/bacnet-fcu-sim:local
+    profiles: ["bacnet-dev"]
+    ports:
+      - "127.0.0.1:47809:47809/udp"
+    environment:
+      DEVICE_INSTANCE: "21002"
+      BACNET_UDP_PORT: "47809"
+      SIM_AI_SAT: "18.0"
+      SIM_MSV_TEST_MODE: "2"
     networks:
       - bacnet_lab
 

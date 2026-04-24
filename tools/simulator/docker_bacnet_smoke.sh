@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# Build/start Docker BACnet sim, probe FCU-DOCKER via runtime CLI, tear down.
+# Build/start Docker BACnet sims (bacnet-dev), strict verify-bip-list for two rows, tear down.
 # Requires: docker, docker compose v2, repository root as cwd.
 
 set -eu
@@ -37,16 +37,21 @@ python3 "$ROOT/tools/runtime/app.py" init-run \
 
 python3 "$ROOT/tools/runtime/app.py" compile-import --run-dir "$RUN_DIR"
 
-OUT="$(python3 "$ROOT/tools/runtime/app.py" probe-bip \
+SUMMARY="$(python3 "$ROOT/tools/runtime/app.py" verify-bip-list \
   --run-dir "$RUN_DIR" \
-  --controller-label FCU-DOCKER \
+  --strict \
   --timeout-seconds 2.0 \
   --retries 3)"
 
-echo "$OUT"
-echo "$OUT" | grep -q 'reachable_verified' || {
-  echo "error: probe-bip did not report reachable_verified"
-  exit 2
-}
+echo "$SUMMARY"
+echo "$SUMMARY" | python3 -c "import json,sys
+s=json.load(sys.stdin)
+assert s.get('strict_pass') is True, s
+assert s.get('total')==2, s
+assert s.get('unresolved')==0, s
+rows={r['controller_label']:r for r in s.get('rows',[])}
+assert rows['FCU-DOCKER']['status']=='reachable_verified'
+assert rows['FCU-DOCKER-B']['status']=='reachable_verified'
+"
 
 echo "docker_bacnet_smoke_ok=true"

@@ -69,7 +69,7 @@ Use this order to reduce rework and unblock parallel work later.
 **Deliverables**
 
 - Stable adapter interface usable by commissioning flow engine — **yes** (`CommissioningBACnetAdapter`).
-- CI integration suite using simulator containers or mock devices — **partial:** list verifier + **loopback BACnet fake** in unittest; **Docker BACnet sim** — **`docker/simulator/`** `bacnet-dev` profile + CI **`probe-bip`** smoke (`tools/simulator/docker_bacnet_smoke.sh`). Full multi-device lab topology still optional.
+- CI integration suite using simulator containers or mock devices — **partial:** list verifier + **loopback BACnet fake** in unittest; **Docker BACnet sim** — **`docker/simulator/`** `bacnet-dev` profile (**two** UDP ports / device instances) + CI **`verify-bip-list --strict`** smoke (`tools/simulator/docker_bacnet_smoke.sh`). Full orchestrator/BBMD lab topology still optional.
 - First operator-visible diagnostic logs for comms failures — **partial:** JSON artifacts + `events.jsonl`; richer comms diagnostics TBD.
 
 ### Phase 4 — commissioning flow engine (v1 slices)
