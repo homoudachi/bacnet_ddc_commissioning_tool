@@ -2,6 +2,20 @@
 
 Use **profile overrides** in the import for site-specific limits. When absent, the tool can apply these **advisory** defaults and still allow **manual pass** / **skip with reason**.
 
+## V1 profile contract (what every profile should carry)
+
+This is the **defaults layer** companion to numeric tables below. Site JSON may add fields; the **compiler/runtime** expect at least:
+
+| Area | Expectation |
+|------|----------------|
+| Identity | `profile_id`, `display_name`, `schema_version` (string; use `0.1-example` until a formal schema ADR freezes semver). |
+| BACnet safety | `commissioning_write_allowlist` and `commissioning_read_allowlist` — arrays of logical `objects[].id` values (see ADR 0004). |
+| Object map | `objects[]` with `id`, `bacnet.object_type`, `bacnet.instance`, and `writable` for anything the CLI may write. |
+| Operator flow | `commissioning_flow[]` entries with `step_id` and `label`; use `step_type`, `skippable`, `skip_when`, `arms_test_mode_state_key`, `run_point_checkout_on_pass`, and `report_ref` as needed for the shipped CLI slices. |
+| Thermal reporting | When a profile defines heating/cooling modulation for exports, include **numeric** limits or references (e.g. `thermal_tests_for_report`) so pass/fail is not only “advisory text” in this file. |
+
+**Pass/fail numbers** belong in the **profile** for production jobs; keep **this markdown** as the team’s **starting defaults** and update both when you change thresholds.
+
 ## Cooling test (valve modulated, CHW on)
 
 | Check | Default | Fail if |
