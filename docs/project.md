@@ -161,10 +161,8 @@ Exact file format (JSON, YAML, SQLite job DB, etc.) is TBD; the above is the **i
 ### BACnet simulation and CI
 
 - **Goal:** heavy **automated simulation and regression** before relying on field panels alone.
-- **Approach (approved baseline):** Docker-based simulator lab with one compose topology and multiple profiles:
-  - `ci`: deterministic bridge network with static IPs
-  - `lab`: macvlan bench-network parity
-  - `multisubnet`: two subnets + BBMD validation
+- **Shipped slice:** `docker/simulator/` **bacnet-dev** profile — one **buildable** BACnet/IP UDP device (`docker/simulator/bacnet-device/`), CI smoke via `tools/simulator/docker_bacnet_smoke.sh` + `docs/examples/site-controllers.docker-bacnet-sim.csv`.
+- **Longer-term baseline (spec):** Docker lab with multiple profiles (`ci` / `lab` / `multisubnet`) — see [docs/simulator/README.md](simulator/README.md) “planned” sections.
 - **Discovery and verification mode:** list-first, verify-all. The system attempts every imported controller row and emits a terminal status for each row (no silent skip).
 - **Strict CI gate:** fail CI when required rows are unresolved, identity mismatched, or missing required points.
 - **Design references:** [docs/simulator/README.md](simulator/README.md), [docs/plans/2026-04-21-bacnet-simulator-plan.md](plans/2026-04-21-bacnet-simulator-plan.md), and [docker/simulator/docker-compose.yml](../docker/simulator/docker-compose.yml).
@@ -245,7 +243,7 @@ These are the main gaps once requirements feel “complete enough” to start co
 - **RAT proxy rules** — if using **HRV return** for **FCU** commissioning, document **eligibility** and UI warnings.
 - **Report layout** — PDF section order, logo/branding, one table vs multiple charts; **CSV vs XLSX** column order frozen for integrators.
 - **Structured log** — **v1 slice:** append-only **JSON Lines** at `logs/events.jsonl` per run-dir; **rotation / retention / portable exe paths** still to define.
-- **Docker BACnet sim** — which simulator images/libraries, how many virtual devices, scripted scenarios for CI.
+- **Docker BACnet sim (beyond one device)** — multi-device images, orchestrator-in-container, BBMD lab parity; single-device **bacnet-dev** is in-repo.
 - **BACnet stack** — Windows portable build packaging; **read/write batching**, **COV/subscribe**, and **sweep-timeouts** beyond the current [`CommissioningBACnetAdapter`](../tools/bacnet/adapter.py) façade.
 - **Build and signing** — still **TBD** (toolchain, certificate, release channel).
 

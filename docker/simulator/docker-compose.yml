@@ -1,262 +1,32 @@
+# Runnable BACnet/IP lab device (builds from this repo).
+# Previous placeholder images (ghcr.io/example/...) were spec-only; use `bacnet-dev` profile.
+#
+# Quick start:
+#   docker compose -f docker/simulator/docker-compose.yml --profile bacnet-dev up -d --build
+#   python3 tools/runtime/app.py probe-bip --run-dir <run-dir> --controller-label FCU-DOCKER
+#   docker compose -f docker/simulator/docker-compose.yml --profile bacnet-dev down
+
 name: bacnet-simulator-lab
 
 services:
-  sim-device-01:
-    image: ghcr.io/example/bacnet-sim-device:latest
-    profiles: ["ci"]
+  bacnet-fcu-sim:
+    build:
+      context: ./bacnet-device
+      dockerfile: Dockerfile
+    image: bacnet-ddc-commissioning-tool/bacnet-fcu-sim:local
+    profiles: ["bacnet-dev"]
+    ports:
+      - "127.0.0.1:47808:47808/udp"
     environment:
-      DEVICE_INSTANCE: "1001"
-      PROFILE_ID: "fcu-default"
-      SCENARIO_MODE: "normal"
+      DEVICE_INSTANCE: "21001"
+      BACNET_UDP_PORT: "47808"
+      # Optional initial presentValue overrides (float/int):
+      # SIM_AI_SAT: "21.5"
+      # SIM_MSV_TEST_MODE: "1"
+      # SIM_AO_CHW_VALVE: "0"
     networks:
-      ci_net:
-        ipv4_address: 172.29.0.11
-
-  sim-device-02:
-    image: ghcr.io/example/bacnet-sim-device:latest
-    profiles: ["ci"]
-    environment:
-      DEVICE_INSTANCE: "1002"
-      PROFILE_ID: "fcu-default"
-      SCENARIO_MODE: "normal"
-    networks:
-      ci_net:
-        ipv4_address: 172.29.0.12
-
-  sim-device-03:
-    image: ghcr.io/example/bacnet-sim-device:latest
-    profiles: ["ci"]
-    environment:
-      DEVICE_INSTANCE: "1003"
-      PROFILE_ID: "hrv-default"
-      SCENARIO_MODE: "normal"
-    networks:
-      ci_net:
-        ipv4_address: 172.29.0.13
-
-  sim-device-04:
-    image: ghcr.io/example/bacnet-sim-device:latest
-    profiles: ["ci"]
-    environment:
-      DEVICE_INSTANCE: "1004"
-      PROFILE_ID: "fcu-default"
-      SCENARIO_MODE: "chw_unavailable"
-    networks:
-      ci_net:
-        ipv4_address: 172.29.0.14
-
-  sim-device-05:
-    image: ghcr.io/example/bacnet-sim-device:latest
-    profiles: ["ci"]
-    environment:
-      DEVICE_INSTANCE: "1005"
-      PROFILE_ID: "hrv-default"
-      SCENARIO_MODE: "timeout_burst"
-    networks:
-      ci_net:
-        ipv4_address: 172.29.0.15
-
-  scenario-orchestrator-ci:
-    image: ghcr.io/example/bacnet-scenario-orchestrator:latest
-    profiles: ["ci"]
-    depends_on:
-      - sim-device-01
-      - sim-device-02
-      - sim-device-03
-      - sim-device-04
-      - sim-device-05
-    environment:
-      TOPOLOGY_PROFILE: "ci"
-      CONTROLLERS_LIST_PATH: "/fixtures/site-controllers.csv"
-    volumes:
-      - ../../docs/examples:/fixtures:ro
-    networks:
-      ci_net:
-        ipv4_address: 172.29.0.30
-
-  test-runner-ci:
-    image: ghcr.io/example/bacnet-integration-tests:latest
-    profiles: ["ci"]
-    depends_on:
-      - scenario-orchestrator-ci
-    environment:
-      TEST_TARGET_MODE: "list-first-verify-all"
-      CONTROLLERS_LIST_PATH: "/fixtures/site-controllers.csv"
-    volumes:
-      - ../../docs/examples:/fixtures:ro
-    networks:
-      ci_net:
-        ipv4_address: 172.29.0.40
-
-  netem-ci:
-    image: alpine:3.20
-    profiles: ["ci-netem"]
-    cap_add:
-      - NET_ADMIN
-    command: ["/bin/sh", "-lc", "sleep infinity"]
-    networks:
-      ci_net:
-        ipv4_address: 172.29.0.50
-
-  sim-lab-01:
-    image: ghcr.io/example/bacnet-sim-device:latest
-    profiles: ["lab"]
-    environment:
-      DEVICE_INSTANCE: "2001"
-      PROFILE_ID: "fcu-default"
-      SCENARIO_MODE: "normal"
-    networks:
-      lab_net:
-        ipv4_address: 192.168.250.11
-
-  sim-lab-02:
-    image: ghcr.io/example/bacnet-sim-device:latest
-    profiles: ["lab"]
-    environment:
-      DEVICE_INSTANCE: "2002"
-      PROFILE_ID: "hrv-default"
-      SCENARIO_MODE: "normal"
-    networks:
-      lab_net:
-        ipv4_address: 192.168.250.12
-
-  scenario-orchestrator-lab:
-    image: ghcr.io/example/bacnet-scenario-orchestrator:latest
-    profiles: ["lab"]
-    depends_on:
-      - sim-lab-01
-      - sim-lab-02
-    environment:
-      TOPOLOGY_PROFILE: "lab"
-      CONTROLLERS_LIST_PATH: "/fixtures/site-controllers.csv"
-    volumes:
-      - ../../docs/examples:/fixtures:ro
-    networks:
-      lab_net:
-        ipv4_address: 192.168.250.30
-
-  test-runner-lab:
-    image: ghcr.io/example/bacnet-integration-tests:latest
-    profiles: ["lab"]
-    depends_on:
-      - scenario-orchestrator-lab
-    environment:
-      TEST_TARGET_MODE: "list-first-verify-all"
-      CONTROLLERS_LIST_PATH: "/fixtures/site-controllers.csv"
-    volumes:
-      - ../../docs/examples:/fixtures:ro
-    networks:
-      lab_net:
-        ipv4_address: 192.168.250.40
-
-  sim-a-01:
-    image: ghcr.io/example/bacnet-sim-device:latest
-    profiles: ["multisubnet"]
-    environment:
-      DEVICE_INSTANCE: "3001"
-      PROFILE_ID: "fcu-default"
-      SCENARIO_MODE: "normal"
-    networks:
-      subnet_a:
-        ipv4_address: 172.30.10.11
-
-  sim-a-02:
-    image: ghcr.io/example/bacnet-sim-device:latest
-    profiles: ["multisubnet"]
-    environment:
-      DEVICE_INSTANCE: "3002"
-      PROFILE_ID: "hrv-default"
-      SCENARIO_MODE: "normal"
-    networks:
-      subnet_a:
-        ipv4_address: 172.30.10.12
-
-  sim-b-01:
-    image: ghcr.io/example/bacnet-sim-device:latest
-    profiles: ["multisubnet"]
-    environment:
-      DEVICE_INSTANCE: "4001"
-      PROFILE_ID: "fcu-default"
-      SCENARIO_MODE: "normal"
-    networks:
-      subnet_b:
-        ipv4_address: 172.30.20.11
-
-  sim-b-02:
-    image: ghcr.io/example/bacnet-sim-device:latest
-    profiles: ["multisubnet"]
-    environment:
-      DEVICE_INSTANCE: "4002"
-      PROFILE_ID: "hrv-default"
-      SCENARIO_MODE: "identity_mismatch"
-    networks:
-      subnet_b:
-        ipv4_address: 172.30.20.12
-
-  bbmd:
-    image: ghcr.io/example/bacnet-bbmd:latest
-    profiles: ["multisubnet"]
-    networks:
-      subnet_a:
-        ipv4_address: 172.30.10.2
-      subnet_b:
-        ipv4_address: 172.30.20.2
-
-  scenario-orchestrator-multisubnet:
-    image: ghcr.io/example/bacnet-scenario-orchestrator:latest
-    profiles: ["multisubnet"]
-    depends_on:
-      - sim-a-01
-      - sim-a-02
-      - sim-b-01
-      - sim-b-02
-      - bbmd
-    environment:
-      TOPOLOGY_PROFILE: "multisubnet"
-      CONTROLLERS_LIST_PATH: "/fixtures/site-controllers.csv"
-    volumes:
-      - ../../docs/examples:/fixtures:ro
-    networks:
-      subnet_a:
-        ipv4_address: 172.30.10.30
-      subnet_b:
-        ipv4_address: 172.30.20.30
-
-  test-runner-multisubnet:
-    image: ghcr.io/example/bacnet-integration-tests:latest
-    profiles: ["multisubnet"]
-    depends_on:
-      - scenario-orchestrator-multisubnet
-    environment:
-      TEST_TARGET_MODE: "list-first-verify-all"
-      CONTROLLERS_LIST_PATH: "/fixtures/site-controllers.csv"
-    volumes:
-      - ../../docs/examples:/fixtures:ro
-    networks:
-      subnet_a:
-        ipv4_address: 172.30.10.40
+      - bacnet_lab
 
 networks:
-  ci_net:
+  bacnet_lab:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.29.0.0/24
-  lab_net:
-    driver: macvlan
-    driver_opts:
-      parent: ${LAB_PARENT_IFACE:-eth0}
-    ipam:
-      config:
-        - subnet: 192.168.250.0/24
-          gateway: 192.168.250.1
-  subnet_a:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 172.30.10.0/24
-  subnet_b:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 172.30.20.0/24

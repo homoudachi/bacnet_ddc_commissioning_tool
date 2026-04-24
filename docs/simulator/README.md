@@ -33,24 +33,34 @@ Supported row classifications:
 
 CI strict mode must fail when any required row is not `reachable_verified`.
 
-## Docker topology profiles
+## Docker BACnet device (implemented)
 
-Use one Compose file with profiles so the same structure works in CI and lab environments.
+A **runnable** single-device simulator ships in this repository:
 
-### `ci` profile (first priority)
+- Compose: `docker/simulator/docker-compose.yml` — profile **`bacnet-dev`**
+- Image source: `docker/simulator/bacnet-device/` (Python + bacpypes3 UDP server)
+- Runbook: `docker/simulator/README.md`
+
+CI runs `tools/simulator/docker_bacnet_smoke.sh` (builds the image, starts the container, **`probe-bip`** against `FCU-DOCKER` on `127.0.0.1:47808`, then tears down).
+
+## Docker topology profiles (longer-term lab spec)
+
+The sections below describe a **multi-service** lab layout (orchestrator, multiple devices, BBMD). That topology is **not** wired to public images yet; use **`bacnet-dev`** above for day-to-day BACnet smoke tests.
+
+### `ci` profile (planned multi-device)
 
 - Bridge network with static container IPs
 - Deterministic behavior and repeatable tests
 - No dependency on broadcast discovery
 - Best fit for automated regression
 
-### `lab` profile
+### `lab` profile (planned)
 
 - `macvlan` network so simulator devices appear as first-class LAN hosts
 - Better parity with bench tools and packet capture workflows
 - Still executes list-first verification logic
 
-### `multisubnet` profile
+### `multisubnet` profile (planned)
 
 - Two simulated BACnet subnets
 - BBMD service included
@@ -154,38 +164,16 @@ This writes one JSON result per case, for example:
 - `artifacts/simulator/ci-required-point-missing.json`
 - `artifacts/simulator/ci-timeout-burst.json`
 
-### 1) Render and inspect topology
+### 1) BACnet device (current)
+
+See **`docker/simulator/README.md`** for build/run and **`probe-bip`** smoke.
+
+### 2) Planned multi-service compose (not shipped as images)
+
+When multi-device images exist, render configs with:
 
 ```bash
-docker compose -f docker/simulator/docker-compose.yml --profile ci config >/tmp/simulator-compose.ci.yaml
-docker compose -f docker/simulator/docker-compose.yml --profile lab config >/tmp/simulator-compose.lab.yaml
-docker compose -f docker/simulator/docker-compose.yml --profile multisubnet config >/tmp/simulator-compose.multisubnet.yaml
-```
-
-### 2) Start a profile
-
-```bash
-docker compose -f docker/simulator/docker-compose.yml --profile ci up -d
-```
-
-For bench networking:
-
-```bash
-LAB_PARENT_IFACE=eth0 docker compose -f docker/simulator/docker-compose.yml --profile lab up -d
-```
-
-### 3) Health checks
-
-```bash
-docker compose -f docker/simulator/docker-compose.yml ps
-docker compose -f docker/simulator/docker-compose.yml logs scenario-orchestrator-ci
-docker compose -f docker/simulator/docker-compose.yml logs test-runner-ci
-```
-
-### 4) Shut down
-
-```bash
-docker compose -f docker/simulator/docker-compose.yml down
+# docker compose -f docker/simulator/docker-compose.yml --profile ci config
 ```
 
 ## Troubleshooting: "why was a device not found?"
@@ -208,8 +196,6 @@ Use this checklist in order:
 - Orchestrator wrapper: `tools/simulator/orchestrator.py`
 - Product record: `docs/project.md`
 
-## Verification status (2026-04-21)
+## Verification status
 
-- `docker compose -f docker/simulator/docker-compose.yml --profile ci config` succeeded
-- `docker compose -f docker/simulator/docker-compose.yml --profile lab config` succeeded
-- `docker compose -f docker/simulator/docker-compose.yml --profile multisubnet config` succeeded
+- **2026-04-26:** `docker compose … --profile bacnet-dev up --build` + `tools/simulator/docker_bacnet_smoke.sh` exercises **`probe-bip`** against the container.
