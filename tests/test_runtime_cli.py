@@ -2605,6 +2605,39 @@ class RuntimeCliTests(unittest.TestCase):
             )
             self.assertEqual(0, ex.returncode)
             self.assertTrue(export_path.exists())
+
+            mod = _run_runtime(
+                "append-commissioning-modulation-sample",
+                "--run-dir",
+                str(self.run_dir),
+                "--controller-label",
+                "FCU-GATE",
+                "--read",
+                "ai_sat",
+                "--technician-name",
+                "Alex Tech",
+                "--note",
+                "unified csv test",
+                "--timeout-seconds",
+                "0.5",
+                "--retries",
+                "1",
+            )
+            self.assertEqual(0, mod.returncode)
+            unified_csv = self.run_dir / "artifacts" / "commissioning-unified.csv"
+            uni = _run_runtime(
+                "export-commissioning-report",
+                "--run-dir",
+                str(self.run_dir),
+                "--output-csv-unified",
+                str(unified_csv),
+            )
+            self.assertEqual(0, uni.returncode)
+            text = unified_csv.read_text(encoding="utf-8")
+            self.assertIn("point_checkout_after_step", text)
+            self.assertIn("thermal_modulation_sample", text)
+            self.assertIn("step_status", text)
+            self.assertIn("ai_sat", text)
         finally:
             server.stop()
 

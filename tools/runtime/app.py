@@ -915,6 +915,47 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
         )
         print(f"commissioning_report_modulation_csv=true csv_path={csv_path.resolve()}")
 
+    csv_unified = getattr(args, "output_csv_unified", None)
+    if csv_unified:
+        csv_unified = Path(csv_unified)
+        csv_unified.parent.mkdir(parents=True, exist_ok=True)
+        unified_fields = [
+            "entry_ts",
+            "kind",
+            "controller_label",
+            "step_id",
+            "step_status",
+            "report_ref",
+            "technician_name",
+            "note",
+            "all_read_ok",
+            "artifact_json",
+            "command_object_id",
+            "command_percent",
+            "dwell_seconds",
+            "sweep_index",
+            "sweep_count",
+            "trigger",
+            "object_id",
+            "property",
+            "status",
+            "value_str",
+            "read_source",
+        ]
+        with csv_unified.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=unified_fields)
+            writer.writeheader()
+            for row in _commissioning_report_unified_csv_rows(doc):
+                writer.writerow(row)
+        _append_event(
+            logs_path,
+            "commissioning_report_unified_csv_exported",
+            {"csv_path": str(csv_unified.resolve())},
+        )
+        print(
+            f"commissioning_report_unified_csv=true csv_path={csv_unified.resolve()}"
+        )
+
     if out_path:
         out_path = Path(out_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1486,6 +1527,205 @@ def _commissioning_report_modulation_rows(doc: dict) -> list[dict[str, str]]:
                     "read_source": "",
                 }
             )
+    return rows
+
+
+def _commissioning_report_unified_csv_rows(doc: dict) -> list[dict[str, str]]:
+    """Flatten all commissioning_report entry kinds into one CSV-shaped row list."""
+    rows: list[dict[str, str]] = []
+    entries = doc.get("entries")
+    if not isinstance(entries, list):
+        return rows
+    for ent in entries:
+        if not isinstance(ent, dict):
+            continue
+        kind = str(ent.get("kind", "")).strip()
+        base_ts = str(ent.get("ts", ""))
+        ctrl = str(ent.get("controller_label", ""))
+        step_id = str(ent.get("step_id", ""))
+        report_ref = str(ent.get("report_ref", ""))
+        tech = str(ent.get("technician_name", ""))
+        note = str(ent.get("note", ""))
+
+        if kind == "point_checkout_after_step":
+            step_status = str(ent.get("step_status", ""))
+            all_ok = str(ent.get("all_read_ok", "")).lower()
+            artifact_json = str(ent.get("artifact_json", ""))
+            summary = ent.get("read_summary")
+            if isinstance(summary, list) and summary:
+                for item in summary:
+                    if not isinstance(item, dict):
+                        continue
+                    rows.append(
+                        {
+                            "entry_ts": base_ts,
+                            "kind": kind,
+                            "controller_label": ctrl,
+                            "step_id": step_id,
+                            "step_status": step_status,
+                            "report_ref": report_ref,
+                            "technician_name": tech,
+                            "note": "",
+                            "all_read_ok": all_ok,
+                            "artifact_json": artifact_json,
+                            "command_object_id": "",
+                            "command_percent": "",
+                            "dwell_seconds": "",
+                            "sweep_index": "",
+                            "sweep_count": "",
+                            "trigger": "",
+                            "object_id": str(item.get("object_id", "")),
+                            "property": str(item.get("property", "")),
+                            "status": str(item.get("status", "")),
+                            "value_str": "",
+                            "read_source": "",
+                        }
+                    )
+            else:
+                rows.append(
+                    {
+                        "entry_ts": base_ts,
+                        "kind": kind,
+                        "controller_label": ctrl,
+                        "step_id": step_id,
+                        "step_status": step_status,
+                        "report_ref": report_ref,
+                        "technician_name": tech,
+                        "note": "",
+                        "all_read_ok": all_ok,
+                        "artifact_json": artifact_json,
+                        "command_object_id": "",
+                        "command_percent": "",
+                        "dwell_seconds": "",
+                        "sweep_index": "",
+                        "sweep_count": "",
+                        "trigger": "",
+                        "object_id": "",
+                        "property": "",
+                        "status": "",
+                        "value_str": "",
+                        "read_source": "",
+                    }
+                )
+            continue
+
+        if kind == "thermal_modulation_sweep":
+            cmd_oid = str(ent.get("command_object_id", ""))
+            cmd_pct = str(ent.get("command_percent", ""))
+            dwell = str(ent.get("dwell_seconds", ""))
+            sweep_ix = str(ent.get("sweep_index", ""))
+            sweep_ct = str(ent.get("sweep_count", ""))
+            trigger = str(ent.get("trigger", ""))
+            artifact_json = ""
+            all_ok = ""
+            step_status = ""
+            for r in ent.get("readings", []) if isinstance(ent.get("readings"), list) else []:
+                if not isinstance(r, dict):
+                    continue
+                rows.append(
+                    {
+                        "entry_ts": base_ts,
+                        "kind": kind,
+                        "controller_label": ctrl,
+                        "step_id": step_id,
+                        "step_status": step_status,
+                        "report_ref": report_ref,
+                        "technician_name": tech,
+                        "note": note,
+                        "all_read_ok": all_ok,
+                        "artifact_json": artifact_json,
+                        "command_object_id": cmd_oid,
+                        "command_percent": cmd_pct,
+                        "dwell_seconds": dwell,
+                        "sweep_index": sweep_ix,
+                        "sweep_count": sweep_ct,
+                        "trigger": trigger,
+                        "object_id": str(r.get("logical_object_id", "")),
+                        "property": "presentValue",
+                        "status": str(r.get("status", "")),
+                        "value_str": str(r.get("value_str", "")),
+                        "read_source": str(r.get("source", "")),
+                    }
+                )
+            continue
+
+        if kind == "thermal_modulation_sample":
+            artifact_json = ""
+            all_ok = ""
+            step_status = ""
+            for r in ent.get("readings", []) if isinstance(ent.get("readings"), list) else []:
+                if not isinstance(r, dict):
+                    continue
+                rows.append(
+                    {
+                        "entry_ts": base_ts,
+                        "kind": kind,
+                        "controller_label": ctrl,
+                        "step_id": step_id,
+                        "step_status": step_status,
+                        "report_ref": report_ref,
+                        "technician_name": tech,
+                        "note": note,
+                        "all_read_ok": all_ok,
+                        "artifact_json": artifact_json,
+                        "command_object_id": "",
+                        "command_percent": "",
+                        "dwell_seconds": "",
+                        "sweep_index": "",
+                        "sweep_count": "",
+                        "trigger": "",
+                        "object_id": str(r.get("object_id", "")),
+                        "property": str(r.get("property", "")),
+                        "status": str(r.get("status", "")),
+                        "value_str": str(r.get("value_str", "")),
+                        "read_source": "",
+                    }
+                )
+            continue
+
+        if kind == "thermal_modulation_batch":
+            artifact_json = ""
+            all_ok = ""
+            step_status = ""
+            for sub in ent.get("samples", []) if isinstance(ent.get("samples"), list) else []:
+                if not isinstance(sub, dict):
+                    continue
+                sub_ts = str(sub.get("ts", base_ts))
+                s_ctrl = str(sub.get("controller_label", ctrl))
+                s_step = str(sub.get("step_id", step_id))
+                s_ref = str(sub.get("report_ref", report_ref))
+                s_tech = str(sub.get("technician_name", tech))
+                s_note = str(sub.get("note", ""))
+                for r in sub.get("readings", []) if isinstance(sub.get("readings"), list) else []:
+                    if not isinstance(r, dict):
+                        continue
+                    rows.append(
+                        {
+                            "entry_ts": sub_ts,
+                            "kind": "thermal_modulation_sample",
+                            "controller_label": s_ctrl,
+                            "step_id": s_step,
+                            "step_status": step_status,
+                            "report_ref": s_ref,
+                            "technician_name": s_tech,
+                            "note": s_note,
+                            "all_read_ok": all_ok,
+                            "artifact_json": artifact_json,
+                            "command_object_id": "",
+                            "command_percent": "",
+                            "dwell_seconds": "",
+                            "sweep_index": "",
+                            "sweep_count": "",
+                            "trigger": "thermal_modulation_batch",
+                            "object_id": str(r.get("object_id", "")),
+                            "property": str(r.get("property", "")),
+                            "status": str(r.get("status", "")),
+                            "value_str": str(r.get("value_str", "")),
+                            "read_source": "",
+                        }
+                    )
+            continue
+
     return rows
 
 
@@ -2721,6 +2961,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-csv",
         type=Path,
         help="Also write thermal modulation rows (thermal_modulation_*) to CSV.",
+    )
+    export_cr.add_argument(
+        "--output-csv-unified",
+        type=Path,
+        help=(
+            "Also write one CSV with point checkout + modulation rows "
+            "(shared columns; unused fields empty per kind)."
+        ),
     )
     export_cr.set_defaults(handler=cmd_export_commissioning_report)
 
