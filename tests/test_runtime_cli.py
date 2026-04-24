@@ -2670,6 +2670,18 @@ class RuntimeCliTests(unittest.TestCase):
             with zipfile.ZipFile(xlsx_path, "r") as zf:
                 names = zf.namelist()
             self.assertTrue(any(n.endswith("xl/worksheets/sheet1.xml") for n in names))
+
+            pdf_path = self.run_dir / "artifacts" / "commissioning-unified.pdf"
+            p = _run_runtime(
+                "export-commissioning-report",
+                "--run-dir",
+                str(self.run_dir),
+                "--output-pdf",
+                str(pdf_path),
+            )
+            self.assertEqual(0, p.returncode)
+            self.assertTrue(pdf_path.is_file())
+            self.assertTrue(pdf_path.read_bytes().startswith(b"%PDF"))
         finally:
             server.stop()
 
@@ -2750,6 +2762,18 @@ class RuntimeCliTests(unittest.TestCase):
         ws = wb.active
         self.assertEqual(1, ws.max_row)
         self.assertEqual("entry_ts", ws.cell(row=1, column=1).value)
+
+        pdf_empty = self.run_dir / "artifacts" / "empty-report.pdf"
+        r4 = _run_runtime(
+            "export-commissioning-report",
+            "--run-dir",
+            str(self.run_dir),
+            "--allow-empty",
+            "--output-pdf",
+            str(pdf_empty),
+        )
+        self.assertEqual(0, r4.returncode)
+        self.assertTrue(pdf_empty.read_bytes().startswith(b"%PDF"))
 
     def test_record_step_point_checkout_failure_leaves_step_pending(self) -> None:
         from test_import_compiler import _write_profile

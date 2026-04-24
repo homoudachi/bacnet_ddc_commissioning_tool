@@ -2,3 +2,5 @@
 bacpypes3>=0.0.80
 # Spreadsheet export (commissioning_report unified XLSX).
 openpyxl>=3.1.0
+# Server-side PDF (unified commissioning_report table).
+fpdf2>=2.7.0

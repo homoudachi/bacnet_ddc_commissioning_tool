@@ -853,11 +853,17 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
     want_csv_unified = bool(getattr(args, "output_csv_unified", None))
     want_html = bool(getattr(args, "output_html", None))
     want_xlsx = bool(getattr(args, "output_xlsx", None))
+    want_pdf = bool(getattr(args, "output_pdf", None))
     allow_empty = bool(getattr(args, "allow_empty", False))
 
     if not src.is_file():
         if allow_empty and (
-            out_path or want_csv or want_csv_unified or want_html or want_xlsx
+            out_path
+            or want_csv
+            or want_csv_unified
+            or want_html
+            or want_xlsx
+            or want_pdf
         ):
             config = _parse_run_config(run_dir)
             job_id = str(config.get("job_id", "")).strip() or "unknown-job"
@@ -957,16 +963,33 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
                 print(
                     f"commissioning_report_html=true html_path={html_path.resolve()}"
                 )
+            if want_pdf:
+                try:
+                    _write_commissioning_report_unified_pdf(Path(args.output_pdf), doc)
+                except RuntimeError as err:
+                    print(f"error: {err}")
+                    return 2
+                pdf_path = Path(args.output_pdf)
+                _append_event(
+                    logs_path,
+                    "commissioning_report_pdf_exported",
+                    {"pdf_path": str(pdf_path.resolve())},
+                )
+                print(
+                    f"commissioning_report_pdf=true pdf_path={pdf_path.resolve()}"
+                )
             if (
                 not out_path
                 and not want_csv
                 and not want_csv_unified
                 and not want_html
                 and not want_xlsx
+                and not want_pdf
             ):
                 print(
                     "error: --allow-empty requires --output-json and/or "
-                    "--output-csv / --output-csv-unified / --output-html / --output-xlsx"
+                    "--output-csv / --output-csv-unified / --output-html / "
+                    "--output-xlsx / --output-pdf"
                 )
                 return 2
             return 0
@@ -974,7 +997,8 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
             f"error: commissioning report not found at {src}; "
             "nothing recorded yet (e.g. record-step with BACnet point checkout gate). "
             "Use --allow-empty with --output-json and/or --output-csv / "
-            "--output-csv-unified / --output-html / --output-xlsx for empty outputs."
+            "--output-csv-unified / --output-html / --output-xlsx / --output-pdf "
+            "for empty outputs."
         )
         return 2
 
@@ -1064,6 +1088,21 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
             {"html_path": str(html_path.resolve())},
         )
         print(f"commissioning_report_html=true html_path={html_path.resolve()}")
+
+    pdf_out = getattr(args, "output_pdf", None)
+    if pdf_out:
+        try:
+            _write_commissioning_report_unified_pdf(Path(pdf_out), doc)
+        except RuntimeError as err:
+            print(f"error: {err}")
+            return 2
+        pdf_path = Path(pdf_out)
+        _append_event(
+            logs_path,
+            "commissioning_report_pdf_exported",
+            {"pdf_path": str(pdf_path.resolve())},
+        )
+        print(f"commissioning_report_pdf=true pdf_path={pdf_path.resolve()}")
 
     if out_path:
         out_path = Path(out_path)
@@ -1683,6 +1722,78 @@ def _write_commissioning_report_unified_xlsx(path: Path, doc: dict) -> None:
     for row in rows:
         ws.append([str(row.get(k, "") or "") for k in COMMISSIONING_REPORT_UNIFIED_FIELDNAMES])
     wb.save(path)
+
+
+def _pdf_cell_safe(text: str, max_len: int) -> str:
+    """ASCII-safe string for fpdf2 core fonts (Helvetica = Latin-1 subset)."""
+    t = str(text).replace("\r", " ").replace("\n", " ")
+    if len(t) > max_len:
+        t = t[: max(0, max_len - 3)] + "..."
+    return t.encode("ascii", errors="replace").decode("ascii")
+
+
+def _write_commissioning_report_unified_pdf(path: Path, doc: dict) -> None:
+    """Write unified commissioning rows to PDF (landscape A4; requires fpdf2)."""
+    try:
+        from fpdf import FPDF
+        from fpdf.enums import XPos, YPos
+    except ImportError as err:  # pragma: no cover
+        raise RuntimeError(
+            "fpdf2 is required for --output-pdf; install requirements.txt"
+        ) from err
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows = _commissioning_report_unified_csv_rows(doc)
+    headers = list(COMMISSIONING_REPORT_UNIFIED_FIELDNAMES)
+    job_id = str(doc.get("job_id", "") or "unknown-job")
+    schema_v = str(doc.get("schema_version", "") or "")
+
+    pdf = FPDF(orientation="L", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=10)
+    pdf.add_page()
+    pdf.set_font("Helvetica", size=9)
+    pdf.cell(
+        0,
+        6,
+        _pdf_cell_safe(f"Commissioning report  job_id={job_id}  schema={schema_v}", 200),
+        new_x=XPos.LMARGIN,
+        new_y=YPos.NEXT,
+    )
+    pdf.ln(1)
+
+    margin_l = pdf.l_margin
+    usable_w = pdf.w - margin_l - pdf.r_margin
+    col_w = usable_w / len(headers)
+    row_h = 4
+    y_bottom = pdf.h - 10
+
+    def draw_header() -> None:
+        pdf.set_font("Helvetica", style="B", size=5)
+        for h in headers:
+            pdf.cell(col_w, 5, _pdf_cell_safe(h, 24), border=1)
+        pdf.ln()
+
+    draw_header()
+    pdf.set_font("Helvetica", size=5)
+    for row in rows:
+        if pdf.get_y() + row_h > y_bottom:
+            pdf.add_page()
+            draw_header()
+            pdf.set_font("Helvetica", size=5)
+        for h in headers:
+            pdf.cell(
+                col_w,
+                row_h,
+                _pdf_cell_safe(str(row.get(h, "") or ""), 28),
+                border=1,
+            )
+        pdf.ln()
+
+    if not rows:
+        pdf.set_font("Helvetica", size=8)
+        pdf.cell(0, 6, "(no entries)", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    pdf.output(str(path))
 
 
 def _commissioning_report_unified_csv_rows(doc: dict) -> list[dict[str, str]]:
@@ -3204,7 +3315,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "If no report exists yet: with --output-json write empty stub JSON; "
             "with --output-csv / --output-csv-unified / --output-html / --output-xlsx "
-            "write headers-only (or empty HTML / empty sheet). "
+            "/ --output-pdf write headers-only (or empty HTML / empty sheet / empty PDF). "
             "At least one output path flag is required."
         ),
     )
@@ -3234,6 +3345,13 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help=(
             "Also write unified rows to an Excel workbook (.xlsx; requires openpyxl)."
+        ),
+    )
+    export_cr.add_argument(
+        "--output-pdf",
+        type=Path,
+        help=(
+            "Also write unified rows to a landscape PDF table (.pdf; requires fpdf2)."
         ),
     )
     export_cr.set_defaults(handler=cmd_export_commissioning_report)
