@@ -73,6 +73,18 @@ python3 tools/runtime/app.py show-session \
   --run-dir artifacts/runtime-run \
   --controller-label FCU-01A
 
+# 3e) Airflow half-design slice (after init-flow + compile-import): write fan command from profile step
+# ``automatic_airflow_adjustment``; when the step arms ``airflow_verify``, MSV must already be state 3.
+# Then confirm tachometer for a step with ``operator_confirm_tachometer_reference`` (stores session true +
+# ``reading_value_str``). Optional: add ``tachometer_reference_session_key`` on the adjustment action to require
+# that confirmation before ``record-step --status passed`` on the adjustment step.
+# python3 tools/runtime/app.py commissioning-airflow-adjust-write --run-dir artifacts/runtime-run \
+#   --controller-label FCU-01A --step-id half_design_airflow_auto --fan-command-percent 48 \
+#   --technician-name "Alex Tech" [--note "..."]
+# python3 tools/runtime/app.py commissioning-confirm-tachometer-reference --run-dir artifacts/runtime-run \
+#   --controller-label FCU-01A --step-id confirm_tachometer_reference_half_flow \
+#   --technician-name "Alex Tech" [--note "..."]
+
 # 3c) Re-initialize after a mistake (backs up prior state to state/flow_backups/, logs flow_reinitialized)
 python3 tools/runtime/app.py init-flow \
   --run-dir artifacts/runtime-run \

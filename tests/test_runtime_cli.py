@@ -49,12 +49,16 @@ class _FakeBipUdpServer:
         *,
         analog_input_present: float = 21.5,
         msv_present: int = 1,
+        av_tacho_present: float = 0.0,
+        av_supply_fan_present: float = 0.0,
         av_heat_present: float = 0.0,
         ao_valve_present: float = 0.0,
     ) -> None:
         self.device_instance = device_instance
         self._ai_present = float(analog_input_present)
         self._msv_present = int(msv_present)
+        self._av_tacho_present = float(av_tacho_present)
+        self._av_supply_fan_present = float(av_supply_fan_present)
         self._av_heat_present = float(av_heat_present)
         self._ao_valve_present = float(ao_valve_present)
         self._lock = threading.Lock()
@@ -123,14 +127,18 @@ class _FakeBipUdpServer:
             with self._lock:
                 ai_val = self._ai_present
                 msv_val = self._msv_present
+                av_tacho = self._av_tacho_present
+                av_fan = self._av_supply_fan_present
                 av_heat = self._av_heat_present
                 ao_valve = self._ao_valve_present
             if ot == 0 and oi == 2:
                 payload = Any(Real(ai_val))
             elif ot == 19 and oi == 50:
                 payload = Any(Unsigned(msv_val))
+            elif ot == 2 and oi == 1:
+                payload = Any(Real(av_tacho))
             elif ot == 2 and oi == 3:
-                payload = Any(Real(av_heat))
+                payload = Any(Real(av_fan))
             elif ot == 2 and oi == 4:
                 payload = Any(Real(av_heat))
             elif ot == 1 and oi == 5:
@@ -164,7 +172,7 @@ class _FakeBipUdpServer:
             elif ot_w == 2 and oi_w == 3:
                 new_val = float(wreq.propertyValue.cast_out(Real))
                 with self._lock:
-                    self._av_heat_present = new_val
+                    self._av_supply_fan_present = new_val
             elif ot_w == 2 and oi_w == 4:
                 new_val = float(wreq.propertyValue.cast_out(Real))
                 with self._lock:
@@ -4081,5 +4089,304 @@ class RuntimeCliTests(unittest.TestCase):
                 "--no-run-modulation-on-pass",
             )
             self.assertEqual(0, ok.returncode)
+        finally:
+            server.stop()
+
+    def test_airflow_half_flow_adjust_then_tach_confirm_gate(self) -> None:
+        from test_import_compiler import _write_profile
+
+        server = _FakeBipUdpServer(
+            device_instance=21001,
+            analog_input_present=21.0,
+            msv_present=3,
+            av_tacho_present=42.5,
+            av_supply_fan_present=0.0,
+        )
+        server.start()
+        try:
+            time.sleep(0.05)
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            profiles_dir = self.run_dir / "profiles-airflow"
+            profiles_dir.mkdir(parents=True, exist_ok=True)
+            _write_profile(
+                profiles_dir / "unit-airflow.json",
+                profile_id="fcu_airflow_slice_v1",
+                display_name="Airflow slice",
+                write_allowlist=["msv_test_mode", "av_supply_fan_command"],
+                read_allowlist=[
+                    "ai_sat",
+                    "msv_test_mode",
+                    "av_supply_fan_command",
+                    "av_supply_fan_tacho_value",
+                ],
+                objects=[
+                    {
+                        "id": "msv_test_mode",
+                        "writable": True,
+                        "bacnet": {"object_type": "multiStateValue", "instance": 50},
+                    },
+                    {
+                        "id": "ai_sat",
+                        "writable": False,
+                        "bacnet": {"object_type": "analogInput", "instance": 2},
+                    },
+                    {
+                        "id": "av_supply_fan_command",
+                        "writable": True,
+                        "bacnet": {"object_type": "analogValue", "instance": 3},
+                    },
+                    {
+                        "id": "av_supply_fan_tacho_value",
+                        "writable": False,
+                        "bacnet": {"object_type": "analogValue", "instance": 1},
+                    },
+                ],
+                commissioning_flow=[
+                    {"step_id": "prep", "label": "Prep"},
+                    {
+                        "step_id": "half_design_airflow_auto",
+                        "label": "Half design auto",
+                        "arms_test_mode_state_key": "airflow_verify",
+                        "actions": [
+                            {
+                                "type": "automatic_airflow_adjustment",
+                                "actuator_object_id": "av_supply_fan_command",
+                                "target_flow_ratio_of_design": 0.5,
+                                "measurement_branch_id": "supply_terminal_main",
+                                "tolerance_ratio": 0.05,
+                                "tachometer_reference_session_key": (
+                                    "fan_tachometer_reference_at_half_design_flow"
+                                ),
+                            }
+                        ],
+                    },
+                    {
+                        "step_id": "confirm_tachometer_reference_half_flow",
+                        "label": "Confirm tacho",
+                        "actions": [
+                            {
+                                "type": "operator_confirm_tachometer_reference",
+                                "read_object_id": "av_supply_fan_tacho_value",
+                                "session_key": "fan_tachometer_reference_at_half_design_flow",
+                            }
+                        ],
+                    },
+                ],
+                unit_specs={"design_supply_airflow_L_s": 0.85},
+            )
+            csv_path = self.run_dir / "controllers-airflow.csv"
+            with csv_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=[
+                        "controller_label",
+                        "profile_id",
+                        "bacnet_device_instance",
+                        "bacnet_ip",
+                        "bacnet_port",
+                        "building_floor",
+                        "notes",
+                    ],
+                )
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "controller_label": "FCU-AIR",
+                        "profile_id": "fcu_airflow_slice_v1",
+                        "bacnet_device_instance": "21001",
+                        "bacnet_ip": "127.0.0.1",
+                        "bacnet_port": str(server.port),
+                        "building_floor": "L01",
+                        "notes": "",
+                    }
+                )
+            self.assertEqual(
+                0,
+                _run_runtime(
+                    "init-run",
+                    "--run-dir",
+                    str(self.run_dir),
+                    "--job-id",
+                    "job-airflow",
+                    "--controllers-csv",
+                    str(csv_path),
+                    "--profiles-dir",
+                    str(profiles_dir),
+                    "--scenarios-dir",
+                    str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+                ).returncode,
+            )
+            self.assertEqual(0, _run_runtime("compile-import", "--run-dir", str(self.run_dir)).returncode)
+            rj = json.loads(
+                (self.run_dir / "state" / "runtime-job.json").read_text(encoding="utf-8")
+            )
+            ctrl0 = rj["controllers"][0]
+            self.assertEqual(
+                0.85,
+                ctrl0["commissioning_meta"]["unit_specs"]["design_supply_airflow_L_s"],
+            )
+
+            self.assertEqual(
+                0,
+                _run_runtime(
+                    "init-flow",
+                    "--run-dir",
+                    str(self.run_dir),
+                    "--controller-label",
+                    "FCU-AIR",
+                ).returncode,
+            )
+            self.assertEqual(
+                0,
+                _run_runtime(
+                    "record-step",
+                    "--run-dir",
+                    str(self.run_dir),
+                    "--controller-label",
+                    "FCU-AIR",
+                    "--step-id",
+                    "prep",
+                    "--status",
+                    "passed",
+                    "--technician-name",
+                    "Alex Tech",
+                    "--note",
+                    "prep ok",
+                    "--no-run-modulation-on-pass",
+                ).returncode,
+            )
+
+            adj = _run_runtime(
+                "commissioning-airflow-adjust-write",
+                "--run-dir",
+                str(self.run_dir),
+                "--controller-label",
+                "FCU-AIR",
+                "--step-id",
+                "half_design_airflow_auto",
+                "--fan-command-percent",
+                "50",
+                "--technician-name",
+                "Alex Tech",
+                "--note",
+                "half target",
+                "--bacnet-timeout-seconds",
+                "0.5",
+                "--bacnet-retries",
+                "1",
+            )
+            self.assertEqual(0, adj.returncode, adj.stdout + adj.stderr)
+            self.assertIn("design_supply_airflow_L_s", adj.stdout)
+
+            rd = _run_runtime(
+                "bacnet-read",
+                "--run-dir",
+                str(self.run_dir),
+                "--controller-label",
+                "FCU-AIR",
+                "--object-id",
+                "av_supply_fan_command",
+                "--timeout-seconds",
+                "0.5",
+                "--retries",
+                "1",
+            )
+            self.assertEqual(0, rd.returncode)
+            self.assertIn('"value_str": "50.0"', rd.stdout)
+
+            blocked_half = _run_runtime(
+                "record-step",
+                "--run-dir",
+                str(self.run_dir),
+                "--controller-label",
+                "FCU-AIR",
+                "--step-id",
+                "half_design_airflow_auto",
+                "--status",
+                "passed",
+                "--technician-name",
+                "Alex Tech",
+                "--note",
+                "skip tacho",
+                "--no-run-modulation-on-pass",
+            )
+            self.assertEqual(2, blocked_half.returncode)
+            self.assertIn(
+                "commissioning-confirm-tachometer-reference", blocked_half.stdout
+            )
+
+            blocked_confirm = _run_runtime(
+                "record-step",
+                "--run-dir",
+                str(self.run_dir),
+                "--controller-label",
+                "FCU-AIR",
+                "--step-id",
+                "confirm_tachometer_reference_half_flow",
+                "--status",
+                "passed",
+                "--technician-name",
+                "Alex Tech",
+                "--note",
+                "no read",
+                "--no-run-modulation-on-pass",
+            )
+            self.assertEqual(2, blocked_confirm.returncode)
+
+            ct = _run_runtime(
+                "commissioning-confirm-tachometer-reference",
+                "--run-dir",
+                str(self.run_dir),
+                "--controller-label",
+                "FCU-AIR",
+                "--step-id",
+                "confirm_tachometer_reference_half_flow",
+                "--technician-name",
+                "Alex Tech",
+                "--note",
+                "saw tacho",
+                "--bacnet-timeout-seconds",
+                "0.5",
+                "--bacnet-retries",
+                "1",
+            )
+            self.assertEqual(0, ct.returncode, ct.stdout + ct.stderr)
+            self.assertIn("42.5", ct.stdout)
+
+            ok_half = _run_runtime(
+                "record-step",
+                "--run-dir",
+                str(self.run_dir),
+                "--controller-label",
+                "FCU-AIR",
+                "--step-id",
+                "half_design_airflow_auto",
+                "--status",
+                "passed",
+                "--technician-name",
+                "Alex Tech",
+                "--note",
+                "after tacho on next step",
+                "--no-run-modulation-on-pass",
+            )
+            self.assertEqual(0, ok_half.returncode)
+
+            ok_confirm = _run_runtime(
+                "record-step",
+                "--run-dir",
+                str(self.run_dir),
+                "--controller-label",
+                "FCU-AIR",
+                "--step-id",
+                "confirm_tachometer_reference_half_flow",
+                "--status",
+                "passed",
+                "--technician-name",
+                "Alex Tech",
+                "--note",
+                "confirmed",
+                "--no-run-modulation-on-pass",
+            )
+            self.assertEqual(0, ok_confirm.returncode)
         finally:
             server.stop()

@@ -24,3 +24,4 @@ Use when a choice is **non-obvious** or you will forget **why** you chose it.
 | [0010](0010-reporting-stack-libraries-v1.md) | Reporting libraries: stdlib CSV/HTML; openpyxl XLSX; fpdf2 PDF | Accepted |
 | [0011](0011-site-controllers-spreadsheet-v1-contract.md) | `site-controllers` CSV v1 columns + unknown-column warnings | Accepted |
 | [0012](0012-windows-single-exe-pyinstaller.md) | Windows single-file exe via PyInstaller; in-process import/simulator | Accepted |
+| [0013](0013-airflow-tachometer-checkpoint-cli.md) | Airflow adjust + tachometer confirm CLIs and record-step gates | Accepted |

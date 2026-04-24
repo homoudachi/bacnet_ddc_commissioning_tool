@@ -233,6 +233,42 @@ def _cooling_valve_stroke_no_chw_gating(step: dict) -> bool:
     return False
 
 
+def _operator_confirm_tachometer_session_key(step: dict) -> str | None:
+    """Session key from ``operator_confirm_tachometer_reference`` action, if any."""
+    actions = step.get("actions")
+    if not isinstance(actions, list):
+        return None
+    for act in actions:
+        if not isinstance(act, dict):
+            continue
+        if str(act.get("type", "")).strip() != "operator_confirm_tachometer_reference":
+            continue
+        session_key = str(act.get("session_key", "")).strip()
+        read_oid = str(act.get("read_object_id", "")).strip()
+        if session_key and read_oid:
+            return session_key
+    return None
+
+
+def _tachometer_confirmation_gating(step: dict) -> bool:
+    return _operator_confirm_tachometer_session_key(step) is not None
+
+
+def _airflow_adjust_tachometer_reference_session_key(step: dict) -> str | None:
+    """Optional ``tachometer_reference_session_key`` on ``automatic_airflow_adjustment`` action."""
+    actions = step.get("actions")
+    if not isinstance(actions, list):
+        return None
+    for act in actions:
+        if not isinstance(act, dict):
+            continue
+        if str(act.get("type", "")).strip() != "automatic_airflow_adjustment":
+            continue
+        sk = str(act.get("tachometer_reference_session_key", "")).strip()
+        return sk or None
+    return None
+
+
 def _validate_step_transition(
     steps: list[dict],
     step: dict,
@@ -330,6 +366,31 @@ def _validate_step_transition(
                         f"before '{prev.get('step_id')}' is completed"
                     ),
                 }
+
+    if requested_status in {"passed", "manual_passed"}:
+        vals = session_values if session_values is not None else {}
+        sk_air = _airflow_adjust_tachometer_reference_session_key(step)
+        if sk_air and not _session_flag_truthy(vals.get(sk_air, "")):
+            return {
+                "reason_code": "tachometer_reference_not_confirmed",
+                "message": (
+                    f"step '{step.get('step_id')}' requires technician confirmation of the "
+                    f"BACnet tachometer before pass (profile automatic_airflow_adjustment "
+                    f"tachometer_reference_session_key); run commissioning-confirm-tachometer-reference "
+                    f"(missing session key: {sk_air!r})"
+                ),
+            }
+        if _tachometer_confirmation_gating(step):
+            sk = _operator_confirm_tachometer_session_key(step)
+            if sk and not _session_flag_truthy(vals.get(sk, "")):
+                return {
+                    "reason_code": "tachometer_reference_not_confirmed",
+                    "message": (
+                        f"step '{step.get('step_id')}' requires technician confirmation "
+                        f"of the BACnet tachometer reading before pass; run "
+                        f"commissioning-confirm-tachometer-reference (missing session key: {sk!r})"
+                    ),
+                }
     return None
 
 
@@ -338,6 +399,7 @@ def _normalize_rejection_reason(reason_code: str) -> str:
         "step_not_skippable": "STEP_NOT_SKIPPABLE",
         "skip_reason_not_recorded": "SKIP_GATE",
         "operator_prompts_not_confirmed": "PROMPTS_NOT_CONFIRMED",
+        "tachometer_reference_not_confirmed": "TACHOMETER_REFERENCE_NOT_CONFIRMED",
         "dependency_not_completed": "DEPENDENCY_UNSATISFIED",
         "dependency_missing_from_flow": "DEPENDENCY_UNSATISFIED",
         "prior_step_incomplete": "PREREQ_ORDER",
@@ -952,6 +1014,303 @@ def cmd_commissioning_confirm_prompt(args: argparse.Namespace) -> int:
                 "prompt_id": prompt_id,
                 "session_key": session_key,
                 "write_percent": float(write_pct),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def _find_flow_step_actions(flow_state: dict, step_id: str) -> list[dict] | None:
+    for item in flow_state.get("steps", []):
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("step_id", "")).strip() == str(step_id).strip():
+            acts = item.get("actions")
+            return acts if isinstance(acts, list) else None
+    return None
+
+
+def _find_action_by_type(actions: list[dict], action_type: str) -> dict | None:
+    want = str(action_type).strip()
+    for act in actions:
+        if not isinstance(act, dict):
+            continue
+        if str(act.get("type", "")).strip() == want:
+            return act
+    return None
+
+
+def cmd_commissioning_confirm_tachometer_reference(args: argparse.Namespace) -> int:
+    """Read tachometer BACnet point and record ``session_key`` as operator-confirmed reference."""
+    run_dir = args.run_dir
+    logs_path = run_dir / "logs" / "events.jsonl"
+    runtime_job_path = run_dir / "state" / "runtime-job.json"
+    flow_path = _flow_state_path(run_dir, args.controller_label)
+    if not flow_path.is_file():
+        print(f"error: flow state missing; run init-flow first ({flow_path})")
+        return 2
+    runtime_job = json.loads(runtime_job_path.read_text(encoding="utf-8"))
+    target = None
+    for controller in runtime_job.get("controllers", []):
+        if controller.get("controller_label") == args.controller_label:
+            target = controller
+            break
+    if target is None:
+        print(f"error: controller not found in runtime job: {args.controller_label}")
+        return 2
+
+    flow_state = json.loads(flow_path.read_text(encoding="utf-8"))
+    actions = _find_flow_step_actions(flow_state, args.step_id)
+    if actions is None:
+        print(f"error: step_id not found in flow state: {args.step_id}")
+        return 2
+    act = _find_action_by_type(actions, "operator_confirm_tachometer_reference")
+    if act is None:
+        print(
+            "error: step has no operator_confirm_tachometer_reference action "
+            "(wrong step_id or profile)"
+        )
+        return 2
+    read_oid = str(act.get("read_object_id", "")).strip()
+    session_key = str(act.get("session_key", "")).strip()
+    if not read_oid or not session_key:
+        print("error: operator_confirm_tachometer_reference missing read_object_id or session_key")
+        return 2
+
+    one = _bacnet_read_one(
+        controller_label=args.controller_label,
+        target=target,
+        object_id=read_oid,
+        property_name="presentValue",
+        timeout_seconds=float(args.bacnet_timeout_seconds),
+        retries=int(args.bacnet_retries),
+        bacnet_bind_port=int(getattr(args, "bacnet_bind_port", 0) or 0),
+        apdu_timeout_override=args.apdu_timeout,
+    )
+    if one.get("status") != "read_ok":
+        print("error: BACnet read of tachometer object failed")
+        print(json.dumps(one, indent=2, sort_keys=True))
+        return 2
+    read_block = one.get("read") if isinstance(one.get("read"), dict) else {}
+    value_str = str(read_block.get("value_str", "")).strip()
+
+    session_path = _session_state_path(run_dir, args.controller_label)
+    session_path.parent.mkdir(parents=True, exist_ok=True)
+    if session_path.is_file():
+        session_state = json.loads(session_path.read_text(encoding="utf-8"))
+    else:
+        session_state = {
+            "controller_label": args.controller_label,
+            "updated_at": _utc_timestamp(),
+            "values": {},
+        }
+    if not isinstance(session_state.get("values"), dict):
+        session_state["values"] = {}
+    # ``value`` must be truthy per _session_flag_truthy (numeric BACnet text alone is not).
+    session_state["values"][session_key] = {
+        "value": "true",
+        "reading_value_str": value_str,
+        "technician_name": str(args.technician_name).strip(),
+        "note": str(getattr(args, "note", "") or ""),
+        "ts": _utc_timestamp(),
+        "step_id": args.step_id,
+        "read_object_id": read_oid,
+        "confirmed": "true",
+    }
+    session_state["updated_at"] = _utc_timestamp()
+    session_path.write_text(json.dumps(session_state, indent=2), encoding="utf-8")
+
+    _append_event(
+        logs_path,
+        "tachometer_reference_confirmed",
+        {
+            "controller_label": args.controller_label,
+            "step_id": args.step_id,
+            "session_key": session_key,
+            "read_object_id": read_oid,
+            "reading_value_str": value_str,
+            "session_state_json": str(session_path.resolve()),
+        },
+    )
+    print(
+        json.dumps(
+            {
+                "tachometer_reference_confirmed": True,
+                "controller_label": args.controller_label,
+                "step_id": args.step_id,
+                "session_key": session_key,
+                "read_object_id": read_oid,
+                "reading_value_str": value_str,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def cmd_commissioning_airflow_adjust_write(args: argparse.Namespace) -> int:
+    """Write fan / actuator command percent for an ``automatic_airflow_adjustment`` profile step."""
+    run_dir = args.run_dir
+    logs_path = run_dir / "logs" / "events.jsonl"
+    runtime_job_path = run_dir / "state" / "runtime-job.json"
+    flow_path = _flow_state_path(run_dir, args.controller_label)
+    if not flow_path.is_file():
+        print(f"error: flow state missing; run init-flow first ({flow_path})")
+        return 2
+    runtime_job = json.loads(runtime_job_path.read_text(encoding="utf-8"))
+    target = None
+    for controller in runtime_job.get("controllers", []):
+        if controller.get("controller_label") == args.controller_label:
+            target = controller
+            break
+    if target is None:
+        print(f"error: controller not found in runtime job: {args.controller_label}")
+        return 2
+
+    flow_state = json.loads(flow_path.read_text(encoding="utf-8"))
+    actions = _find_flow_step_actions(flow_state, args.step_id)
+    if actions is None:
+        print(f"error: step_id not found in flow state: {args.step_id}")
+        return 2
+    act = _find_action_by_type(actions, "automatic_airflow_adjustment")
+    if act is None:
+        print(
+            "error: step has no automatic_airflow_adjustment action "
+            "(wrong step_id or profile)"
+        )
+        return 2
+    actuator_oid = str(act.get("actuator_object_id", "")).strip()
+    if not actuator_oid:
+        print("error: automatic_airflow_adjustment missing actuator_object_id")
+        return 2
+
+    try:
+        pct = float(args.fan_command_percent)
+    except (TypeError, ValueError):
+        print("error: --fan-command-percent must be a number")
+        return 2
+    if pct < 0.0 or pct > 100.0:
+        print("error: --fan-command-percent must be between 0 and 100")
+        return 2
+
+    step_row = _lookup_step_by_id(flow_state.get("steps", []), args.step_id)
+    arms = str(step_row.get("arms_test_mode_state_key", "")).strip() if step_row else ""
+    if arms == "airflow_verify":
+        one = _bacnet_read_one(
+            controller_label=args.controller_label,
+            target=target,
+            object_id="msv_test_mode",
+            property_name="presentValue",
+            timeout_seconds=float(args.bacnet_timeout_seconds),
+            retries=int(args.bacnet_retries),
+            bacnet_bind_port=int(getattr(args, "bacnet_bind_port", 0) or 0),
+            apdu_timeout_override=args.apdu_timeout,
+        )
+        if one.get("status") != "read_ok":
+            print(
+                "error: BACnet read of msv_test_mode failed (required when step arms airflow_verify)"
+            )
+            print(json.dumps(one, indent=2, sort_keys=True))
+            return 2
+        try:
+            msv_state = int(float(str(one.get("read", {}).get("value_str", ""))))
+        except (TypeError, ValueError):
+            print("error: could not parse msv_test_mode presentValue as integer state")
+            return 2
+        if msv_state != 3:
+            print(
+                f"error: msv_test_mode must be state 3 (airflow_verify) for this step; got {msv_state}"
+            )
+            return 2
+
+    cmd_res = _resolve_profile_object_bacnet(target, actuator_oid)
+    if cmd_res is None:
+        print(f"error: {actuator_oid!r} not in profile objects_by_id")
+        return 2
+    cmd_ot, cmd_oi = cmd_res
+    objects_by_id = target.get("objects_by_id", {})
+    if not isinstance(objects_by_id, dict) or actuator_oid not in objects_by_id:
+        print(f"error: {actuator_oid!r} missing from objects_by_id")
+        return 2
+    if not bool(objects_by_id[actuator_oid].get("writable")):
+        print(f"error: {actuator_oid!r} is not writable in profile")
+        return 2
+    w_allow = target.get("commissioning_write_allowlist", [])
+    if not isinstance(w_allow, list) or actuator_oid not in {
+        str(x).strip() for x in w_allow if str(x).strip()
+    }:
+        print(
+            f"error: {actuator_oid!r} not in commissioning_write_allowlist "
+            f"(add it to the unit profile for this site)"
+        )
+        return 2
+
+    addr = target.get("bacnet", {})
+    host = str(addr.get("host", "")).strip()
+    port = int(addr.get("port", 0))
+    expected_instance = int(addr.get("device_instance", 0))
+    bacnet_ad = _bacnet_adapter()
+    target_addr = bacnet_ad.format_ipv4_target(host, port)
+    try:
+        bind_port = int(getattr(args, "bacnet_bind_port", 0) or 0)
+    except ValueError:
+        bind_port = 0
+    try:
+        apdu_t = bacnet_ad.commissioning_apdu_timeout_seconds(args.apdu_timeout)
+    except (TypeError, ValueError) as err:
+        print(f"error: invalid --apdu-timeout: {err}")
+        return 2
+    who_t = bacnet_ad.effective_who_is_timeout(
+        float(args.bacnet_timeout_seconds), int(args.bacnet_retries)
+    )
+
+    write_res = bacnet_ad.write_present_value(
+        bind_port=bind_port,
+        target_address=target_addr,
+        expected_device_instance=expected_instance,
+        object_type=cmd_ot,
+        object_instance=cmd_oi,
+        value=float(pct),
+        who_is_timeout=who_t,
+        apdu_timeout=apdu_t,
+    )
+    if write_res.get("status") != "write_ok":
+        print(json.dumps({"status": "write_failed", "write": write_res}, indent=2, sort_keys=True))
+        return 2
+
+    meta = target.get("commissioning_meta") if isinstance(target.get("commissioning_meta"), dict) else {}
+    unit_specs = meta.get("unit_specs") if isinstance(meta.get("unit_specs"), dict) else {}
+    design_flow = unit_specs.get("design_supply_airflow_L_s")
+    try:
+        ratio = float(act.get("target_flow_ratio_of_design", 0.5))
+    except (TypeError, ValueError):
+        ratio = 0.5
+
+    _append_event(
+        logs_path,
+        "airflow_adjust_command_written",
+        {
+            "controller_label": args.controller_label,
+            "step_id": args.step_id,
+            "actuator_object_id": actuator_oid,
+            "fan_command_percent": float(pct),
+            "target_flow_ratio_of_design": ratio,
+            "design_supply_airflow_L_s": design_flow,
+        },
+    )
+    print(
+        json.dumps(
+            {
+                "airflow_adjust_written": True,
+                "controller_label": args.controller_label,
+                "step_id": args.step_id,
+                "actuator_object_id": actuator_oid,
+                "fan_command_percent": float(pct),
+                "target_flow_ratio_of_design": ratio,
+                "design_supply_airflow_L_s": design_flow,
             },
             indent=2,
             sort_keys=True,
@@ -4055,6 +4414,89 @@ def build_parser() -> argparse.ArgumentParser:
         help="BACpypes3 APDU timeout override (default: adapter default).",
     )
     confirm_prompt.set_defaults(handler=cmd_commissioning_confirm_prompt)
+
+    confirm_tacho = subparsers.add_parser(
+        "commissioning-confirm-tachometer-reference",
+        help=(
+            "Airflow checkpoint: BACnet-read tachometer from profile step "
+            "operator_confirm_tachometer_reference and store session_key (required before record-step pass)."
+        ),
+    )
+    confirm_tacho.add_argument("--run-dir", required=True, type=Path)
+    confirm_tacho.add_argument("--controller-label", required=True)
+    confirm_tacho.add_argument("--step-id", required=True)
+    confirm_tacho.add_argument("--technician-name", required=True)
+    confirm_tacho.add_argument("--note", default="")
+    confirm_tacho.add_argument(
+        "--bacnet-timeout-seconds",
+        type=float,
+        default=0.5,
+        help="Who-Is timeout base for BACnet read.",
+    )
+    confirm_tacho.add_argument(
+        "--bacnet-retries",
+        type=int,
+        default=1,
+        help="Who-Is retries for BACnet I/O.",
+    )
+    confirm_tacho.add_argument(
+        "--bacnet-bind-port",
+        type=int,
+        default=0,
+        help="Local UDP bind port (0 = OS-assigned).",
+    )
+    confirm_tacho.add_argument(
+        "--apdu-timeout",
+        type=float,
+        default=None,
+        help="BACpypes3 APDU timeout override (default: adapter default).",
+    )
+    confirm_tacho.set_defaults(handler=cmd_commissioning_confirm_tachometer_reference)
+
+    airflow_adj = subparsers.add_parser(
+        "commissioning-airflow-adjust-write",
+        help=(
+            "Airflow checkpoint: WriteProperty presentValue on actuator_object_id from profile step "
+            "automatic_airflow_adjustment (e.g. fan command %). When step arms airflow_verify, "
+            "msv_test_mode must be state 3 first."
+        ),
+    )
+    airflow_adj.add_argument("--run-dir", required=True, type=Path)
+    airflow_adj.add_argument("--controller-label", required=True)
+    airflow_adj.add_argument("--step-id", required=True)
+    airflow_adj.add_argument(
+        "--fan-command-percent",
+        required=True,
+        type=float,
+        help="Actuator command 0–100 (written to profile automatic_airflow_adjustment actuator_object_id).",
+    )
+    airflow_adj.add_argument("--technician-name", required=True)
+    airflow_adj.add_argument("--note", default="")
+    airflow_adj.add_argument(
+        "--bacnet-timeout-seconds",
+        type=float,
+        default=0.5,
+        help="Who-Is timeout base for BACnet read/write.",
+    )
+    airflow_adj.add_argument(
+        "--bacnet-retries",
+        type=int,
+        default=1,
+        help="Who-Is retries for BACnet I/O.",
+    )
+    airflow_adj.add_argument(
+        "--bacnet-bind-port",
+        type=int,
+        default=0,
+        help="Local UDP bind port (0 = OS-assigned).",
+    )
+    airflow_adj.add_argument(
+        "--apdu-timeout",
+        type=float,
+        default=None,
+        help="BACpypes3 APDU timeout override (default: adapter default).",
+    )
+    airflow_adj.set_defaults(handler=cmd_commissioning_airflow_adjust_write)
 
     show_session = subparsers.add_parser(
         "show-session",
