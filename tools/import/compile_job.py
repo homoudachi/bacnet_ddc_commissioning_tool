@@ -271,6 +271,11 @@ def compile_model(
                     if text:
                         read_allow_ids.append(text)
 
+            unit_specs = profile.get("unit_specs")
+            commissioning_meta: dict[str, Any] = {}
+            if isinstance(unit_specs, dict):
+                commissioning_meta["unit_specs"] = unit_specs
+
             controllers.append(
                 {
                     "controller_label": label,
@@ -282,6 +287,7 @@ def compile_model(
                     },
                     "commissioning_write_allowlist": allow_ids,
                     "commissioning_read_allowlist": read_allow_ids,
+                    "commissioning_meta": commissioning_meta,
                     "objects_by_id": _extract_objects_by_id(profile),
                     "point_checkout": _extract_point_checkout(profile),
                     "commissioning_flow": _extract_commissioning_steps(profile),

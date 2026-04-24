@@ -40,6 +40,7 @@ def _write_profile(
     point_checkout: list[dict] | None = None,
     commissioning_flow: list[dict] | None = None,
     objects: list[dict] | None = None,
+    unit_specs: dict | None = None,
 ) -> None:
     data: dict = {
                 "schema_version": "0.1-example",
@@ -76,6 +77,8 @@ def _write_profile(
         data["point_checkout"] = point_checkout
     if commissioning_flow is not None:
         data["commissioning_flow"] = commissioning_flow
+    if unit_specs is not None:
+        data["unit_specs"] = unit_specs
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
@@ -175,6 +178,40 @@ class ImportCompilerTests(unittest.TestCase):
         self.assertTrue(fcu_objs["msv_test_mode"]["writable"])
         report = json.loads(report_json.read_text(encoding="utf-8"))
         self.assertEqual([], report["errors"])
+
+    def test_compile_includes_commissioning_meta_unit_specs(self) -> None:
+        controllers = FIXTURES / "controllers-compile-meta.csv"
+        output_json = FIXTURES / "runtime-job-meta.json"
+        report_json = FIXTURES / "runtime-job-meta-report.json"
+        _write_csv(
+            controllers,
+            [
+                {
+                    "controller_label": "FCU-X",
+                    "profile_id": "profile_meta",
+                    "bacnet_device_instance": "21001",
+                    "bacnet_ip": "192.168.1.50",
+                    "bacnet_port": "47808",
+                    "building_floor": "L01",
+                    "notes": "",
+                },
+            ],
+        )
+        _write_profile(
+            self.profiles_dir / "unit-profile-meta.json",
+            profile_id="profile_meta",
+            display_name="Meta test",
+            write_allowlist=["msv_test_mode"],
+            read_allowlist=["ai_sat"],
+            unit_specs={"design_supply_airflow_L_s": 0.85},
+        )
+        result = _run_compiler(controllers, self.profiles_dir, output_json, report_json)
+        self.assertEqual(0, result.returncode)
+        runtime = json.loads(output_json.read_text(encoding="utf-8"))
+        row = runtime["controllers"][0]
+        self.assertIn("commissioning_meta", row)
+        meta = row["commissioning_meta"]
+        self.assertEqual(0.85, meta["unit_specs"]["design_supply_airflow_L_s"])
 
     def test_unknown_csv_column_emits_warning(self) -> None:
         controllers = FIXTURES / "controllers-unknown-col.csv"
