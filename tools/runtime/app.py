@@ -1746,42 +1746,37 @@ def _pdf_cell_safe(text: str, max_len: int) -> str:
     return t.encode("ascii", errors="replace").decode("ascii")
 
 
+def _commissioning_pdf_bundled_placeholder_logo() -> Path:
+    """Neutral placeholder shipped in-repo (not a customer trademark)."""
+    return ROOT / "docs" / "examples" / "branding" / "commissioning-logo-placeholder.png"
+
+
 def _resolve_commissioning_pdf_logo_path(
     run_dir: Path, cli_path: Path | None
 ) -> Path | None:
-    """Logo for PDF: explicit ``--pdf-logo-image``, else ``artifacts/branding/degree-logo.png``."""
+    """Resolve logo: ``--pdf-logo-image``, then ``artifacts/branding/logo.png``, then bundled placeholder."""
     if cli_path is not None:
         p = Path(cli_path)
-        return p if p.is_file() else None
-    default = run_dir / "artifacts" / "branding" / "degree-logo.png"
-    return default if default.is_file() else None
+        if p.is_file():
+            return p
+    customer = run_dir / "artifacts" / "branding" / "logo.png"
+    if customer.is_file():
+        return customer
+    bundled = _commissioning_pdf_bundled_placeholder_logo()
+    return bundled if bundled.is_file() else None
 
 
-def _pdf_draw_degree_logo_vector(pdf, x: float, y: float) -> float:
-    """Draw a compact vector wordmark (brown #7C4200, orange #FF6000). Returns Y below block."""
-    brown = (124, 66, 0)
-    orange = (255, 96, 0)
-    h_main = 7.0
-    h_tag = 3.2
-    gap = 1.0
-    pdf.set_draw_color(*brown)
-    pdf.set_text_color(*brown)
-    pdf.set_font("Helvetica", size=11)
-    word_w = pdf.get_string_width("degree") + 1.0
-    pdf.text(x, y + h_main * 0.72, "degree")
-    # Stylised degree symbol: orange ring (ellipse outline)
-    cx = x + word_w + 3.5
-    cy = y + h_main * 0.35
-    pdf.set_draw_color(*orange)
-    pdf.set_line_width(0.9)
-    pdf.ellipse(cx - 2.8, cy - 2.8, 5.6, 5.6, style="D")
-    pdf.set_line_width(0.2)
-    pdf.set_draw_color(*brown)
-    pdf.set_font("Helvetica", size=5.5)
-    pdf.set_text_color(*brown)
-    tag = "air conditioning & electrical services"
-    pdf.text(x, y + h_main + gap + h_tag * 0.55, _pdf_cell_safe(tag, 120))
-    return y + h_main + gap + h_tag + 1.0
+def _pdf_draw_logo_placeholder_vector(pdf, x: float, y: float) -> float:
+    """Neutral vector block when no logo file is available (no customer marks)."""
+    gray = (120, 120, 120)
+    pdf.set_draw_color(*gray)
+    pdf.set_text_color(*gray)
+    pdf.rect(x, y, 75, 14, style="D")
+    pdf.set_font("Helvetica", size=9)
+    pdf.text(x + 3, y + 5.5, "Site logo (add PNG under artifacts/branding/logo.png)")
+    pdf.set_font("Helvetica", size=6)
+    pdf.text(x + 3, y + 10.5, "or pass --pdf-logo-image")
+    return y + 16.0
 
 
 def _pdf_draw_commissioning_logo_strip(
@@ -1808,7 +1803,7 @@ def _pdf_draw_commissioning_logo_strip(
                 return y + target_h + 2.0
             except Exception:
                 pass
-    return _pdf_draw_degree_logo_vector(pdf, x, y)
+    return _pdf_draw_logo_placeholder_vector(pdf, x, y)
 
 
 def _write_commissioning_report_unified_pdf(
@@ -3452,9 +3447,10 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         help=(
-            "PNG/JPEG logo for PDF header (optional). If omitted, uses "
-            "<run-dir>/artifacts/branding/degree-logo.png when present; else a "
-            "built-in vector wordmark (brown/orange)."
+            "PNG/JPEG logo for PDF header. If omitted: "
+            "<run-dir>/artifacts/branding/logo.png when present, else the "
+            "neutral placeholder shipped under docs/examples/branding/, else a "
+            "simple vector box."
         ),
     )
     export_cr.set_defaults(handler=cmd_export_commissioning_report)
