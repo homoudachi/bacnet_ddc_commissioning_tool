@@ -1191,6 +1191,26 @@ def cmd_commissioning_confirm_tachometer_reference(args: argparse.Namespace) -> 
             "session_state_json": str(session_path.resolve()),
         },
     )
+    rep_path = _append_commissioning_report_entry(
+        run_dir,
+        {
+            "ts": _utc_timestamp(),
+            "kind": "tachometer_reference_confirmation",
+            "controller_label": args.controller_label,
+            "step_id": args.step_id,
+            "report_ref": "",
+            "technician_name": str(args.technician_name).strip(),
+            "note": str(getattr(args, "note", "") or ""),
+            "session_key": session_key,
+            "read_object_id": read_oid,
+            "reading_value_str": value_str,
+        },
+    )
+    _append_event(
+        logs_path,
+        "commissioning_tachometer_report_appended",
+        {"commissioning_report_json": str(rep_path.resolve())},
+    )
     print(
         json.dumps(
             {
@@ -1200,6 +1220,7 @@ def cmd_commissioning_confirm_tachometer_reference(args: argparse.Namespace) -> 
                 "session_key": session_key,
                 "read_object_id": read_oid,
                 "reading_value_str": value_str,
+                "commissioning_report_json": str(rep_path.resolve()),
             },
             indent=2,
             sort_keys=True,
@@ -1358,6 +1379,33 @@ def cmd_commissioning_airflow_adjust_write(args: argparse.Namespace) -> int:
             "design_supply_airflow_L_s": design_flow,
         },
     )
+    dflow_out: float | str = ""
+    if design_flow is not None:
+        try:
+            dflow_out = float(design_flow)
+        except (TypeError, ValueError):
+            dflow_out = str(design_flow)
+    rep_path = _append_commissioning_report_entry(
+        run_dir,
+        {
+            "ts": _utc_timestamp(),
+            "kind": "airflow_adjust_command",
+            "controller_label": args.controller_label,
+            "step_id": args.step_id,
+            "report_ref": "",
+            "technician_name": str(args.technician_name).strip(),
+            "note": str(getattr(args, "note", "") or ""),
+            "actuator_object_id": actuator_oid,
+            "command_percent": float(pct),
+            "target_flow_ratio_of_design": ratio,
+            "design_supply_airflow_L_s": dflow_out,
+        },
+    )
+    _append_event(
+        logs_path,
+        "commissioning_airflow_adjust_report_appended",
+        {"commissioning_report_json": str(rep_path.resolve())},
+    )
     print(
         json.dumps(
             {
@@ -1368,6 +1416,7 @@ def cmd_commissioning_airflow_adjust_write(args: argparse.Namespace) -> int:
                 "fan_command_percent": float(pct),
                 "target_flow_ratio_of_design": ratio,
                 "design_supply_airflow_L_s": design_flow,
+                "commissioning_report_json": str(rep_path.resolve()),
             },
             indent=2,
             sort_keys=True,
@@ -2607,6 +2656,9 @@ COMMISSIONING_REPORT_UNIFIED_FIELDNAMES: tuple[str, ...] = (
     "measured_flow_L_s",
     "measurement_tool",
     "design_flow_L_s",
+    "session_key",
+    "target_flow_ratio_of_design",
+    "design_supply_airflow_L_s",
 )
 
 
@@ -2987,6 +3039,82 @@ def _commissioning_report_unified_csv_rows(doc: dict) -> list[dict[str, str]]:
                     )
             continue
 
+        if kind == "tachometer_reference_confirmation":
+            rows.append(
+                {
+                    "entry_ts": base_ts,
+                    "kind": kind,
+                    "controller_label": ctrl,
+                    "step_id": step_id,
+                    "step_status": "",
+                    "report_ref": report_ref,
+                    "technician_name": tech,
+                    "note": note,
+                    "all_read_ok": "",
+                    "artifact_json": "",
+                    "command_object_id": "",
+                    "command_percent": "",
+                    "dwell_seconds": "",
+                    "sweep_index": "",
+                    "sweep_count": "",
+                    "trigger": "",
+                    "object_id": str(ent.get("read_object_id", "")),
+                    "property": "presentValue",
+                    "status": "read_ok",
+                    "value_str": str(ent.get("reading_value_str", "")),
+                    "read_source": "bacnet",
+                    "measurement_branch_id": "",
+                    "measured_flow_L_s": "",
+                    "measurement_tool": "",
+                    "design_flow_L_s": "",
+                    "session_key": str(ent.get("session_key", "")),
+                    "target_flow_ratio_of_design": "",
+                    "design_supply_airflow_L_s": "",
+                }
+            )
+            continue
+
+        if kind == "airflow_adjust_command":
+            try:
+                ratio_v = float(ent.get("target_flow_ratio_of_design", ""))
+                ratio_s = str(ratio_v)
+            except (TypeError, ValueError):
+                ratio_s = str(ent.get("target_flow_ratio_of_design", ""))
+            dsa = ent.get("design_supply_airflow_L_s", "")
+            rows.append(
+                {
+                    "entry_ts": base_ts,
+                    "kind": kind,
+                    "controller_label": ctrl,
+                    "step_id": step_id,
+                    "step_status": "",
+                    "report_ref": report_ref,
+                    "technician_name": tech,
+                    "note": note,
+                    "all_read_ok": "",
+                    "artifact_json": "",
+                    "command_object_id": str(ent.get("actuator_object_id", "")),
+                    "command_percent": str(ent.get("command_percent", "")),
+                    "dwell_seconds": "",
+                    "sweep_index": "",
+                    "sweep_count": "",
+                    "trigger": "",
+                    "object_id": "",
+                    "property": "",
+                    "status": "",
+                    "value_str": "",
+                    "read_source": "",
+                    "measurement_branch_id": "",
+                    "measured_flow_L_s": "",
+                    "measurement_tool": "",
+                    "design_flow_L_s": "",
+                    "session_key": "",
+                    "target_flow_ratio_of_design": ratio_s,
+                    "design_supply_airflow_L_s": str(dsa) if dsa != "" else "",
+                }
+            )
+            continue
+
         if kind == "manual_airflow_measurement":
             rows.append(
                 {
@@ -3015,6 +3143,9 @@ def _commissioning_report_unified_csv_rows(doc: dict) -> list[dict[str, str]]:
                     "measured_flow_L_s": str(ent.get("measured_flow_L_s", "")),
                     "measurement_tool": str(ent.get("measurement_tool", "")),
                     "design_flow_L_s": str(ent.get("design_flow_L_s", "")),
+                    "session_key": str(ent.get("session_key", "")),
+                    "target_flow_ratio_of_design": "",
+                    "design_supply_airflow_L_s": "",
                 }
             )
             continue

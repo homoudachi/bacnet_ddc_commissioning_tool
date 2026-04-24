@@ -4277,6 +4277,7 @@ class RuntimeCliTests(unittest.TestCase):
             )
             self.assertEqual(0, adj.returncode, adj.stdout + adj.stderr)
             self.assertIn("design_supply_airflow_L_s", adj.stdout)
+            self.assertIn("commissioning_report_json", adj.stdout)
 
             rd = _run_runtime(
                 "bacnet-read",
@@ -4352,6 +4353,22 @@ class RuntimeCliTests(unittest.TestCase):
             )
             self.assertEqual(0, ct.returncode, ct.stdout + ct.stderr)
             self.assertIn("42.5", ct.stdout)
+            self.assertIn("commissioning_report_json", ct.stdout)
+
+            rep_path = self.run_dir / "artifacts" / "commissioning_report.json"
+            self.assertTrue(rep_path.is_file())
+            rdoc = json.loads(rep_path.read_text(encoding="utf-8"))
+            kinds = [e.get("kind") for e in rdoc.get("entries", []) if isinstance(e, dict)]
+            self.assertIn("airflow_adjust_command", kinds)
+            self.assertIn("tachometer_reference_confirmation", kinds)
+            tacho_ent = next(
+                e
+                for e in rdoc["entries"]
+                if isinstance(e, dict)
+                and e.get("kind") == "tachometer_reference_confirmation"
+            )
+            self.assertEqual("av_supply_fan_tacho_value", tacho_ent.get("read_object_id"))
+            self.assertEqual("42.5", tacho_ent.get("reading_value_str"))
 
             ok_half = _run_runtime(
                 "record-step",
@@ -4388,6 +4405,21 @@ class RuntimeCliTests(unittest.TestCase):
                 "--no-run-modulation-on-pass",
             )
             self.assertEqual(0, ok_confirm.returncode)
+
+            uni = self.run_dir / "artifacts" / "airflow-check-unified.csv"
+            ex = _run_runtime(
+                "export-commissioning-report",
+                "--run-dir",
+                str(self.run_dir),
+                "--output-csv-unified",
+                str(uni),
+            )
+            self.assertEqual(0, ex.returncode)
+            ut = uni.read_text(encoding="utf-8")
+            self.assertIn("tachometer_reference_confirmation", ut)
+            self.assertIn("airflow_adjust_command", ut)
+            self.assertIn("session_key", ut)
+            self.assertIn("target_flow_ratio_of_design", ut)
         finally:
             server.stop()
 

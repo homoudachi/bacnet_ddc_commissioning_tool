@@ -24,7 +24,7 @@ Use before tagging a release or handing a **Windows exe** / **Python** drop to t
 | Airflow | `commissioning-airflow-adjust-write`, `commissioning-confirm-tachometer-reference` | Optional profile keys |
 | Manual airflow | `commissioning-record-manual-airflow` | Before pass on `manual_airflow_verification_assisted` steps |
 | Modulation | `bacnet-modulation-sweep` | After `init-flow` |
-| Report | `export-commissioning-report` CSV / unified / HTML / XLSX / PDF | Includes `manual_airflow_measurement` after `commissioning-record-manual-airflow` |
+| Report | `export-commissioning-report` CSV / unified / HTML / XLSX / PDF | Includes modulation, point checkout, `manual_airflow_measurement`, `tachometer_reference_confirmation`, `airflow_adjust_command` |
 
 ## Known gaps (not blocking v1 CLI)
 
