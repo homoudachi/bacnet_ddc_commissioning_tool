@@ -11,7 +11,7 @@ Move this repository from "requirements and examples only" to a working baseline
 
 ## Current status
 
-- **2026-04-25:** Same baseline as 2026-04-24, plus **commissioning_report** hooks for **multi-point `bacnet-modulation-sweep`** (`--command-percents`), **session RAT** via `session_return_air_temperature_key` when BACnet RAT is absent, optional **`record-step`** sweep on pass (`--modulation-command-percents` / `--no-run-modulation-on-pass`), **`skip_when`** + session truthy gate for **`record-step skipped`** (CHW readiness), and **`print-job-graph`** counts **`skip_gated_steps`** / **`modulation_action_steps`** per controller. Remaining v1 gaps: **portable Windows packaging**, **Docker BACnet sim lab**, **full commissioning flow engine** (guided steps beyond CLI slices), **unified heat/cool report model** + PDF/XLSX. See `README.md` and `docs/project.md`.
+- **2026-04-26:** Same baseline as 2026-04-25, plus **PyInstaller single-file Windows exe** (`bacnet-commissioning.exe`, **ADR 0012**), **in-process** import compile + simulator orchestration (no subprocess to loose `.py` files), and **`tools/runtime/repo_root.py`** for frozen **`sys._MEIPASS`** layout. Remaining v1 gaps: **code signing**, **Docker BACnet sim lab** polish, **full commissioning flow engine** (guided steps beyond CLI slices), **unified heat/cool report model** polish. See `README.md` and `docs/project.md`.
 - Product intent is tracked in `docs/project.md`.
 - This plan remains the high-level execution sequence; treat unchecked items as backlog unless superseded by newer ADRs. **Checklist:** `[x]` = shipped enough for baseline; notes in-line mark partials.
 
@@ -91,7 +91,7 @@ Use this order to reduce rework and unblock parallel work later.
 - [x] Export CSV first — **partial:** **`export-run-summary --output-csv`** (controller × flow status rollup); **not** yet the unified modulation table contract.
 - [x] **Partial:** append-only **`export-commissioning-report`** / **`artifacts/commissioning_report.json`** for **point checkout after step**, **CLI-appended thermal modulation samples/batches**, **`bacnet-modulation-sweep`** / optional **`record-step`** sweep rows (**`thermal_modulation_sweep`** with BACnet vs session **`read_source`** in CSV). **`export-commissioning-report --output-csv-unified`** flattens **point checkout + modulation** into one CSV (shared column contract v1). **Not** yet PDF tables or a frozen long-lived schema ADR for that CSV.
 - [ ] Then PDF/XLSX from same normalized dataset — **partial:** **`export-commissioning-report`** **`--output-html`** (browser print-to-PDF), **`--output-xlsx`** (**openpyxl**), **`--output-pdf`** (**fpdf2**, landscape table). **Not** yet styled customer PDF templates or charts.
-- [ ] Package portable Windows executable and document signing/release process.
+- [x] Package portable Windows executable — **partial:** **PyInstaller** one-file **`bacnet-commissioning.exe`** + [`docs/packaging/windows-exe.md`](packaging/windows-exe.md) + CI artifact workflow; **signing/release checklist** still open.
 - [ ] Add release checklist and smoke-test matrix.
 
 **Deliverables**

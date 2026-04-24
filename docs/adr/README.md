@@ -20,3 +20,4 @@ Use when a choice is **non-obvious** or you will forget **why** you chose it.
 | [0006](0006-commissioning-report-modulation-samples.md) | Commissioning report: thermal modulation samples/batch + CSV export | Accepted |
 | [0007](0007-chw-valve-stroke-prompt-confirm-cli.md) | CHW valve stroke (no CHW): `commissioning-confirm-prompt` + `record-step` gate | Accepted |
 | [0008](0008-docker-bacnet-device-sim.md) | Docker BACnet/IP lab device (`bacnet-dev` profile + CI smoke) | Accepted |
+| [0012](0012-windows-single-exe-pyinstaller.md) | Windows single-file exe via PyInstaller; in-process import/simulator | Accepted |
