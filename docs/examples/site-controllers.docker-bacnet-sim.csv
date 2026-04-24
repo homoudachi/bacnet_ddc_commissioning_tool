@@ -1,4 +1,4 @@
 controller_label,profile_id,bacnet_device_instance,bacnet_ip,bacnet_port,building_floor,notes
-FCU-DOCKER,fcu_2pipe_chw_electric_heat_v1,21001,127.0.0.1,47808,L01,Docker bacnet-dev: first sim (UDP 47808)
-FCU-DOCKER-B,fcu_2pipe_chw_electric_heat_v1,21002,127.0.0.1,47809,L01,Docker bacnet-dev: second sim (UDP 47809)
+FCU-DOCKER,fcu_2pipe_chw_electric_heat_docker_sim_v1,21001,127.0.0.1,47808,L01,Docker bacnet-dev: first sim (UDP 47808)
+FCU-DOCKER-B,fcu_2pipe_chw_electric_heat_docker_sim_v1,21002,127.0.0.1,47809,L01,Docker bacnet-dev: second sim (UDP 47809)
 HRV-DOCKER,hrv_counterflow_erv_v1,22001,127.0.0.1,47810,Roof,Docker bacnet-dev: HRV profile sim (SIM_PROFILE=hrv, UDP 47810)
