@@ -16,6 +16,7 @@
 ## Windows single-file executable
 
 - Build (on Windows): **[docs/packaging/windows-exe.md](docs/packaging/windows-exe.md)** — produces **`dist/bacnet-commissioning.exe`** via **PyInstaller** (`tools/packaging/runtime.spec`). CI builds on **`windows-latest`** (`.github/workflows/windows-exe.yml`) and uploads the exe as an artifact. Signing is not configured.
+- Pre-release checks: **[docs/packaging/release-checklist.md](docs/packaging/release-checklist.md)** (tests, import validate, optional Docker smoke, exe smoke matrix).
 
 ## Current implementation slice
 
@@ -83,6 +84,12 @@ python3 tools/runtime/app.py show-session \
 #   --technician-name "Alex Tech" [--note "..."]
 # python3 tools/runtime/app.py commissioning-confirm-tachometer-reference --run-dir artifacts/runtime-run \
 #   --controller-label FCU-01A --step-id confirm_tachometer_reference_half_flow \
+#   --technician-name "Alex Tech" [--note "..."]
+# 3f) Manual measured airflow (L/s) for manual_airflow_verification_assisted steps — required before
+# record-step passed on those steps (session key manual_airflow_measured_<branch_id>_L_s by default):
+# python3 tools/runtime/app.py commissioning-record-manual-airflow --run-dir artifacts/runtime-run \
+#   --controller-label FCU-01A --step-id manual_airflow_verify_half_then_design \
+#   --branch-id supply_terminal_main --measured-flow-L-s 0.42 --measurement-tool balometer \
 #   --technician-name "Alex Tech" [--note "..."]
 
 # 3c) Re-initialize after a mistake (backs up prior state to state/flow_backups/, logs flow_reinitialized)

@@ -4390,3 +4390,185 @@ class RuntimeCliTests(unittest.TestCase):
             self.assertEqual(0, ok_confirm.returncode)
         finally:
             server.stop()
+
+    def test_manual_airflow_record_then_record_step_pass(self) -> None:
+        from test_import_compiler import _write_profile
+
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        profiles_dir = self.run_dir / "profiles-manual-air"
+        profiles_dir.mkdir(parents=True, exist_ok=True)
+        _write_profile(
+            profiles_dir / "unit-manual-air.json",
+            profile_id="fcu_manual_air_v1",
+            display_name="Manual air",
+            write_allowlist=["msv_test_mode"],
+            read_allowlist=["msv_test_mode"],
+            objects=[
+                {
+                    "id": "msv_test_mode",
+                    "writable": True,
+                    "bacnet": {"object_type": "multiStateValue", "instance": 50},
+                },
+            ],
+            commissioning_flow=[
+                {"step_id": "prep", "label": "Prep"},
+                {
+                    "step_id": "manual_airflow_only",
+                    "label": "Manual airflow",
+                    "actions": [
+                        {
+                            "type": "manual_airflow_verification_assisted",
+                            "branch_ids": ["supply_main"],
+                        }
+                    ],
+                },
+            ],
+            airflow_verification={
+                "branches": [
+                    {
+                        "id": "supply_main",
+                        "design_flow_L_s": 0.5,
+                        "measurement": {
+                            "allowed_tools": ["balometer"],
+                        },
+                    }
+                ]
+            },
+        )
+        csv_path = self.run_dir / "controllers-manual-air.csv"
+        with csv_path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(
+                handle,
+                fieldnames=[
+                    "controller_label",
+                    "profile_id",
+                    "bacnet_device_instance",
+                    "bacnet_ip",
+                    "bacnet_port",
+                    "building_floor",
+                    "notes",
+                ],
+            )
+            writer.writeheader()
+            writer.writerow(
+                {
+                    "controller_label": "FCU-MAN",
+                    "profile_id": "fcu_manual_air_v1",
+                    "bacnet_device_instance": "21001",
+                    "bacnet_ip": "127.0.0.1",
+                    "bacnet_port": "47808",
+                    "building_floor": "L01",
+                    "notes": "",
+                }
+            )
+        self.assertEqual(
+            0,
+            _run_runtime(
+                "init-run",
+                "--run-dir",
+                str(self.run_dir),
+                "--job-id",
+                "job-man-air",
+                "--controllers-csv",
+                str(csv_path),
+                "--profiles-dir",
+                str(profiles_dir),
+                "--scenarios-dir",
+                str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+            ).returncode,
+        )
+        self.assertEqual(0, _run_runtime("compile-import", "--run-dir", str(self.run_dir)).returncode)
+        rj = json.loads((self.run_dir / "state" / "runtime-job.json").read_text(encoding="utf-8"))
+        self.assertEqual(
+            "supply_main",
+            rj["controllers"][0]["commissioning_meta"]["airflow_verification"]["branches"][0]["id"],
+        )
+
+        self.assertEqual(
+            0,
+            _run_runtime(
+                "init-flow",
+                "--run-dir",
+                str(self.run_dir),
+                "--controller-label",
+                "FCU-MAN",
+            ).returncode,
+        )
+        self.assertEqual(
+            0,
+            _run_runtime(
+                "record-step",
+                "--run-dir",
+                str(self.run_dir),
+                "--controller-label",
+                "FCU-MAN",
+                "--step-id",
+                "prep",
+                "--status",
+                "passed",
+                "--technician-name",
+                "Alex Tech",
+                "--note",
+                "prep",
+                "--no-run-modulation-on-pass",
+            ).returncode,
+        )
+
+        blocked = _run_runtime(
+            "record-step",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-MAN",
+            "--step-id",
+            "manual_airflow_only",
+            "--status",
+            "passed",
+            "--technician-name",
+            "Alex Tech",
+            "--note",
+            "no measurement",
+            "--no-run-modulation-on-pass",
+        )
+        self.assertEqual(2, blocked.returncode)
+        self.assertIn("commissioning-record-manual-airflow", blocked.stdout)
+
+        rec = _run_runtime(
+            "commissioning-record-manual-airflow",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-MAN",
+            "--step-id",
+            "manual_airflow_only",
+            "--branch-id",
+            "supply_main",
+            "--measured-flow-L-s",
+            "0.44",
+            "--measurement-tool",
+            "balometer",
+            "--technician-name",
+            "Alex Tech",
+            "--note",
+            "traverse",
+        )
+        self.assertEqual(0, rec.returncode, rec.stdout + rec.stderr)
+        self.assertIn("manual_airflow_measured_supply_main_L_s", rec.stdout)
+
+        ok = _run_runtime(
+            "record-step",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-MAN",
+            "--step-id",
+            "manual_airflow_only",
+            "--status",
+            "passed",
+            "--technician-name",
+            "Alex Tech",
+            "--note",
+            "after measurement",
+            "--no-run-modulation-on-pass",
+        )
+        self.assertEqual(0, ok.returncode)

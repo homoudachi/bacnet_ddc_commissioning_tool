@@ -272,9 +272,12 @@ def compile_model(
                         read_allow_ids.append(text)
 
             unit_specs = profile.get("unit_specs")
+            airflow_verification = profile.get("airflow_verification")
             commissioning_meta: dict[str, Any] = {}
             if isinstance(unit_specs, dict):
                 commissioning_meta["unit_specs"] = unit_specs
+            if isinstance(airflow_verification, dict):
+                commissioning_meta["airflow_verification"] = airflow_verification
 
             controllers.append(
                 {

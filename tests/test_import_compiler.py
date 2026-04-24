@@ -41,6 +41,7 @@ def _write_profile(
     commissioning_flow: list[dict] | None = None,
     objects: list[dict] | None = None,
     unit_specs: dict | None = None,
+    airflow_verification: dict | None = None,
 ) -> None:
     data: dict = {
                 "schema_version": "0.1-example",
@@ -79,6 +80,8 @@ def _write_profile(
         data["commissioning_flow"] = commissioning_flow
     if unit_specs is not None:
         data["unit_specs"] = unit_specs
+    if airflow_verification is not None:
+        data["airflow_verification"] = airflow_verification
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
@@ -212,6 +215,49 @@ class ImportCompilerTests(unittest.TestCase):
         self.assertIn("commissioning_meta", row)
         meta = row["commissioning_meta"]
         self.assertEqual(0.85, meta["unit_specs"]["design_supply_airflow_L_s"])
+
+    def test_compile_includes_commissioning_meta_airflow_verification(self) -> None:
+        controllers = FIXTURES / "controllers-compile-airflow.csv"
+        output_json = FIXTURES / "runtime-job-airflow-meta.json"
+        report_json = FIXTURES / "runtime-job-airflow-meta-report.json"
+        _write_csv(
+            controllers,
+            [
+                {
+                    "controller_label": "FCU-X",
+                    "profile_id": "profile_airflow_meta",
+                    "bacnet_device_instance": "21001",
+                    "bacnet_ip": "192.168.1.50",
+                    "bacnet_port": "47808",
+                    "building_floor": "L01",
+                    "notes": "",
+                },
+            ],
+        )
+        av = {
+            "branches": [
+                {
+                    "id": "supply_terminal_main",
+                    "design_flow_L_s": 0.85,
+                    "measurement": {
+                        "allowed_tools": ["balometer"],
+                    },
+                }
+            ]
+        }
+        _write_profile(
+            self.profiles_dir / "unit-profile-airflow-meta.json",
+            profile_id="profile_airflow_meta",
+            display_name="Airflow meta",
+            write_allowlist=["msv_test_mode"],
+            read_allowlist=["msv_test_mode"],
+            airflow_verification=av,
+        )
+        result = _run_compiler(controllers, self.profiles_dir, output_json, report_json)
+        self.assertEqual(0, result.returncode)
+        runtime = json.loads(output_json.read_text(encoding="utf-8"))
+        meta = runtime["controllers"][0]["commissioning_meta"]
+        self.assertEqual(av, meta["airflow_verification"])
 
     def test_unknown_csv_column_emits_warning(self) -> None:
         controllers = FIXTURES / "controllers-unknown-col.csv"

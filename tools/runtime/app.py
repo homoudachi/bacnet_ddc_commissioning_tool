@@ -254,6 +254,50 @@ def _tachometer_confirmation_gating(step: dict) -> bool:
     return _operator_confirm_tachometer_session_key(step) is not None
 
 
+def _default_manual_airflow_session_key(branch_id: str) -> str:
+    bid = str(branch_id).strip()
+    return f"manual_airflow_measured_{bid}_L_s"
+
+
+def _manual_airflow_verification_session_keys(step: dict) -> list[str]:
+    """Session keys required before pass for ``manual_airflow_verification_assisted`` steps."""
+    actions = step.get("actions")
+    if not isinstance(actions, list):
+        return []
+    keys: list[str] = []
+    for act in actions:
+        if not isinstance(act, dict):
+            continue
+        if str(act.get("type", "")).strip() != "manual_airflow_verification_assisted":
+            continue
+        raw_map = act.get("session_keys")
+        overrides: dict[str, str] = {}
+        if isinstance(raw_map, dict):
+            for k, v in raw_map.items():
+                kk = str(k).strip()
+                vv = str(v).strip()
+                if kk and vv:
+                    overrides[kk] = vv
+        raw_branches = act.get("branch_ids")
+        if not isinstance(raw_branches, list):
+            continue
+        for bid in raw_branches:
+            b = str(bid).strip()
+            if not b:
+                continue
+            keys.append(overrides.get(b, _default_manual_airflow_session_key(b)))
+    return keys
+
+
+def _manual_airflow_verification_gating(step: dict) -> bool:
+    return bool(_manual_airflow_verification_session_keys(step))
+
+
+def _session_has_recorded_measurement(vals: dict[str, str], key: str) -> bool:
+    raw = str(vals.get(key, "")).strip()
+    return bool(raw)
+
+
 def _airflow_adjust_tachometer_reference_session_key(step: dict) -> str | None:
     """Optional ``tachometer_reference_session_key`` on ``automatic_airflow_adjustment`` action."""
     actions = step.get("actions")
@@ -391,6 +435,18 @@ def _validate_step_transition(
                         f"commissioning-confirm-tachometer-reference (missing session key: {sk!r})"
                     ),
                 }
+        if _manual_airflow_verification_gating(step):
+            pend = _manual_airflow_verification_session_keys(step)
+            missing = [k for k in pend if not _session_has_recorded_measurement(vals, k)]
+            if missing:
+                return {
+                    "reason_code": "manual_airflow_measurement_missing",
+                    "message": (
+                        f"step '{step.get('step_id')}' requires measured airflow (L/s) in session "
+                        f"before pass; run commissioning-record-manual-airflow for each branch "
+                        f"(missing keys: {missing})"
+                    ),
+                }
     return None
 
 
@@ -400,6 +456,7 @@ def _normalize_rejection_reason(reason_code: str) -> str:
         "skip_reason_not_recorded": "SKIP_GATE",
         "operator_prompts_not_confirmed": "PROMPTS_NOT_CONFIRMED",
         "tachometer_reference_not_confirmed": "TACHOMETER_REFERENCE_NOT_CONFIRMED",
+        "manual_airflow_measurement_missing": "MANUAL_AIRFLOW_MEASUREMENT_MISSING",
         "dependency_not_completed": "DEPENDENCY_UNSATISFIED",
         "dependency_missing_from_flow": "DEPENDENCY_UNSATISFIED",
         "prior_step_incomplete": "PREREQ_ORDER",
@@ -1311,6 +1368,198 @@ def cmd_commissioning_airflow_adjust_write(args: argparse.Namespace) -> int:
                 "fan_command_percent": float(pct),
                 "target_flow_ratio_of_design": ratio,
                 "design_supply_airflow_L_s": design_flow,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def cmd_commissioning_record_manual_airflow(args: argparse.Namespace) -> int:
+    """Record measured airflow (L/s) for ``manual_airflow_verification_assisted`` profile step."""
+    run_dir = args.run_dir
+    logs_path = run_dir / "logs" / "events.jsonl"
+    runtime_job_path = run_dir / "state" / "runtime-job.json"
+    flow_path = _flow_state_path(run_dir, args.controller_label)
+    if not flow_path.is_file():
+        print(f"error: flow state missing; run init-flow first ({flow_path})")
+        return 2
+    runtime_job = json.loads(runtime_job_path.read_text(encoding="utf-8"))
+    target = None
+    for controller in runtime_job.get("controllers", []):
+        if controller.get("controller_label") == args.controller_label:
+            target = controller
+            break
+    if target is None:
+        print(f"error: controller not found in runtime job: {args.controller_label}")
+        return 2
+
+    flow_state = json.loads(flow_path.read_text(encoding="utf-8"))
+    actions = _find_flow_step_actions(flow_state, args.step_id)
+    if actions is None:
+        print(f"error: step_id not found in flow state: {args.step_id}")
+        return 2
+
+    branch_id = str(args.branch_id).strip()
+    if not branch_id:
+        print("error: --branch-id must be non-empty")
+        return 2
+
+    act_found: dict | None = None
+    for act in actions:
+        if not isinstance(act, dict):
+            continue
+        if str(act.get("type", "")).strip() != "manual_airflow_verification_assisted":
+            continue
+        raw_branches = act.get("branch_ids")
+        if not isinstance(raw_branches, list):
+            continue
+        branch_set = {str(b).strip() for b in raw_branches if str(b).strip()}
+        if branch_id in branch_set:
+            act_found = act
+            break
+
+    if act_found is None:
+        print(
+            "error: step has no manual_airflow_verification_assisted action "
+            f"listing branch_id={branch_id!r}"
+        )
+        return 2
+
+    raw_map = act_found.get("session_keys")
+    overrides: dict[str, str] = {}
+    if isinstance(raw_map, dict):
+        for k, v in raw_map.items():
+            kk = str(k).strip()
+            vv = str(v).strip()
+            if kk and vv:
+                overrides[kk] = vv
+    session_key = overrides.get(branch_id, _default_manual_airflow_session_key(branch_id))
+
+    try:
+        flow_ls = float(str(args.measured_flow_L_s).strip())
+    except (TypeError, ValueError):
+        print("error: --measured-flow-L-s must be a number")
+        return 2
+    if flow_ls <= 0.0:
+        print("error: --measured-flow-L-s must be > 0")
+        return 2
+
+    tool = str(getattr(args, "measurement_tool", "") or "").strip()
+    if not tool:
+        print("error: --measurement-tool is required (e.g. balometer)")
+        return 2
+
+    meta = target.get("commissioning_meta") if isinstance(target.get("commissioning_meta"), dict) else {}
+    av = meta.get("airflow_verification") if isinstance(meta.get("airflow_verification"), dict) else {}
+    branches = av.get("branches") if isinstance(av.get("branches"), list) else []
+    allowed_tools: list[str] | None = None
+    design_flow_branch: float | None = None
+    for br in branches:
+        if not isinstance(br, dict):
+            continue
+        if str(br.get("id", "")).strip() != branch_id:
+            continue
+        try:
+            d = br.get("design_flow_L_s")
+            if d is not None:
+                design_flow_branch = float(d)
+        except (TypeError, ValueError):
+            design_flow_branch = None
+        meas = br.get("measurement") if isinstance(br.get("measurement"), dict) else {}
+        raw_allowed = meas.get("allowed_tools")
+        if isinstance(raw_allowed, list) and raw_allowed:
+            allowed_tools = [str(x).strip() for x in raw_allowed if str(x).strip()]
+        break
+
+    if allowed_tools is not None and tool not in allowed_tools:
+        print(
+            f"error: measurement_tool {tool!r} not in profile allowed_tools "
+            f"for branch {branch_id!r}: {allowed_tools}"
+        )
+        return 2
+
+    step_row = _lookup_step_by_id(flow_state.get("steps", []), args.step_id)
+    arms = str(step_row.get("arms_test_mode_state_key", "")).strip() if step_row else ""
+    if arms == "airflow_verify":
+        one = _bacnet_read_one(
+            controller_label=args.controller_label,
+            target=target,
+            object_id="msv_test_mode",
+            property_name="presentValue",
+            timeout_seconds=float(args.bacnet_timeout_seconds),
+            retries=int(args.bacnet_retries),
+            bacnet_bind_port=int(getattr(args, "bacnet_bind_port", 0) or 0),
+            apdu_timeout_override=args.apdu_timeout,
+        )
+        if one.get("status") != "read_ok":
+            print(
+                "error: BACnet read of msv_test_mode failed (required when step arms airflow_verify)"
+            )
+            print(json.dumps(one, indent=2, sort_keys=True))
+            return 2
+        try:
+            msv_state = int(float(str(one.get("read", {}).get("value_str", ""))))
+        except (TypeError, ValueError):
+            print("error: could not parse msv_test_mode presentValue as integer state")
+            return 2
+        if msv_state != 3:
+            print(
+                f"error: msv_test_mode must be state 3 (airflow_verify); got {msv_state}"
+            )
+            return 2
+
+    session_path = _session_state_path(run_dir, args.controller_label)
+    session_path.parent.mkdir(parents=True, exist_ok=True)
+    if session_path.is_file():
+        session_state = json.loads(session_path.read_text(encoding="utf-8"))
+    else:
+        session_state = {
+            "controller_label": args.controller_label,
+            "updated_at": _utc_timestamp(),
+            "values": {},
+        }
+    if not isinstance(session_state.get("values"), dict):
+        session_state["values"] = {}
+
+    value_str = str(flow_ls)
+    session_state["values"][session_key] = {
+        "value": value_str,
+        "technician_name": str(args.technician_name).strip(),
+        "note": str(getattr(args, "note", "") or ""),
+        "ts": _utc_timestamp(),
+        "step_id": args.step_id,
+        "branch_id": branch_id,
+        "measurement_tool": tool,
+        "design_flow_L_s": design_flow_branch,
+    }
+    session_state["updated_at"] = _utc_timestamp()
+    session_path.write_text(json.dumps(session_state, indent=2), encoding="utf-8")
+
+    _append_event(
+        logs_path,
+        "manual_airflow_recorded",
+        {
+            "controller_label": args.controller_label,
+            "step_id": args.step_id,
+            "branch_id": branch_id,
+            "session_key": session_key,
+            "measured_flow_L_s": flow_ls,
+            "measurement_tool": tool,
+            "session_state_json": str(session_path.resolve()),
+        },
+    )
+    print(
+        json.dumps(
+            {
+                "manual_airflow_recorded": True,
+                "controller_label": args.controller_label,
+                "step_id": args.step_id,
+                "branch_id": branch_id,
+                "session_key": session_key,
+                "measured_flow_L_s": flow_ls,
+                "measurement_tool": tool,
             },
             indent=2,
             sort_keys=True,
@@ -4497,6 +4746,60 @@ def build_parser() -> argparse.ArgumentParser:
         help="BACpypes3 APDU timeout override (default: adapter default).",
     )
     airflow_adj.set_defaults(handler=cmd_commissioning_airflow_adjust_write)
+
+    manual_air = subparsers.add_parser(
+        "commissioning-record-manual-airflow",
+        help=(
+            "Record measured airflow (L/s) for manual_airflow_verification_assisted "
+            "(session key per branch; required before record-step pass on that step)."
+        ),
+    )
+    manual_air.add_argument("--run-dir", required=True, type=Path)
+    manual_air.add_argument("--controller-label", required=True)
+    manual_air.add_argument("--step-id", required=True)
+    manual_air.add_argument(
+        "--branch-id",
+        required=True,
+        help="Branch id from profile airflow_verification.branches[].id (must appear in step branch_ids).",
+    )
+    manual_air.add_argument(
+        "--measured-flow-L-s",
+        required=True,
+        dest="measured_flow_L_s",
+        help="Measured airflow in L/s (> 0).",
+    )
+    manual_air.add_argument(
+        "--measurement-tool",
+        required=True,
+        help="Tool used (must be in profile branch measurement.allowed_tools when defined).",
+    )
+    manual_air.add_argument("--technician-name", required=True)
+    manual_air.add_argument("--note", default="")
+    manual_air.add_argument(
+        "--bacnet-timeout-seconds",
+        type=float,
+        default=0.5,
+        help="Who-Is timeout base when verifying MSV for airflow_verify.",
+    )
+    manual_air.add_argument(
+        "--bacnet-retries",
+        type=int,
+        default=1,
+        help="Who-Is retries for BACnet read.",
+    )
+    manual_air.add_argument(
+        "--bacnet-bind-port",
+        type=int,
+        default=0,
+        help="Local UDP bind port (0 = OS-assigned).",
+    )
+    manual_air.add_argument(
+        "--apdu-timeout",
+        type=float,
+        default=None,
+        help="BACpypes3 APDU timeout override (default: adapter default).",
+    )
+    manual_air.set_defaults(handler=cmd_commissioning_record_manual_airflow)
 
     show_session = subparsers.add_parser(
         "show-session",
