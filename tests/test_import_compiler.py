@@ -300,6 +300,146 @@ class ImportCompilerTests(unittest.TestCase):
         runtime = json.loads(output_json.read_text(encoding="utf-8"))
         self.assertNotIn("panel_name", runtime["controllers"][0])
 
+    def test_bacnet_object_instance_override_column(self) -> None:
+        controllers = FIXTURES / "controllers-bacnet-override.csv"
+        output_json = FIXTURES / "runtime-job-bacnet-override.json"
+        report_json = FIXTURES / "runtime-job-bacnet-override-report.json"
+        _write_csv(
+            controllers,
+            [
+                {
+                    "controller_label": "FCU-OV",
+                    "profile_id": "profile_override",
+                    "bacnet_device_instance": "21001",
+                    "bacnet_ip": "192.168.1.50",
+                    "bacnet_port": "47808",
+                    "building_floor": "L01",
+                    "notes": "",
+                    "bacnet_object_msv_test_mode": "99",
+                },
+            ],
+            extra_columns=("bacnet_object_msv_test_mode",),
+        )
+        _write_profile(
+            self.profiles_dir / "unit-profile-override.json",
+            profile_id="profile_override",
+            display_name="Override test",
+            write_allowlist=["msv_test_mode"],
+            read_allowlist=["msv_test_mode"],
+        )
+
+        result = _run_compiler(controllers, self.profiles_dir, output_json, report_json)
+        self.assertEqual(0, result.returncode, msg=result.stdout + result.stderr)
+        report = json.loads(report_json.read_text(encoding="utf-8"))
+        self.assertEqual([], report["errors"])
+        runtime = json.loads(output_json.read_text(encoding="utf-8"))
+        row0 = runtime["controllers"][0]
+        self.assertEqual(
+            {"msv_test_mode": 99},
+            row0["commissioning_meta"]["controller_csv_object_instance_overrides"],
+        )
+        self.assertEqual(
+            99,
+            row0["objects_by_id"]["msv_test_mode"]["bacnet"]["instance"],
+        )
+        self.assertEqual(
+            2,
+            row0["objects_by_id"]["ai_sat"]["bacnet"]["instance"],
+        )
+
+    def test_bacnet_object_override_unknown_id_is_error(self) -> None:
+        controllers = FIXTURES / "controllers-bacnet-override-badid.csv"
+        output_json = FIXTURES / "runtime-job-bacnet-override-badid.json"
+        report_json = FIXTURES / "runtime-job-bacnet-override-badid-report.json"
+        _write_csv(
+            controllers,
+            [
+                {
+                    "controller_label": "FCU-BAD",
+                    "profile_id": "profile_override_bad",
+                    "bacnet_device_instance": "21001",
+                    "bacnet_ip": "192.168.1.50",
+                    "bacnet_port": "47808",
+                    "building_floor": "",
+                    "notes": "",
+                    "bacnet_object_no_such_point": "1",
+                },
+            ],
+            extra_columns=("bacnet_object_no_such_point",),
+        )
+        _write_profile(
+            self.profiles_dir / "unit-profile-override-bad.json",
+            profile_id="profile_override_bad",
+            display_name="Bad override",
+        )
+        result = _run_compiler(controllers, self.profiles_dir, output_json, report_json)
+        self.assertNotEqual(0, result.returncode)
+        report = json.loads(report_json.read_text(encoding="utf-8"))
+        codes = [e["code"] for e in report["errors"]]
+        self.assertIn("unknown_bacnet_object_override_id", codes)
+
+    def test_bacnet_object_override_invalid_instance_is_error(self) -> None:
+        controllers = FIXTURES / "controllers-bacnet-override-badinst.csv"
+        output_json = FIXTURES / "runtime-job-bacnet-override-badinst.json"
+        report_json = FIXTURES / "runtime-job-bacnet-override-badinst-report.json"
+        _write_csv(
+            controllers,
+            [
+                {
+                    "controller_label": "FCU-BAD2",
+                    "profile_id": "profile_override_bad2",
+                    "bacnet_device_instance": "21001",
+                    "bacnet_ip": "192.168.1.50",
+                    "bacnet_port": "47808",
+                    "building_floor": "",
+                    "notes": "",
+                    "bacnet_object_msv_test_mode": "not-an-int",
+                },
+            ],
+            extra_columns=("bacnet_object_msv_test_mode",),
+        )
+        _write_profile(
+            self.profiles_dir / "unit-profile-override-bad2.json",
+            profile_id="profile_override_bad2",
+            display_name="Bad inst",
+        )
+        result = _run_compiler(controllers, self.profiles_dir, output_json, report_json)
+        self.assertNotEqual(0, result.returncode)
+        report = json.loads(report_json.read_text(encoding="utf-8"))
+        codes = [e["code"] for e in report["errors"]]
+        self.assertIn("invalid_bacnet_object_instance_override", codes)
+
+    def test_bacnet_object_override_columns_not_unknown_warnings(self) -> None:
+        controllers = FIXTURES / "controllers-bacnet-override-nowarn.csv"
+        output_json = FIXTURES / "runtime-job-bacnet-override-nowarn.json"
+        report_json = FIXTURES / "runtime-job-bacnet-override-nowarn-report.json"
+        _write_csv(
+            controllers,
+            [
+                {
+                    "controller_label": "FCU-NW",
+                    "profile_id": "profile_override_nw",
+                    "bacnet_device_instance": "21001",
+                    "bacnet_ip": "192.168.1.50",
+                    "bacnet_port": "47808",
+                    "building_floor": "",
+                    "notes": "",
+                    "bacnet_object_msv_test_mode": "",
+                },
+            ],
+            extra_columns=("bacnet_object_msv_test_mode",),
+        )
+        _write_profile(
+            self.profiles_dir / "unit-profile-override-nw.json",
+            profile_id="profile_override_nw",
+            display_name="No warn",
+        )
+        result = _run_compiler(controllers, self.profiles_dir, output_json, report_json)
+        self.assertEqual(0, result.returncode, msg=result.stdout + result.stderr)
+        report = json.loads(report_json.read_text(encoding="utf-8"))
+        codes = [w["code"] for w in report["warnings"]]
+        self.assertNotIn("unknown_controller_csv_column", codes)
+
     def test_compile_includes_commissioning_step_metadata(self) -> None:
         controllers = FIXTURES / "controllers-compile-stepmeta.csv"
         output_json = FIXTURES / "runtime-job-stepmeta.json"

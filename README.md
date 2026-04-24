@@ -24,7 +24,7 @@
 - List-first verification CLI: **[tools/simulator/list_verifier.py](tools/simulator/list_verifier.py)**
 - Initial tests: **[tests/test_list_verifier.py](tests/test_list_verifier.py)**
 - ADR lock-ins: **[docs/adr/](docs/adr/)** (see index; includes BACnet, Docker sim, Phase 0, Windows exe)
-- Import compiler CLI: **[tools/import/compile_job.py](tools/import/compile_job.py)**
+- Import compiler CLI: **[tools/import/compile_job.py](tools/import/compile_job.py)** — optional per-row **`bacnet_object_<logical_id>`** columns override BACnet **object instance** numbers from the profile (see **[`docs/schema/site-controllers-v1.csv.md`](docs/schema/site-controllers-v1.csv.md)**).
 - Import compiler tests: **[tests/test_import_compiler.py](tests/test_import_compiler.py)**
 - Runtime skeleton CLI: **[tools/runtime/app.py](tools/runtime/app.py)**
 - BACnet façade (probe + present-value read/write): **[tools/bacnet/adapter.py](tools/bacnet/adapter.py)**

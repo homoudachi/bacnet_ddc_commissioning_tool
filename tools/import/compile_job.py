@@ -26,6 +26,81 @@ KNOWN_CONTROLLER_COLUMNS = frozenset(REQUIRED_COLUMNS) | frozenset(
     ]
 )
 
+# Per-row BACnet addressing: ``bacnet_object_<logical_id>`` overrides ``instance`` for that
+# profile ``objects[].id`` while keeping ``object_type`` and allowlists from the profile.
+BACNET_OBJECT_INSTANCE_COL_PREFIX = "bacnet_object_"
+
+
+def _is_bacnet_object_instance_column(name: str) -> bool:
+    col = str(name).strip()
+    return col.startswith(BACNET_OBJECT_INSTANCE_COL_PREFIX) and len(col) > len(
+        BACNET_OBJECT_INSTANCE_COL_PREFIX
+    )
+
+
+def _parse_per_row_object_instance_overrides(
+    row: dict[str, str],
+    row_index: int,
+    controller_label: str,
+    objects_by_id: dict[str, dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Parse ``bacnet_object_<logical_id>`` columns into logical id → BACnet instance int."""
+    errors: list[dict[str, Any]] = []
+    overrides: dict[str, int] = {}
+    for key, raw_val in row.items():
+        if key is None:
+            continue
+        col = str(key).strip()
+        if not _is_bacnet_object_instance_column(col):
+            continue
+        logical_id = col[len(BACNET_OBJECT_INSTANCE_COL_PREFIX) :].strip()
+        if not logical_id:
+            _error(
+                errors,
+                code="invalid_bacnet_object_override_column",
+                message=f"column {col!r} must be bacnet_object_<logical_id> with non-empty id",
+                controller_label=controller_label,
+                row=row_index,
+            )
+            continue
+        val = (raw_val or "").strip()
+        if not val:
+            continue
+        if logical_id not in objects_by_id:
+            _error(
+                errors,
+                code="unknown_bacnet_object_override_id",
+                message=(
+                    f"column {col!r}: object id {logical_id!r} is not defined "
+                    f"in the profile objects list"
+                ),
+                controller_label=controller_label,
+                row=row_index,
+            )
+            continue
+        try:
+            inst = int(val)
+        except ValueError:
+            _error(
+                errors,
+                code="invalid_bacnet_object_instance_override",
+                message=f"column {col!r}: expected integer BACnet instance, got {val!r}",
+                controller_label=controller_label,
+                row=row_index,
+            )
+            continue
+        if inst < 0:
+            _error(
+                errors,
+                code="invalid_bacnet_object_instance_override",
+                message=f"column {col!r}: BACnet instance must be >= 0",
+                controller_label=controller_label,
+                row=row_index,
+            )
+            continue
+        overrides[logical_id] = inst
+    return errors, overrides
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -149,6 +224,8 @@ def compile_model(
         for col in sorted(header - KNOWN_CONTROLLER_COLUMNS):
             name = str(col).strip()
             if not name:
+                continue
+            if _is_bacnet_object_instance_column(name):
                 continue
             _warning(
                 warnings,
@@ -279,6 +356,29 @@ def compile_model(
             if isinstance(airflow_verification, dict):
                 commissioning_meta["airflow_verification"] = airflow_verification
 
+            objects_by_id = _extract_objects_by_id(profile)
+            ov_errors, instance_overrides = _parse_per_row_object_instance_overrides(
+                row=row,
+                row_index=row_index,
+                controller_label=label,
+                objects_by_id=objects_by_id,
+            )
+            if ov_errors:
+                errors.extend(ov_errors)
+                continue
+            if instance_overrides:
+                commissioning_meta["controller_csv_object_instance_overrides"] = {
+                    k: instance_overrides[k] for k in sorted(instance_overrides)
+                }
+                for oid, inst in instance_overrides.items():
+                    entry = objects_by_id.get(oid)
+                    if entry is None:
+                        continue
+                    bac = entry.get("bacnet")
+                    if not isinstance(bac, dict):
+                        continue
+                    entry["bacnet"] = {**bac, "instance": inst}
+
             controllers.append(
                 {
                     "controller_label": label,
@@ -291,7 +391,7 @@ def compile_model(
                     "commissioning_write_allowlist": allow_ids,
                     "commissioning_read_allowlist": read_allow_ids,
                     "commissioning_meta": commissioning_meta,
-                    "objects_by_id": _extract_objects_by_id(profile),
+                    "objects_by_id": objects_by_id,
                     "point_checkout": _extract_point_checkout(profile),
                     "commissioning_flow": _extract_commissioning_steps(profile),
                     "bacnet": {
