@@ -453,12 +453,20 @@ def _extract_commissioning_steps(profile: dict[str, Any]) -> list[dict[str, Any]
     return steps
 
 
-def main() -> int:
-    args = parse_args()
+def run_compile(
+    controllers_csv: Path,
+    profiles_dir: Path,
+    output_json: Path,
+    report_json: Path,
+) -> int:
+    """Compile controllers CSV + profile library; write runtime + import report JSON.
+
+    Used by the runtime CLI and by PyInstaller single-file builds (no subprocess).
+    """
     try:
-        profiles_by_id, profile_errors, profile_warnings = load_profiles(args.profiles_dir)
+        profiles_by_id, profile_errors, profile_warnings = load_profiles(profiles_dir)
         runtime_model, report, exit_code = compile_model(
-            controllers_csv=args.controllers_csv,
+            controllers_csv=controllers_csv,
             profiles_by_id=profiles_by_id,
             initial_errors=profile_errors,
             initial_warnings=profile_warnings,
@@ -472,22 +480,32 @@ def main() -> int:
             "errors": [{"code": "fatal", "message": str(err)}],
             "warnings": [],
         }
-        args.report_json.parent.mkdir(parents=True, exist_ok=True)
-        args.report_json.write_text(json.dumps(fallback, indent=2), encoding="utf-8")
+        report_json.parent.mkdir(parents=True, exist_ok=True)
+        report_json.write_text(json.dumps(fallback, indent=2), encoding="utf-8")
         print("compile_ok=false errors=1 warnings=0")
         print(f"error: {err}")
         return 2
 
-    args.output_json.parent.mkdir(parents=True, exist_ok=True)
-    args.report_json.parent.mkdir(parents=True, exist_ok=True)
-    args.output_json.write_text(json.dumps(runtime_model, indent=2), encoding="utf-8")
-    args.report_json.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    output_json.parent.mkdir(parents=True, exist_ok=True)
+    report_json.parent.mkdir(parents=True, exist_ok=True)
+    output_json.write_text(json.dumps(runtime_model, indent=2), encoding="utf-8")
+    report_json.write_text(json.dumps(report, indent=2), encoding="utf-8")
 
     print(
         f"compile_ok={'true' if report['compile_ok'] else 'false'} "
         f"errors={report['error_count']} warnings={report['warning_count']}"
     )
     return exit_code
+
+
+def main() -> int:
+    args = parse_args()
+    return run_compile(
+        args.controllers_csv,
+        args.profiles_dir,
+        args.output_json,
+        args.report_json,
+    )
 
 
 if __name__ == "__main__":

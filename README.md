@@ -13,11 +13,15 @@
 - Track cross-cutting decisions in **[Remaining to plan (before implementation)](docs/project.md#remaining-to-plan-before-implementation)** and **[Open questions](docs/project.md#open-questions)**.
 - For BACnet simulation architecture and networking, use **[docs/simulator/README.md](docs/simulator/README.md)** and **[docs/plans/2026-04-21-bacnet-simulator-plan.md](docs/plans/2026-04-21-bacnet-simulator-plan.md)**. A **runnable Docker BACnet lab** (profile **`bacnet-dev`**, three UDP ports) lives under **`docker/simulator/`**; quick runbook: **`docker/simulator/README.md`**. CI runs **`tools/simulator/docker_bacnet_smoke.sh`** when Docker is available (**`verify-bip-list`**, **`bacnet-read`**, **`dry-run-bacnet-write --execute`** on MSV and analog points, **`bacnet-point-checkout`**).
 
+## Windows single-file executable
+
+- Build (on Windows): **[docs/packaging/windows-exe.md](docs/packaging/windows-exe.md)** — produces **`dist/bacnet-commissioning.exe`** via **PyInstaller** (`tools/packaging/runtime.spec`). CI builds on **`windows-latest`** (`.github/workflows/windows-exe.yml`) and uploads the exe as an artifact. Signing is not configured.
+
 ## Current implementation slice
 
 - List-first verification CLI: **[tools/simulator/list_verifier.py](tools/simulator/list_verifier.py)**
 - Initial tests: **[tests/test_list_verifier.py](tests/test_list_verifier.py)**
-- ADR lock-ins: **[docs/adr/](docs/adr/)** (0001-0003)
+- ADR lock-ins: **[docs/adr/](docs/adr/)** (see index; includes BACnet, Docker sim, Phase 0, Windows exe)
 - Import compiler CLI: **[tools/import/compile_job.py](tools/import/compile_job.py)**
 - Import compiler tests: **[tests/test_import_compiler.py](tests/test_import_compiler.py)**
 - Runtime skeleton CLI: **[tools/runtime/app.py](tools/runtime/app.py)**

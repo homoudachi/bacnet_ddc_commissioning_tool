@@ -11,7 +11,7 @@ Move this repository from "requirements and examples only" to a working baseline
 
 ## Current status
 
-- **2026-04-26:** Same baseline as 2026-04-25, plus **Phase 0 lock-ins:** ADR **0009** (Python CLI v1 stack; portable exe deferred), **0010** (reporting libs: stdlib CSV/HTML, **openpyxl** XLSX, **fpdf2** PDF), **0011** (`site-controllers` v1 column contract + **`unknown_controller_csv_column`** warnings for extra CSV headers), canonical table **`docs/schema/site-controllers-v1.csv.md`**, and **v1 profile contract** paragraph in **`docs/examples/pass-fail-defaults.recommended.md`**. Remaining v1 gaps: **portable Windows packaging**, **full commissioning flow engine** (guided steps beyond CLI slices), **unified heat/cool report model** polish, **per-row sheet overrides**. See `README.md` and `docs/project.md`.
+- **2026-04-26:** Same baseline as 2026-04-25, plus **Phase 0 lock-ins:** ADR **0009** (Python CLI v1 stack), **0010** (reporting libs: stdlib CSV/HTML, **openpyxl** XLSX, **fpdf2** PDF), **0011** (`site-controllers` v1 column contract + **`unknown_controller_csv_column`** warnings for extra CSV headers), canonical table **`docs/schema/site-controllers-v1.csv.md`**, and **v1 profile contract** paragraph in **`docs/examples/pass-fail-defaults.recommended.md`**. Plus **PyInstaller** single-file Windows **`bacnet-commissioning.exe`** (**ADR 0012**), **in-process** import compile + simulator orchestration, and **`tools/runtime/repo_root.py`** for frozen **`sys._MEIPASS`** layout. Remaining v1 gaps: **code signing / release checklist**, **full commissioning flow engine** (guided steps beyond CLI slices), **unified heat/cool report model** polish, **per-row sheet overrides**. See `README.md` and `docs/project.md`.
 - Product intent is tracked in `docs/project.md`.
 - This plan remains the high-level execution sequence; treat unchecked items as backlog unless superseded by newer ADRs. **Checklist:** `[x]` = shipped enough for baseline; notes in-line mark partials.
 
@@ -91,7 +91,7 @@ Use this order to reduce rework and unblock parallel work later.
 - [x] Export CSV first — **partial:** **`export-run-summary --output-csv`** (controller × flow status rollup); **not** yet the unified modulation table contract.
 - [x] **Partial:** append-only **`export-commissioning-report`** / **`artifacts/commissioning_report.json`** for **point checkout after step**, **CLI-appended thermal modulation samples/batches**, **`bacnet-modulation-sweep`** / optional **`record-step`** sweep rows (**`thermal_modulation_sweep`** with BACnet vs session **`read_source`** in CSV). **`export-commissioning-report --output-csv-unified`** flattens **point checkout + modulation** into one CSV (shared column contract v1). **Not** yet PDF tables or a frozen long-lived schema ADR for that CSV.
 - [ ] Then PDF/XLSX from same normalized dataset — **partial:** **`export-commissioning-report`** **`--output-html`** (browser print-to-PDF), **`--output-xlsx`** (**openpyxl**), **`--output-pdf`** (**fpdf2**, landscape table). **Not** yet styled customer PDF templates or charts.
-- [ ] Package portable Windows executable and document signing/release process.
+- [x] Package portable Windows executable — **partial:** **PyInstaller** one-file **`bacnet-commissioning.exe`** + [`docs/packaging/windows-exe.md`](packaging/windows-exe.md) + CI artifact workflow; **signing/release checklist** still open.
 - [ ] Add release checklist and smoke-test matrix.
 
 **Deliverables**
