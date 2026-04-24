@@ -1,2 +1,4 @@
 # Runtime BACnet client (WriteProperty / device discovery).
 bacpypes3>=0.0.80
+# Spreadsheet export (commissioning_report unified XLSX).
+openpyxl>=3.1.0

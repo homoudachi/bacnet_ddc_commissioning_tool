@@ -17,11 +17,12 @@ The commissioning report file (`artifacts/commissioning_report.json`) started wi
 3. Extend **`export-commissioning-report`** with **`--output-csv`** to flatten **`thermal_modulation_sample`**, **`thermal_modulation_batch`**, and **`thermal_modulation_sweep`** (extra columns `command_object_id`, `command_percent`, `dwell_seconds` where applicable).
 4. **`--output-csv-unified`**: one CSV spanning **`point_checkout_after_step`** and all thermal modulation kinds using a shared wide column set (empty cells where a field does not apply).
 5. **`--output-html`**: same rows as unified CSV as a minimal HTML document for **human print-to-PDF** (no PDF library in-process).
-6. **`--allow-empty`** stub uses schema **0.2** for consistency.
-7. **`bacnet-modulation-sweep`** writes command percent(s) then reads SAT/RAT/context per profile **`modulate_actuator_log_sat_for_report`** action. **`--command-percents`** runs one **`thermal_modulation_sweep`** entry per value. When BACnet RAT is absent or not in **`objects_by_id`**, **`session_return_air_temperature_key`** supplies a reading row with **`source: session`** (operator must **`set-session-value`**). **`record-step`** may run the same sweep on **`passed` / `manual_passed`** when **`--modulation-command-percents`** is supplied (or **`--no-run-modulation-on-pass`** to disable).
+6. **`--output-xlsx`**: same unified rows in an **Excel 2007+** workbook (dependency: **openpyxl** in `requirements.txt`).
+7. **`--allow-empty`** stub uses schema **0.2** for consistency.
+8. **`bacnet-modulation-sweep`** writes command percent(s) then reads SAT/RAT/context per profile **`modulate_actuator_log_sat_for_report`** action. **`--command-percents`** runs one **`thermal_modulation_sweep`** entry per value. When BACnet RAT is absent or not in **`objects_by_id`**, **`session_return_air_temperature_key`** supplies a reading row with **`source: session`** (operator must **`set-session-value`**). **`record-step`** may run the same sweep on **`passed` / `manual_passed`** when **`--modulation-command-percents`** is supplied (or **`--no-run-modulation-on-pass`** to disable).
 
 ## Consequences
 
 - Operators or external scripts can log modulation **snapshots** without implementing the full step engine.
-- **`--output-csv`** remains modulation-only; **`--output-csv-unified`** is the single-file rollup for spreadsheets; **`--output-html`** mirrors unified rows for sharing. Sweep rows may include **`read_source`** (`bacnet` / `session`).
+- **`--output-csv`** remains modulation-only; **`--output-csv-unified`** / **`--output-xlsx`** / **`--output-html`** share the unified row shape for spreadsheets and sharing. Sweep rows may include **`read_source`** (`bacnet` / `session`).
 - **`append-commissioning-modulation-sample`** / **`append-commissioning-modulation-batch`** are read-only; **`bacnet-modulation-sweep`** performs allowlisted **WriteProperty** then reads. A full profile-driven step engine (dwell policies, aborts, UI) remains future work.

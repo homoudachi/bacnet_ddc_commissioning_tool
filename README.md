@@ -130,6 +130,7 @@ python3 tools/runtime/app.py record-step \
 # Optional: --output-csv modulation.csv exports thermal_modulation_* rows only
 # Optional: --output-csv-unified all-rows.csv merges point checkout + modulation into one CSV
 # Optional: --output-html report.html same data as unified CSV; open in browser → Print → Save as PDF
+# Optional: --output-xlsx report.xlsx same unified rows (needs: pip install -r requirements.txt)
 
 # 4c) Append thermal modulation sample (allowlisted BACnet reads → commissioning_report.json)
 # python3 tools/runtime/app.py append-commissioning-modulation-sample --run-dir artifacts/runtime-run \

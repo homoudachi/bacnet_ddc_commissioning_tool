@@ -852,10 +852,13 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
     want_csv = bool(getattr(args, "output_csv", None))
     want_csv_unified = bool(getattr(args, "output_csv_unified", None))
     want_html = bool(getattr(args, "output_html", None))
+    want_xlsx = bool(getattr(args, "output_xlsx", None))
     allow_empty = bool(getattr(args, "allow_empty", False))
 
     if not src.is_file():
-        if allow_empty and (out_path or want_csv or want_csv_unified or want_html):
+        if allow_empty and (
+            out_path or want_csv or want_csv_unified or want_html or want_xlsx
+        ):
             config = _parse_run_config(run_dir)
             job_id = str(config.get("job_id", "")).strip() or "unknown-job"
             doc: dict = {
@@ -910,31 +913,10 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
             if want_csv_unified:
                 csv_unified = Path(args.output_csv_unified)
                 csv_unified.parent.mkdir(parents=True, exist_ok=True)
-                unified_fields = [
-                    "entry_ts",
-                    "kind",
-                    "controller_label",
-                    "step_id",
-                    "step_status",
-                    "report_ref",
-                    "technician_name",
-                    "note",
-                    "all_read_ok",
-                    "artifact_json",
-                    "command_object_id",
-                    "command_percent",
-                    "dwell_seconds",
-                    "sweep_index",
-                    "sweep_count",
-                    "trigger",
-                    "object_id",
-                    "property",
-                    "status",
-                    "value_str",
-                    "read_source",
-                ]
                 with csv_unified.open("w", newline="", encoding="utf-8") as handle:
-                    writer = csv.DictWriter(handle, fieldnames=unified_fields)
+                    writer = csv.DictWriter(
+                        handle, fieldnames=list(COMMISSIONING_REPORT_UNIFIED_FIELDNAMES)
+                    )
                     writer.writeheader()
                 _append_event(
                     logs_path,
@@ -943,6 +925,21 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
                 )
                 print(
                     f"commissioning_report_unified_csv=true csv_path={csv_unified.resolve()}"
+                )
+            if want_xlsx:
+                try:
+                    _write_commissioning_report_unified_xlsx(Path(args.output_xlsx), doc)
+                except RuntimeError as err:
+                    print(f"error: {err}")
+                    return 2
+                xlsx_path = Path(args.output_xlsx)
+                _append_event(
+                    logs_path,
+                    "commissioning_report_xlsx_exported",
+                    {"xlsx_path": str(xlsx_path.resolve())},
+                )
+                print(
+                    f"commissioning_report_xlsx=true xlsx_path={xlsx_path.resolve()}"
                 )
             if want_html:
                 html_path = Path(args.output_html)
@@ -960,10 +957,16 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
                 print(
                     f"commissioning_report_html=true html_path={html_path.resolve()}"
                 )
-            if not out_path and not want_csv and not want_csv_unified and not want_html:
+            if (
+                not out_path
+                and not want_csv
+                and not want_csv_unified
+                and not want_html
+                and not want_xlsx
+            ):
                 print(
                     "error: --allow-empty requires --output-json and/or "
-                    "--output-csv / --output-csv-unified / --output-html"
+                    "--output-csv / --output-csv-unified / --output-html / --output-xlsx"
                 )
                 return 2
             return 0
@@ -971,7 +974,7 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
             f"error: commissioning report not found at {src}; "
             "nothing recorded yet (e.g. record-step with BACnet point checkout gate). "
             "Use --allow-empty with --output-json and/or --output-csv / "
-            "--output-csv-unified / --output-html for empty outputs."
+            "--output-csv-unified / --output-html / --output-xlsx for empty outputs."
         )
         return 2
 
@@ -1013,31 +1016,10 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
     if csv_unified:
         csv_unified = Path(csv_unified)
         csv_unified.parent.mkdir(parents=True, exist_ok=True)
-        unified_fields = [
-            "entry_ts",
-            "kind",
-            "controller_label",
-            "step_id",
-            "step_status",
-            "report_ref",
-            "technician_name",
-            "note",
-            "all_read_ok",
-            "artifact_json",
-            "command_object_id",
-            "command_percent",
-            "dwell_seconds",
-            "sweep_index",
-            "sweep_count",
-            "trigger",
-            "object_id",
-            "property",
-            "status",
-            "value_str",
-            "read_source",
-        ]
         with csv_unified.open("w", newline="", encoding="utf-8") as handle:
-            writer = csv.DictWriter(handle, fieldnames=unified_fields)
+            writer = csv.DictWriter(
+                handle, fieldnames=list(COMMISSIONING_REPORT_UNIFIED_FIELDNAMES)
+            )
             writer.writeheader()
             for row in _commissioning_report_unified_csv_rows(doc):
                 writer.writerow(row)
@@ -1049,6 +1031,21 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
         print(
             f"commissioning_report_unified_csv=true csv_path={csv_unified.resolve()}"
         )
+
+    xlsx_out = getattr(args, "output_xlsx", None)
+    if xlsx_out:
+        try:
+            _write_commissioning_report_unified_xlsx(Path(xlsx_out), doc)
+        except RuntimeError as err:
+            print(f"error: {err}")
+            return 2
+        xlsx_path = Path(xlsx_out)
+        _append_event(
+            logs_path,
+            "commissioning_report_xlsx_exported",
+            {"xlsx_path": str(xlsx_path.resolve())},
+        )
+        print(f"commissioning_report_xlsx=true xlsx_path={xlsx_path.resolve()}")
 
     html_out = getattr(args, "output_html", None)
     if html_out:
@@ -1640,6 +1637,52 @@ def _commissioning_report_modulation_rows(doc: dict) -> list[dict[str, str]]:
                 }
             )
     return rows
+
+
+COMMISSIONING_REPORT_UNIFIED_FIELDNAMES: tuple[str, ...] = (
+    "entry_ts",
+    "kind",
+    "controller_label",
+    "step_id",
+    "step_status",
+    "report_ref",
+    "technician_name",
+    "note",
+    "all_read_ok",
+    "artifact_json",
+    "command_object_id",
+    "command_percent",
+    "dwell_seconds",
+    "sweep_index",
+    "sweep_count",
+    "trigger",
+    "object_id",
+    "property",
+    "status",
+    "value_str",
+    "read_source",
+)
+
+
+def _write_commissioning_report_unified_xlsx(path: Path, doc: dict) -> None:
+    """Write unified commissioning rows to an ``.xlsx`` file (requires openpyxl)."""
+    try:
+        from openpyxl import Workbook
+    except ImportError as err:  # pragma: no cover — exercised when dep missing
+        raise RuntimeError(
+            "openpyxl is required for --output-xlsx; install requirements.txt"
+        ) from err
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows = _commissioning_report_unified_csv_rows(doc)
+    wb = Workbook()
+    ws = wb.active
+    assert ws is not None
+    ws.title = "commissioning"
+    ws.append(list(COMMISSIONING_REPORT_UNIFIED_FIELDNAMES))
+    for row in rows:
+        ws.append([str(row.get(k, "") or "") for k in COMMISSIONING_REPORT_UNIFIED_FIELDNAMES])
+    wb.save(path)
 
 
 def _commissioning_report_unified_csv_rows(doc: dict) -> list[dict[str, str]]:
@@ -3160,8 +3203,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "If no report exists yet: with --output-json write empty stub JSON; "
-            "with --output-csv / --output-csv-unified / --output-html write headers-only "
-            "(or empty HTML table). At least one output path flag is required."
+            "with --output-csv / --output-csv-unified / --output-html / --output-xlsx "
+            "write headers-only (or empty HTML / empty sheet). "
+            "At least one output path flag is required."
         ),
     )
     export_cr.add_argument(
@@ -3183,6 +3227,13 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Also write a simple HTML table (same rows as --output-csv-unified); "
             "open in a browser and print to PDF (no extra Python deps)."
+        ),
+    )
+    export_cr.add_argument(
+        "--output-xlsx",
+        type=Path,
+        help=(
+            "Also write unified rows to an Excel workbook (.xlsx; requires openpyxl)."
         ),
     )
     export_cr.set_defaults(handler=cmd_export_commissioning_report)

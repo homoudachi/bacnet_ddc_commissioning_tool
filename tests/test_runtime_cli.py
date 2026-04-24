@@ -2,6 +2,7 @@ import csv
 import json
 import pathlib
 import shutil
+import zipfile
 import socket
 import subprocess
 import sys
@@ -2655,6 +2656,20 @@ class RuntimeCliTests(unittest.TestCase):
             self.assertIn("point_checkout_after_step", html_text)
             self.assertIn("thermal_modulation_sample", html_text)
             self.assertIn("Print to PDF", html_text)
+
+            xlsx_path = self.run_dir / "artifacts" / "commissioning-unified.xlsx"
+            x = _run_runtime(
+                "export-commissioning-report",
+                "--run-dir",
+                str(self.run_dir),
+                "--output-xlsx",
+                str(xlsx_path),
+            )
+            self.assertEqual(0, x.returncode)
+            self.assertTrue(xlsx_path.is_file())
+            with zipfile.ZipFile(xlsx_path, "r") as zf:
+                names = zf.namelist()
+            self.assertTrue(any(n.endswith("xl/worksheets/sheet1.xml") for n in names))
         finally:
             server.stop()
 
@@ -2718,6 +2733,23 @@ class RuntimeCliTests(unittest.TestCase):
         )
         self.assertEqual(0, r2.returncode)
         self.assertIn("(no entries)", html_only.read_text(encoding="utf-8"))
+
+        x_empty = self.run_dir / "artifacts" / "empty-report.xlsx"
+        r3 = _run_runtime(
+            "export-commissioning-report",
+            "--run-dir",
+            str(self.run_dir),
+            "--allow-empty",
+            "--output-xlsx",
+            str(x_empty),
+        )
+        self.assertEqual(0, r3.returncode)
+        from openpyxl import load_workbook
+
+        wb = load_workbook(x_empty)
+        ws = wb.active
+        self.assertEqual(1, ws.max_row)
+        self.assertEqual("entry_ts", ws.cell(row=1, column=1).value)
 
     def test_record_step_point_checkout_failure_leaves_step_pending(self) -> None:
         from test_import_compiler import _write_profile
