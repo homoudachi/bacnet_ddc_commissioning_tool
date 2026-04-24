@@ -4,6 +4,7 @@
 
 - **Current repo status (2026-04-23):** docs-first project with early runnable tooling (simulator verifier/orchestrator, import compiler, and Python runtime CLI). BACnet **probes** use a tiny UDP helper; **ReadProperty / WriteProperty** use **[BACpypes3](https://bacpypes3.readthedocs.io/)** (`pip install -r requirements.txt`). There is no full end-user commissioning application yet.
 - **[Living project doc](docs/project.md)** — product requirements, commissioning flows, examples, import direction, and reports (update as the product evolves).
+- **Unified commissioning export (CSV v1):** [`docs/schema/commissioning-report-unified-csv-v1.md`](docs/schema/commissioning-report-unified-csv-v1.md) — column order for `export-commissioning-report --output-csv-unified` (and HTML/XLSX/PDF); **ADR 0014** in [`docs/adr/`](docs/adr/).
 - **[ADRs](docs/adr/)** — short decision records when choices are non-obvious.
 - **[Slice plans](docs/plans/)** — time-boxed implementation plans; archive or remove when the slice ships.
 
