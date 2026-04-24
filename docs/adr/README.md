@@ -20,3 +20,6 @@ Use when a choice is **non-obvious** or you will forget **why** you chose it.
 | [0006](0006-commissioning-report-modulation-samples.md) | Commissioning report: thermal modulation samples/batch + CSV export | Accepted |
 | [0007](0007-chw-valve-stroke-prompt-confirm-cli.md) | CHW valve stroke (no CHW): `commissioning-confirm-prompt` + `record-step` gate | Accepted |
 | [0008](0008-docker-bacnet-device-sim.md) | Docker BACnet/IP lab device (`bacnet-dev` profile + CI smoke) | Accepted |
+| [0009](0009-implementation-stack-python-cli-v1.md) | V1 implementation stack: Python 3 CLI baseline; portable exe deferred | Accepted |
+| [0010](0010-reporting-stack-libraries-v1.md) | Reporting libraries: stdlib CSV/HTML; openpyxl XLSX; fpdf2 PDF | Accepted |
+| [0011](0011-site-controllers-spreadsheet-v1-contract.md) | `site-controllers` CSV v1 columns + unknown-column warnings | Accepted |

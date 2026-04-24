@@ -11,7 +11,7 @@ Move this repository from "requirements and examples only" to a working baseline
 
 ## Current status
 
-- **2026-04-25:** Same baseline as 2026-04-24, plus **commissioning_report** hooks for **multi-point `bacnet-modulation-sweep`** (`--command-percents`), **session RAT** via `session_return_air_temperature_key` when BACnet RAT is absent, optional **`record-step`** sweep on pass (`--modulation-command-percents` / `--no-run-modulation-on-pass`), **`skip_when`** + session truthy gate for **`record-step skipped`** (CHW readiness), and **`print-job-graph`** counts **`skip_gated_steps`** / **`modulation_action_steps`** per controller. Remaining v1 gaps: **portable Windows packaging**, **Docker BACnet sim lab**, **full commissioning flow engine** (guided steps beyond CLI slices), **unified heat/cool report model** + PDF/XLSX. See `README.md` and `docs/project.md`.
+- **2026-04-26:** Same baseline as 2026-04-25, plus **Phase 0 lock-ins:** ADR **0009** (Python CLI v1 stack; portable exe deferred), **0010** (reporting libs: stdlib CSV/HTML, **openpyxl** XLSX, **fpdf2** PDF), **0011** (`site-controllers` v1 column contract + **`unknown_controller_csv_column`** warnings for extra CSV headers), canonical table **`docs/schema/site-controllers-v1.csv.md`**, and **v1 profile contract** paragraph in **`docs/examples/pass-fail-defaults.recommended.md`**. Remaining v1 gaps: **portable Windows packaging**, **full commissioning flow engine** (guided steps beyond CLI slices), **unified heat/cool report model** polish, **per-row sheet overrides**. See `README.md` and `docs/project.md`.
 - Product intent is tracked in `docs/project.md`.
 - This plan remains the high-level execution sequence; treat unchecked items as backlog unless superseded by newer ADRs. **Checklist:** `[x]` = shipped enough for baseline; notes in-line mark partials.
 
@@ -21,11 +21,11 @@ Use this order to reduce rework and unblock parallel work later.
 
 ### Phase 0 — lock critical decisions first
 
-- [ ] Create ADR: implementation stack and packaging target (**current code:** Python 3 CLI baseline; **portable exe / Go+Fyne** still TBD — see `docs/project.md` → *Remaining to plan*).
+- [x] Create ADR: implementation stack and packaging target — **ADR 0009:** Python 3 CLI baseline for v1; **Windows portable exe** packaging/signing still TBD (`docs/project.md`).
 - [x] Create ADR: internal job model and file format — **partial:** runtime **`state/runtime-job.json`** + import report contract documented via compiler + examples; formal ADR for long-lived schema versioning still optional.
-- [ ] Create ADR: reporting stack (PDF + CSV/XLSX library choices and schema) — **partial:** CSV export slice exists (`export-run-summary --output-csv`).
-- [ ] Freeze "required columns" for `site-controllers` spreadsheet v1 (template + compiler enforce core columns; **120+ row** column spec still open).
-- [ ] Freeze v1 pass/fail default fields that must appear in every profile (recommended defaults live in `docs/examples/` markdown; **profile contract freeze** open).
+- [x] Create ADR: reporting stack (PDF + CSV/XLSX library choices) — **ADR 0010:** stdlib CSV/HTML, **openpyxl** XLSX, **fpdf2** PDF for unified commissioning export; long-lived integrator schema ADR still optional.
+- [x] Freeze "required columns" for `site-controllers` spreadsheet v1 — **ADR 0011** + **`docs/schema/site-controllers-v1.csv.md`**; compiler warns on unknown headers; **120+ row** performance / extended column set still open.
+- [x] Freeze v1 pass/fail default fields that must appear in every profile — **partial:** **`docs/examples/pass-fail-defaults.recommended.md`** now includes a **v1 profile contract** checklist; numeric thresholds remain **profile-authored** for production.
 
 **Deliverables**
 

@@ -2,9 +2,9 @@
 
 Audience: future you. Update when intent, behavior, or exports change.
 
-## Project maturity snapshot (2026-04-25)
+## Project maturity snapshot (2026-04-26)
 
-- Repository state: **documentation plus Python CLIs** (`tools/`: simulator list verification, import compiler with **duplicate BACnet/IP endpoint warnings**, runtime commissioning helpers including **validate-import** dry compile, **print-job-graph** (per-controller **skip_gated_steps** / **modulation_action_steps** counts from compiled flow), **flow/session inspection**, **run summary export** + optional **CSV**, **audited flow re-init**, **BACnet façade** [`tools/bacnet/adapter.py`](../tools/bacnet/adapter.py), **profile allowlisted BACnet read/write**, **`point_checkout`** batch reads, CLI flags **`--apdu-timeout`** / echoed **`bacnet_timeouts`** in artifacts, **record-step** policy (point checkout gate, **skip_when** session gate for skips, optional **modulation sweep** on pass), and **`bacnet-modulation-sweep`** with **multi-setpoint** and **session RAT** fallback). **Unit tests** include a **loopback BACnet fake peer** (BACpypes3-shaped frames) exercising **`bacnet-read`**, **`dry-run-bacnet-write --execute`**, **`bacnet-point-checkout`**, and modulation paths without field hardware.
+- Repository state: **documentation plus Python CLIs** (`tools/`: simulator list verification, import compiler with **duplicate BACnet/IP endpoint warnings** and **unknown CSV column** warnings per **ADR 0011**, runtime commissioning helpers including **validate-import** dry compile, **print-job-graph** (per-controller **skip_gated_steps** / **modulation_action_steps** counts from compiled flow), **flow/session inspection**, **run summary export** + optional **CSV**, **audited flow re-init**, **BACnet façade** [`tools/bacnet/adapter.py`](../tools/bacnet/adapter.py), **profile allowlisted BACnet read/write**, **`point_checkout`** batch reads, CLI flags **`--apdu-timeout`** / echoed **`bacnet_timeouts`** in artifacts, **record-step** policy (point checkout gate, **skip_when** session gate for skips, optional **modulation sweep** on pass), and **`bacnet-modulation-sweep`** with **multi-setpoint** and **session RAT** fallback). **Unit tests** include a **loopback BACnet fake peer** (BACpypes3-shaped frames) exercising **`bacnet-read`**, **`dry-run-bacnet-write --execute`**, **`bacnet-point-checkout`**, and modulation paths without field hardware. **ADRs 0009–0011** lock **v1 stack** (Python CLI), **reporting libraries** (stdlib + openpyxl + fpdf2), and **`site-controllers` v1 columns** ([`docs/schema/site-controllers-v1.csv.md`](schema/site-controllers-v1.csv.md)).
 - This document is the source of truth for product intent; align runnable steps with [`README.md`](../README.md).
 - Active implementation roadmap lives in: [`docs/plans/2026-04-21-v1-foundation-plan.md`](plans/2026-04-21-v1-foundation-plan.md).
 
@@ -237,7 +237,7 @@ Runtime commands (init-run through export-run-summary, record-step, simulator/BI
 
 These are the main gaps once requirements feel “complete enough” to start coding:
 
-- **Spreadsheet column spec** — frozen header row for **120+ controllers**, which columns are **required vs optional** per `profile_id`, and how **object overrides** (if any) serialize from sheet cells.
+- **Spreadsheet column spec** — **v1 required/optional core** is frozen in [**`docs/schema/site-controllers-v1.csv.md`**](schema/site-controllers-v1.csv.md) and **ADR 0011**; full **120+ controller** extended headers and **per-row object overrides** remain to design.
 - **Sheet → runtime compiler** — **shipped baseline** in `tools/import/compile_job.py` + `compile-import` / `validate-import`; optional **generated JSON** debugging workflow and **large-sheet** performance targets still to lock.
 - **HRV effectiveness equation** — lock **sensor placement** vs math for each program version; until then keep **advisory** only.
 - **RAT proxy rules** — if using **HRV return** for **FCU** commissioning, document **eligibility** and UI warnings.
@@ -254,5 +254,5 @@ These are the main gaps once requirements feel “complete enough” to start co
 - **MSV contracts:** canonical **state numbers** per test type across profiles, or fully profile-local only?
 - **Half-design reference:** optional hysteresis when comparing **live tachometer value** to the **session-stored** value captured after auto-adjust + operator confirm.
 - **Bluetooth / external sensors:** deferred — pairing, calibration, audit trail (who accepted which reading).
-- **PDF / XLSX stack:** libraries acceptable for FOSS + Windows portable build.
+- **PDF / XLSX stack:** **locked for v1** — **openpyxl** (XLSX), **fpdf2** (PDF table); see **ADR 0010** and `requirements.txt`.
 - **Log format:** binary, JSON lines, CSV, or rotating text; retention on disk.
