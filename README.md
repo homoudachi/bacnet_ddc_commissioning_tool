@@ -43,6 +43,8 @@ python3 tools/runtime/app.py validate-import --run-dir artifacts/runtime-run
 
 # 2c) Print controller / flow / object-count summary (requires compile-import first)
 python3 tools/runtime/app.py print-job-graph --run-dir artifacts/runtime-run
+# Each line includes skip_gated_steps= (skippable + non-empty skip_when) and
+# modulation_action_steps= (steps with modulate_actuator_log_sat_for_report).
 
 # 3) Initialize commissioning flow state for one controller
 python3 tools/runtime/app.py init-flow \

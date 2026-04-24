@@ -2,9 +2,9 @@
 
 Audience: future you. Update when intent, behavior, or exports change.
 
-## Project maturity snapshot (2026-04-24)
+## Project maturity snapshot (2026-04-25)
 
-- Repository state: **documentation plus Python CLIs** (`tools/`: simulator list verification, import compiler with **duplicate BACnet/IP endpoint warnings**, runtime commissioning helpers including **validate-import** dry compile, **print-job-graph**, **flow/session inspection**, **run summary export** + optional **CSV**, **audited flow re-init**, **BACnet façade** [`tools/bacnet/adapter.py`](../tools/bacnet/adapter.py), **profile allowlisted BACnet read/write**, **`point_checkout`** batch reads, CLI flags **`--apdu-timeout`** / echoed **`bacnet_timeouts`** in artifacts, and **record-step** policy for failed/pending outcomes). **Unit tests** include a **loopback BACnet fake peer** (BACpypes3-shaped frames) exercising **`bacnet-read`**, **`dry-run-bacnet-write --execute`**, and **`bacnet-point-checkout`** without field hardware.
+- Repository state: **documentation plus Python CLIs** (`tools/`: simulator list verification, import compiler with **duplicate BACnet/IP endpoint warnings**, runtime commissioning helpers including **validate-import** dry compile, **print-job-graph** (per-controller **skip_gated_steps** / **modulation_action_steps** counts from compiled flow), **flow/session inspection**, **run summary export** + optional **CSV**, **audited flow re-init**, **BACnet façade** [`tools/bacnet/adapter.py`](../tools/bacnet/adapter.py), **profile allowlisted BACnet read/write**, **`point_checkout`** batch reads, CLI flags **`--apdu-timeout`** / echoed **`bacnet_timeouts`** in artifacts, **record-step** policy (point checkout gate, **skip_when** session gate for skips, optional **modulation sweep** on pass), and **`bacnet-modulation-sweep`** with **multi-setpoint** and **session RAT** fallback). **Unit tests** include a **loopback BACnet fake peer** (BACpypes3-shaped frames) exercising **`bacnet-read`**, **`dry-run-bacnet-write --execute`**, **`bacnet-point-checkout`**, and modulation paths without field hardware.
 - This document is the source of truth for product intent; align runnable steps with [`README.md`](../README.md).
 - Active implementation roadmap lives in: [`docs/plans/2026-04-21-v1-foundation-plan.md`](plans/2026-04-21-v1-foundation-plan.md).
 

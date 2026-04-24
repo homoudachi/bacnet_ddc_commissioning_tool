@@ -11,7 +11,7 @@ Move this repository from "requirements and examples only" to a working baseline
 
 ## Current status
 
-- **2026-04-24:** Runnable **Python 3** CLIs (`tools/`), growing **unittest** suite (run `python3 -m unittest discover -s tests -p 'test_*.py'`), GitHub Actions, **BACnet façade** ([`tools/bacnet/adapter.py`](../bacnet/adapter.py)), **loopback BACnet integration tests**, **export-run-summary** CSV, **validate-import** / **print-job-graph**, flow/session + **record-step** policy. Remaining v1 gaps: **portable Windows packaging**, **Docker BACnet sim lab**, **full commissioning flow engine** (guided steps beyond reads), **unified heat/cool report model** + PDF/XLSX. See `README.md` and `docs/project.md`.
+- **2026-04-25:** Same baseline as 2026-04-24, plus **commissioning_report** hooks for **multi-point `bacnet-modulation-sweep`** (`--command-percents`), **session RAT** via `session_return_air_temperature_key` when BACnet RAT is absent, optional **`record-step`** sweep on pass (`--modulation-command-percents` / `--no-run-modulation-on-pass`), **`skip_when`** + session truthy gate for **`record-step skipped`** (CHW readiness), and **`print-job-graph`** counts **`skip_gated_steps`** / **`modulation_action_steps`** per controller. Remaining v1 gaps: **portable Windows packaging**, **Docker BACnet sim lab**, **full commissioning flow engine** (guided steps beyond CLI slices), **unified heat/cool report model** + PDF/XLSX. See `README.md` and `docs/project.md`.
 - Product intent is tracked in `docs/project.md`.
 - This plan remains the high-level execution sequence; treat unchecked items as backlog unless superseded by newer ADRs. **Checklist:** `[x]` = shipped enough for baseline; notes in-line mark partials.
 
@@ -77,7 +77,7 @@ Use this order to reduce rework and unblock parallel work later.
 - [x] Implement point checkout flow — **v1:** **`bacnet-point-checkout`** CLI; **`record-step`** can run the same reads when a profile step uses **`step_type: bacnet_point_checkout`** or **`run_point_checkout_on_pass`**; results append **`artifacts/commissioning_report.json`**; **guided UI** still future.
 - [ ] Implement airflow adjustment + technician confirmation checkpoints.
 - [ ] Implement cooling valve stroke test (no CHW) with mandatory human confirmation records.
-- [ ] Implement heating/cooling modulation test scaffolds with skippable/manual-pass controls — **partial:** **`bacnet-modulation-sweep`** (multi **`--command-percents`**, session RAT via **`session_return_air_temperature_key`**) + optional **`record-step`** sweep on pass; **`skip_when`** + session truthy gate for **`record-step skipped`**; **not** full guided step engine / skip UI.
+- [ ] Implement heating/cooling modulation test scaffolds with skippable/manual-pass controls — **partial:** **`bacnet-modulation-sweep`** (multi **`--command-percents`**, session RAT via **`session_return_air_temperature_key`**) + optional **`record-step`** sweep on pass; **`skip_when`** + session truthy gate for **`record-step skipped`**; **`print-job-graph`** surfaces **`skip_gated_steps`** / **`modulation_action_steps`**; **not** full guided step engine / skip UI.
 
 **Deliverables**
 
@@ -89,7 +89,7 @@ Use this order to reduce rework and unblock parallel work later.
 
 - [ ] Implement report model for unified heating/cooling output tables (SAT + RAT + command + time/step).
 - [x] Export CSV first — **partial:** **`export-run-summary --output-csv`** (controller × flow status rollup); **not** yet the unified modulation table contract.
-- [x] **Partial:** append-only **`export-commissioning-report`** / **`artifacts/commissioning_report.json`** for **point checkout after step** and **CLI-appended thermal modulation samples/batches** (`append-commissioning-modulation-sample`, **`append-commissioning-modulation-batch`**); CSV export of modulation rows via **`export-commissioning-report --output-csv`**. **Not** yet automated profile **`modulate_actuator_log_sat_for_report`** engine or PDF tables.
+- [x] **Partial:** append-only **`export-commissioning-report`** / **`artifacts/commissioning_report.json`** for **point checkout after step**, **CLI-appended thermal modulation samples/batches**, **`bacnet-modulation-sweep`** / optional **`record-step`** sweep rows (**`thermal_modulation_sweep`** with BACnet vs session **`read_source`** in CSV). **Not** yet a single “unified table” export contract across all entry kinds, nor PDF tables.
 - [ ] Then PDF/XLSX from same normalized dataset.
 - [ ] Package portable Windows executable and document signing/release process.
 - [ ] Add release checklist and smoke-test matrix.

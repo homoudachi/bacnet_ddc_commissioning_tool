@@ -355,6 +355,8 @@ class RuntimeCliTests(unittest.TestCase):
         self.assertIn("read_allowlist=", result.stdout)
         self.assertIn("point_checkout=", result.stdout)
         self.assertRegex(result.stdout, r"FCU-01A.*point_checkout=2")
+        self.assertRegex(result.stdout, r"skip_gated_steps=1")
+        self.assertRegex(result.stdout, r"modulation_action_steps=2")
 
         lines = (
             self.run_dir / "logs" / "events.jsonl"

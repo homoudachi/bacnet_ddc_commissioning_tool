@@ -387,6 +387,21 @@ def cmd_print_job_graph(args: argparse.Namespace) -> int:
         label = str(row.get("controller_label", "")).strip()
         flow = row.get("commissioning_flow", [])
         step_count = len(flow) if isinstance(flow, list) else 0
+        skip_gated_steps = 0
+        modulation_action_steps = 0
+        if isinstance(flow, list):
+            for st in flow:
+                if not isinstance(st, dict):
+                    continue
+                raw_sw = st.get("skip_when")
+                if (
+                    st.get("skippable") is True
+                    and isinstance(raw_sw, list)
+                    and any(str(c).strip() for c in raw_sw)
+                ):
+                    skip_gated_steps += 1
+                if _find_modulate_actuator_action(st) is not None:
+                    modulation_action_steps += 1
         objs = row.get("objects_by_id", {})
         obj_count = len(objs) if isinstance(objs, dict) else 0
         w_allow = row.get("commissioning_write_allowlist", [])
@@ -398,7 +413,8 @@ def cmd_print_job_graph(args: argparse.Namespace) -> int:
         lines.append(
             f"  {label} profile_id={row.get('profile_id')} "
             f"steps={step_count} objects_by_id={obj_count} "
-            f"write_allowlist={wn} read_allowlist={rn} point_checkout={pc_count}"
+            f"write_allowlist={wn} read_allowlist={rn} point_checkout={pc_count} "
+            f"skip_gated_steps={skip_gated_steps} modulation_action_steps={modulation_action_steps}"
         )
 
     text = "\n".join(lines) + "\n"
