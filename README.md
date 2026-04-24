@@ -17,14 +17,14 @@
 ## Windows single-file executable
 
 - Build (on Windows): **[docs/packaging/windows-exe.md](docs/packaging/windows-exe.md)** — produces **`dist/bacnet-commissioning.exe`** via **PyInstaller** (`tools/packaging/runtime.spec`). CI builds on **`windows-latest`** (`.github/workflows/windows-exe.yml`) and uploads the exe as an artifact. Signing is not configured.
-- Pre-release checks: **[docs/packaging/release-checklist.md](docs/packaging/release-checklist.md)** (tests, import validate, optional Docker smoke, exe smoke matrix). CI also runs **`tools/simulator/commissioning_export_smoke.sh`** (empty commissioning report → unified CSV/HTML/XLSX/PDF).
+- Pre-release checks: **[docs/packaging/release-checklist.md](docs/packaging/release-checklist.md)** (tests, import validate, optional Docker smoke, exe smoke matrix). CI also runs **`tools/simulator/commissioning_export_smoke.sh`** (empty commissioning report → unified CSV/HTML/XLSX/PDF + customer HTML/PDF) and **`tools/import/benchmark_compile.py`** (120-row synthetic compile).
 
 ## Current implementation slice
 
 - List-first verification CLI: **[tools/simulator/list_verifier.py](tools/simulator/list_verifier.py)**
 - Initial tests: **[tests/test_list_verifier.py](tests/test_list_verifier.py)**
 - ADR lock-ins: **[docs/adr/](docs/adr/)** (see index; includes BACnet, Docker sim, Phase 0, Windows exe)
-- Import compiler CLI: **[tools/import/compile_job.py](tools/import/compile_job.py)** — optional per-row **`bacnet_object_<logical_id>`** columns override BACnet **object instance** numbers from the profile (see **[`docs/schema/site-controllers-v1.csv.md`](docs/schema/site-controllers-v1.csv.md)**).
+- Import compiler CLI: **[tools/import/compile_job.py](tools/import/compile_job.py)** — optional per-row **`bacnet_object_<logical_id>`** columns override BACnet **object instance** numbers from the profile (see **[`docs/schema/site-controllers-v1.csv.md`](docs/schema/site-controllers-v1.csv.md)**). Large-sheet timing: **[tools/import/benchmark_compile.py](tools/import/benchmark_compile.py)**.
 - Import compiler tests: **[tests/test_import_compiler.py](tests/test_import_compiler.py)**
 - Runtime skeleton CLI: **[tools/runtime/app.py](tools/runtime/app.py)**
 - BACnet façade (probe + present-value read/write): **[tools/bacnet/adapter.py](tools/bacnet/adapter.py)**

@@ -16,6 +16,7 @@ Services (profile **`bacnet-dev`**):
 |-----------|----------|-----------------|--------|
 | `bacnet-fcu-sim` | `127.0.0.1:47808` | 21001 | `SIM_PROFILE=fcu` (default): FCU object instances |
 | `bacnet-fcu-sim-02` | `127.0.0.1:47809` | 21002 | FCU profile; different SAT/MSV via `SIM_*` |
+| `bacnet-fcu-sim-03` | `127.0.0.1:47811` | 21003 | Extra FCU-shaped device for multi-controller lab smoke |
 | `bacnet-hrv-sim` | `127.0.0.1:47810` | 22001 | `SIM_PROFILE=hrv`: MSV instance **60**, temps, fan cmds (see `server.py`) |
 
 ## Smoke test with the runtime CLI
@@ -38,9 +39,9 @@ python3 tools/runtime/app.py verify-bip-list \
   --retries 2
 ```
 
-Expected: `"strict_pass": true`, `"total": 3`, all controllers **`reachable_verified`**.
+Expected: `"strict_pass": true`, `"total": 4`, all controllers **`reachable_verified`**.
 
-After probes, CI also runs **`bacnet-read`** (FCU **`ai_sat`**, HRV **`msv_test_mode`**, **`ai_supply_air_temperature`**, **`av_supply_fan_command`**, **`av_exhaust_fan_command`**), **`dry-run-bacnet-write --execute`** on **`msv_test_mode`** (FCU + HRV) plus **analog** writes on FCU **`av_electric_heat_command`** / **`ao_chw_valve`** and HRV fan commands (each with read-back), and **`bacnet-point-checkout`** for both profiles.
+After probes, CI also runs **`bacnet-read`** (FCU **`ai_sat`** on all three FCU rows, HRV **`msv_test_mode`**, **`ai_supply_air_temperature`**, **`av_supply_fan_command`**, **`av_exhaust_fan_command`**), **`dry-run-bacnet-write --execute`** on **`msv_test_mode`** (FCU + HRV) plus **analog** writes on FCU **`av_electric_heat_command`** / **`ao_chw_valve`** and HRV fan commands (each with read-back), and **`bacnet-point-checkout`** for both profiles.
 
 ## Stop
 

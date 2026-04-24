@@ -27,6 +27,14 @@ jobs:
       - name: Build single-file exe
         run: python -m PyInstaller tools/packaging/runtime.spec
 
+      - name: Optional Authenticode sign (repository secrets)
+        shell: pwsh
+        env:
+          WINDOWS_CODESIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
+          WINDOWS_CODESIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PFX_PASSWORD }}
+          WINDOWS_CODESIGN_TIMESTAMP_URL: ${{ secrets.WINDOWS_CODESIGN_TIMESTAMP_URL }}
+        run: pwsh -File tools/packaging/sign_windows_exe.ps1
+
       - name: Smoke test
         run: dist/bacnet-commissioning.exe --help
 

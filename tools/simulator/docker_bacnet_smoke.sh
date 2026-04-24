@@ -47,11 +47,12 @@ echo "$SUMMARY"
 echo "$SUMMARY" | python3 -c "import json,sys
 s=json.load(sys.stdin)
 assert s.get('strict_pass') is True, s
-assert s.get('total')==3, s
+assert s.get('total')==4, s
 assert s.get('unresolved')==0, s
 rows={r['controller_label']:r for r in s.get('rows',[])}
 assert rows['FCU-DOCKER']['status']=='reachable_verified'
 assert rows['FCU-DOCKER-B']['status']=='reachable_verified'
+assert rows['FCU-DOCKER-C']['status']=='reachable_verified'
 assert rows['HRV-DOCKER']['status']=='reachable_verified'
 "
 
@@ -60,6 +61,7 @@ BACNET_READ_FLAGS="--timeout-seconds 2.0 --retries 3"
 for pair in \
   "FCU-DOCKER:ai_sat" \
   "FCU-DOCKER-B:ai_sat" \
+  "FCU-DOCKER-C:ai_sat" \
   "HRV-DOCKER:msv_test_mode" \
   "HRV-DOCKER:ai_supply_air_temperature" \
   "HRV-DOCKER:av_supply_fan_command" \

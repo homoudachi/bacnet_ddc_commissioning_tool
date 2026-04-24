@@ -47,6 +47,18 @@ dist\bacnet-commissioning.exe --help
 
 **When to skip signing:** internal tools, lab-only builds, or small pilots where technicians already trust the source—**unsigned is fine** if you accept the extra SmartScreen/IT friction. **When to add it:** shipping broadly to customers or **managed Windows** estates where **AppLocker / SmartScreen policy** blocks unsigned executables.
 
+### CI (GitHub Actions)
+
+The **windows-exe** workflow runs **`tools/packaging/sign_windows_exe.ps1`** after PyInstaller when these **repository secrets** are set (all optional; if `WINDOWS_CODESIGN_PFX_BASE64` is missing, signing is skipped):
+
+| Secret | Purpose |
+|--------|---------|
+| `WINDOWS_CODESIGN_PFX_BASE64` | Base64-encoded **PFX** containing the code-signing cert + private key |
+| `WINDOWS_CODESIGN_PFX_PASSWORD` | PFX password (may be empty) |
+| `WINDOWS_CODESIGN_TIMESTAMP_URL` | RFC3161 timestamp URL (default in script: DigiCert) |
+
+The Windows runner must include **SignTool** (Windows SDK); the script searches under `Program Files (x86)\Windows Kits\10\bin`.
+
 ## Notes
 
 - **Antivirus** sometimes flags PyInstaller bundles; report false positives to your AV vendor if needed.

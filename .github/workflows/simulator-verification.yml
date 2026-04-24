@@ -28,6 +28,10 @@ jobs:
         run: |
           python3 -m unittest discover -s tests -p 'test_*.py'
 
+      - name: Import compile benchmark (120-row synthetic sheet)
+        run: |
+          python3 tools/import/benchmark_compile.py --rows 120
+
       - name: Commissioning report export smoke (empty stub)
         run: |
           tools/simulator/commissioning_export_smoke.sh

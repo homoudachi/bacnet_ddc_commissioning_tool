@@ -41,7 +41,7 @@ A **runnable** single-device simulator ships in this repository:
 - Image source: `docker/simulator/bacnet-device/` (Python + bacpypes3 UDP server)
 - Runbook: `docker/simulator/README.md`
 
-CI runs `tools/simulator/docker_bacnet_smoke.sh` (builds images, starts **three** sim containers on `127.0.0.1:47808`–`47810`, then **`verify-bip-list --strict`**, **`bacnet-read`**, **`dry-run-bacnet-write --execute`** + read-back on **MSV and analog** points (FCU heat / CHW valve; HRV supply and exhaust fan commands), **`bacnet-point-checkout`**, then tears down).
+CI runs `tools/simulator/docker_bacnet_smoke.sh` (builds images, starts **four** sim containers on `127.0.0.1:47808`–`47811` (three FCU-shaped + one HRV-shaped), then **`verify-bip-list --strict`**, **`bacnet-read`**, **`dry-run-bacnet-write --execute`** + read-back on **MSV and analog** points (FCU heat / CHW valve; HRV supply and exhaust fan commands), **`bacnet-point-checkout`**, then tears down).
 
 ## Docker topology profiles (longer-term lab spec)
 
@@ -198,4 +198,4 @@ Use this checklist in order:
 
 ## Verification status
 
-- **2026-04-26:** `docker compose … --profile bacnet-dev up --build` + `tools/simulator/docker_bacnet_smoke.sh` exercises **`verify-bip-list --strict`** against three sim containers (two FCU + one HRV profile).
+- **2026-04-27:** `docker compose … --profile bacnet-dev up --build` + `tools/simulator/docker_bacnet_smoke.sh` exercises **`verify-bip-list --strict`** against four sim containers (three FCU + one HRV profile).

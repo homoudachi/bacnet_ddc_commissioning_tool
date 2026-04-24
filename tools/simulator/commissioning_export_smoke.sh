@@ -24,7 +24,9 @@ python3 "$ROOT/tools/runtime/app.py" export-commissioning-report \
   --output-csv-unified "$RUN_DIR/artifacts/export-unified.csv" \
   --output-html "$RUN_DIR/artifacts/export.html" \
   --output-xlsx "$RUN_DIR/artifacts/export.xlsx" \
-  --output-pdf "$RUN_DIR/artifacts/export.pdf"
+  --output-pdf "$RUN_DIR/artifacts/export.pdf" \
+  --output-customer-html "$RUN_DIR/artifacts/export-customer.html" \
+  --output-customer-pdf "$RUN_DIR/artifacts/export-customer.pdf"
 
 python3 - "$RUN_DIR" "$ROOT" <<'PY'
 import csv
@@ -40,8 +42,10 @@ uni = run / "artifacts" / "export-unified.csv"
 html = run / "artifacts" / "export.html"
 xlsx = run / "artifacts" / "export.xlsx"
 pdf = run / "artifacts" / "export.pdf"
+chtml = run / "artifacts" / "export-customer.html"
+cpdf = run / "artifacts" / "export-customer.pdf"
 
-for p in (stub, uni, html, xlsx, pdf):
+for p in (stub, uni, html, xlsx, pdf, chtml, cpdf):
     if not p.is_file():
         print(f"error: missing output {p}")
         sys.exit(2)
@@ -74,6 +78,15 @@ if "<!DOCTYPE html>" not in text or "prompt_id" not in text:
 
 if not pdf.read_bytes().startswith(b"%PDF"):
     print("error: PDF export missing %PDF magic")
+    sys.exit(2)
+
+cht = chtml.read_text(encoding="utf-8")
+if "thermal modulation" not in cht.lower() or "(no modulation entries)" not in cht:
+    print("error: customer HTML export missing expected content")
+    sys.exit(2)
+
+if not cpdf.read_bytes().startswith(b"%PDF"):
+    print("error: customer PDF export missing %PDF magic")
     sys.exit(2)
 
 print("commissioning_export_smoke_ok=true")

@@ -20,4 +20,5 @@ Accepted
 ## Consequences
 
 - PRs that add/rename/remove unified columns must update **`COMMISSIONING_REPORT_UNIFIED_FIELDNAMES`** and **`COLUMN_HELP`** in `tools/schema/gen_commissioning_report_unified_csv_doc.py`, then run **`python3 tools/schema/gen_commissioning_report_unified_csv_doc.py`** to refresh the markdown (and ADR if versioning rules change).
+- **Customer modulation table** (`--output-customer-html` / `--output-customer-pdf`) uses a **narrow** fixed column set (**`COMMISSIONING_REPORT_CUSTOMER_MODULATION_FIELDNAMES`** in `tools/runtime/app.py`) over **`_commissioning_report_modulation_rows`** only; it is **not** part of the unified CSV v1 tuple and may evolve independently for shareable heat/cool summaries.
 - Customer-branded PDF layouts (ADR 0010) still sit on top of this flat contract until a dedicated template ADR exists.

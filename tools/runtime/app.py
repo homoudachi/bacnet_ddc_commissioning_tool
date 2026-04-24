@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from typing import Any
 import csv
 import html
 import json
@@ -158,6 +159,43 @@ def _next_open_step(steps: list[dict]) -> dict | None:
                 "status": status,
             }
     return None
+
+
+def _compact_flow_guidance(steps: list[dict]) -> dict[str, Any]:
+    """Operator-oriented commissioning flow summary (CLI guided slice)."""
+    complete = _sequencing_complete_statuses()
+    items: list[dict[str, Any]] = []
+    for item in steps:
+        if not isinstance(item, dict):
+            continue
+        sid = str(item.get("step_id", "")).strip()
+        if not sid:
+            continue
+        st = str(item.get("status", "pending"))
+        row: dict[str, Any] = {
+            "step_id": sid,
+            "label": str(item.get("label", "")).strip(),
+            "status": st,
+        }
+        arms = str(item.get("arms_test_mode_state_key", "")).strip()
+        if arms:
+            row["arms_test_mode_state_key"] = arms
+        stype = str(item.get("step_type", "")).strip()
+        if stype and stype != "standard":
+            row["step_type"] = stype
+        if item.get("skippable") is True:
+            raw_sw = item.get("skip_when")
+            if isinstance(raw_sw, list) and any(str(c).strip() for c in raw_sw):
+                row["skip_when"] = [str(c).strip() for c in raw_sw if str(c).strip()]
+        items.append(row)
+    pending = sum(1 for i in items if str(i.get("status", "")) not in complete)
+    return {
+        "step_count": len(items),
+        "pending_step_count": pending,
+        "all_sequencing_complete": pending == 0,
+        "next_open_step": _next_open_step(steps),
+        "steps": items,
+    }
 
 
 def _is_terminal_prereq_status(status: str) -> bool:
@@ -819,6 +857,42 @@ def cmd_show_flow(args: argparse.Namespace) -> int:
         },
     )
     print(json.dumps(flow_state, sort_keys=True))
+    return 0
+
+
+def cmd_commissioning_guided_next(args: argparse.Namespace) -> int:
+    """Print compact commissioning guidance: next step + step list (CLI guided slice)."""
+    run_dir = args.run_dir
+    logs_path = run_dir / "logs" / "events.jsonl"
+    flow_state_path = _flow_state_path(run_dir, args.controller_label)
+    if not flow_state_path.is_file():
+        print(
+            "error: commissioning flow not initialized; run init-flow first "
+            f"(missing {flow_state_path})"
+        )
+        return 2
+
+    flow_state = json.loads(flow_state_path.read_text(encoding="utf-8"))
+    steps = flow_state.get("steps", [])
+    if not isinstance(steps, list):
+        steps = []
+    session = _load_session_state(run_dir, args.controller_label)
+    session_vals = _session_values_map(session) if session else {}
+
+    payload: dict[str, Any] = {
+        "controller_label": str(flow_state.get("controller_label", "")).strip()
+        or args.controller_label,
+        "profile_id": flow_state.get("profile_id"),
+        "flow_state_json": str(flow_state_path.resolve()),
+        "guidance": _compact_flow_guidance(steps),
+        "session_keys": sorted(session_vals.keys()),
+    }
+    _append_event(
+        logs_path,
+        "commissioning_guided_next_viewed",
+        {"controller_label": args.controller_label},
+    )
+    print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
 
 
@@ -1814,6 +1888,8 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
     want_html = bool(getattr(args, "output_html", None))
     want_xlsx = bool(getattr(args, "output_xlsx", None))
     want_pdf = bool(getattr(args, "output_pdf", None))
+    want_customer_html = bool(getattr(args, "output_customer_html", None))
+    want_customer_pdf = bool(getattr(args, "output_customer_pdf", None))
     allow_empty = bool(getattr(args, "allow_empty", False))
 
     if not src.is_file():
@@ -1824,6 +1900,8 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
             or want_html
             or want_xlsx
             or want_pdf
+            or want_customer_html
+            or want_customer_pdf
         ):
             config = _parse_run_config(run_dir)
             job_id = str(config.get("job_id", "")).strip() or "unknown-job"
@@ -1945,6 +2023,48 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
                 print(
                     f"commissioning_report_pdf=true pdf_path={pdf_path.resolve()}"
                 )
+            if want_customer_html:
+                ch_path = Path(args.output_customer_html)
+                ch_path.parent.mkdir(parents=True, exist_ok=True)
+                mod_rows = _commissioning_report_modulation_rows(doc)
+                norm: list[dict[str, str]] = []
+                for r in mod_rows:
+                    out_row = {k: str(r.get(k, "") or "") for k in COMMISSIONING_REPORT_CUSTOMER_MODULATION_FIELDNAMES}
+                    norm.append(out_row)
+                ch_body = _customer_modulation_rows_to_html(
+                    job_id, str(doc.get("schema_version", "")), norm
+                )
+                ch_path.write_text(ch_body, encoding="utf-8")
+                _append_event(
+                    logs_path,
+                    "commissioning_report_customer_html_exported",
+                    {"html_path": str(ch_path.resolve())},
+                )
+                print(
+                    f"commissioning_report_customer_html=true html_path={ch_path.resolve()}"
+                )
+            if want_customer_pdf:
+                try:
+                    logo_p = _resolve_commissioning_pdf_logo_path(
+                        run_dir, getattr(args, "pdf_logo_image", None)
+                    )
+                    _write_customer_modulation_pdf(
+                        Path(args.output_customer_pdf),
+                        doc,
+                        logo_image_path=logo_p,
+                    )
+                except RuntimeError as err:
+                    print(f"error: {err}")
+                    return 2
+                cp_path = Path(args.output_customer_pdf)
+                _append_event(
+                    logs_path,
+                    "commissioning_report_customer_pdf_exported",
+                    {"pdf_path": str(cp_path.resolve())},
+                )
+                print(
+                    f"commissioning_report_customer_pdf=true pdf_path={cp_path.resolve()}"
+                )
             if (
                 not out_path
                 and not want_csv
@@ -1952,11 +2072,14 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
                 and not want_html
                 and not want_xlsx
                 and not want_pdf
+                and not want_customer_html
+                and not want_customer_pdf
             ):
                 print(
                     "error: --allow-empty requires --output-json and/or "
                     "--output-csv / --output-csv-unified / --output-html / "
-                    "--output-xlsx / --output-pdf"
+                    "--output-xlsx / --output-pdf / --output-customer-html / "
+                    "--output-customer-pdf"
                 )
                 return 2
             return 0
@@ -1964,7 +2087,8 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
             f"error: commissioning report not found at {src}; "
             "nothing recorded yet (e.g. record-step with BACnet point checkout gate). "
             "Use --allow-empty with --output-json and/or --output-csv / "
-            "--output-csv-unified / --output-html / --output-xlsx / --output-pdf "
+            "--output-csv-unified / --output-html / --output-xlsx / --output-pdf / "
+            "--output-customer-html / --output-customer-pdf "
             "for empty outputs."
         )
         return 2
@@ -2077,6 +2201,53 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
             {"pdf_path": str(pdf_path.resolve())},
         )
         print(f"commissioning_report_pdf=true pdf_path={pdf_path.resolve()}")
+
+    customer_html_out = getattr(args, "output_customer_html", None)
+    if customer_html_out:
+        html_path = Path(customer_html_out)
+        html_path.parent.mkdir(parents=True, exist_ok=True)
+        job_id = str(doc.get("job_id", "")).strip() or "unknown-job"
+        schema_v = str(doc.get("schema_version", "")).strip()
+        mod_rows = _commissioning_report_modulation_rows(doc)
+        norm: list[dict[str, str]] = []
+        for r in mod_rows:
+            norm.append(
+                {k: str(r.get(k, "") or "") for k in COMMISSIONING_REPORT_CUSTOMER_MODULATION_FIELDNAMES}
+            )
+        html_body = _customer_modulation_rows_to_html(job_id, schema_v, norm)
+        html_path.write_text(html_body, encoding="utf-8")
+        _append_event(
+            logs_path,
+            "commissioning_report_customer_html_exported",
+            {"html_path": str(html_path.resolve())},
+        )
+        print(
+            f"commissioning_report_customer_html=true html_path={html_path.resolve()}"
+        )
+
+    customer_pdf_out = getattr(args, "output_customer_pdf", None)
+    if customer_pdf_out:
+        try:
+            logo_p = _resolve_commissioning_pdf_logo_path(
+                run_dir, getattr(args, "pdf_logo_image", None)
+            )
+            _write_customer_modulation_pdf(
+                Path(customer_pdf_out),
+                doc,
+                logo_image_path=logo_p,
+            )
+        except RuntimeError as err:
+            print(f"error: {err}")
+            return 2
+        cp_path = Path(customer_pdf_out)
+        _append_event(
+            logs_path,
+            "commissioning_report_customer_pdf_exported",
+            {"pdf_path": str(cp_path.resolve())},
+        )
+        print(
+            f"commissioning_report_customer_pdf=true pdf_path={cp_path.resolve()}"
+        )
 
     if out_path:
         out_path = Path(out_path)
@@ -2652,6 +2823,25 @@ def _commissioning_report_modulation_rows(doc: dict) -> list[dict[str, str]]:
     return rows
 
 
+# Customer-facing heat/cool table: modulation sweep/sample/batch rows only (narrow columns).
+COMMISSIONING_REPORT_CUSTOMER_MODULATION_FIELDNAMES: tuple[str, ...] = (
+    "entry_ts",
+    "kind",
+    "controller_label",
+    "step_id",
+    "report_ref",
+    "technician_name",
+    "command_object_id",
+    "command_percent",
+    "dwell_seconds",
+    "object_id",
+    "property",
+    "status",
+    "value_str",
+    "read_source",
+)
+
+
 COMMISSIONING_REPORT_UNIFIED_FIELDNAMES: tuple[str, ...] = (
     "entry_ts",
     "kind",
@@ -2683,6 +2873,138 @@ COMMISSIONING_REPORT_UNIFIED_FIELDNAMES: tuple[str, ...] = (
     "design_supply_airflow_L_s",
     "prompt_id",
 )
+
+
+def _customer_modulation_rows_to_html(
+    job_id: str, schema_version: str, rows: list[dict[str, str]]
+) -> str:
+    """Printable HTML for customer-facing thermal modulation table (narrow columns)."""
+    title = html.escape(f"Commissioning — thermal modulation — job {job_id}")
+    esc_job = html.escape(job_id)
+    esc_schema = html.escape(schema_version)
+    cols = list(COMMISSIONING_REPORT_CUSTOMER_MODULATION_FIELDNAMES)
+    th = "".join(f"<th>{html.escape(h)}</th>" for h in cols)
+    body_rows: list[str] = []
+    for row in rows:
+        cells = "".join(
+            f"<td>{html.escape(str(row.get(k, '') or ''))}</td>" for k in cols
+        )
+        body_rows.append(f"<tr>{cells}</tr>")
+    colspan = str(len(cols))
+    tbody = (
+        "\n".join(body_rows)
+        if body_rows
+        else f"<tr><td colspan=\"{colspan}\">(no modulation entries)</td></tr>"
+    )
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>{title}</title>
+<style>
+body {{ font-family: system-ui, sans-serif; margin: 1rem; }}
+h1 {{ font-size: 1.15rem; }}
+.sub {{ color: #444; margin-bottom: 0.5rem; font-size: 0.95rem; }}
+table {{ border-collapse: collapse; width: 100%; font-size: 0.9rem; }}
+th, td {{ border: 1px solid #bbb; padding: 0.4rem 0.55rem; text-align: left; vertical-align: top; }}
+th {{ background: #e8eef5; }}
+tr:nth-child(even) td {{ background: #fafafa; }}
+@media print {{ body {{ margin: 0; }} table {{ font-size: 0.82rem; }} }}
+</style>
+</head>
+<body>
+<h1>{title}</h1>
+<p class="sub">Heat/cool modulation reads (sweep, sample, and batch rows). schema_version: {esc_schema}</p>
+<table>
+<thead><tr>{th}</tr></thead>
+<tbody>
+{tbody}
+</tbody>
+</table>
+<p class="sub">Print to PDF from the browser (Ctrl+P) when sharing with customers.</p>
+</body>
+</html>
+"""
+
+
+def _write_customer_modulation_pdf(
+    path: Path,
+    doc: dict,
+    *,
+    logo_image_path: Path | None = None,
+) -> None:
+    """Landscape PDF with wider cells for customer modulation table only."""
+    try:
+        from fpdf import FPDF
+        from fpdf.enums import XPos, YPos
+    except ImportError as err:  # pragma: no cover
+        raise RuntimeError(
+            "fpdf2 is required for --output-customer-pdf; install requirements.txt"
+        ) from err
+
+    rows = _commissioning_report_modulation_rows(doc)
+    headers = list(COMMISSIONING_REPORT_CUSTOMER_MODULATION_FIELDNAMES)
+    job_id = str(doc.get("job_id", "") or "unknown-job")
+    schema_v = str(doc.get("schema_version", "") or "")
+
+    pdf = FPDF(orientation="L", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=10)
+    pdf.add_page()
+    margin_l = pdf.l_margin
+    usable_w = pdf.w - margin_l - pdf.r_margin
+    y_after_logo = _pdf_draw_commissioning_logo_strip(
+        pdf,
+        logo_image_path=logo_image_path,
+        x=margin_l,
+        y=pdf.get_y(),
+    )
+    pdf.set_y(y_after_logo)
+
+    pdf.set_font("Helvetica", size=10)
+    pdf.set_text_color(0, 0, 0)
+    pdf.cell(
+        0,
+        6,
+        _pdf_cell_safe(
+            f"Thermal modulation (heat/cool)  job_id={job_id}  schema={schema_v}", 220
+        ),
+        new_x=XPos.LMARGIN,
+        new_y=YPos.NEXT,
+    )
+    pdf.ln(1)
+
+    col_w = usable_w / len(headers)
+    row_h = 5
+    y_bottom = pdf.h - 10
+
+    def draw_header() -> None:
+        pdf.set_font("Helvetica", style="B", size=6)
+        for h in headers:
+            pdf.cell(col_w, 6, _pdf_cell_safe(h, 28), border=1)
+        pdf.ln()
+
+    draw_header()
+    pdf.set_font("Helvetica", size=6)
+    for row in rows:
+        if pdf.get_y() + row_h > y_bottom:
+            pdf.add_page()
+            draw_header()
+            pdf.set_font("Helvetica", size=6)
+        for h in headers:
+            pdf.cell(
+                col_w,
+                row_h,
+                _pdf_cell_safe(str(row.get(h, "") or ""), 36),
+                border=1,
+            )
+        pdf.ln()
+
+    if not rows:
+        pdf.set_font("Helvetica", size=9)
+        pdf.cell(0, 6, "(no modulation entries)", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    pdf.output(str(path))
 
 
 def _write_commissioning_report_unified_xlsx(path: Path, doc: dict) -> None:
@@ -3254,6 +3576,7 @@ h1 {{ font-size: 1.1rem; }}
 table {{ border-collapse: collapse; width: 100%; font-size: 0.85rem; }}
 th, td {{ border: 1px solid #ccc; padding: 0.35rem 0.5rem; text-align: left; vertical-align: top; }}
 th {{ background: #f0f0f0; }}
+tr:nth-child(even) td {{ background: #fafafa; }}
 @media print {{ body {{ margin: 0; }} table {{ font-size: 0.75rem; }} }}
 </style>
 </head>
@@ -4500,7 +4823,8 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "If no report exists yet: with --output-json write empty stub JSON; "
             "with --output-csv / --output-csv-unified / --output-html / --output-xlsx "
-            "/ --output-pdf write headers-only (or empty HTML / empty sheet / empty PDF). "
+            "/ --output-pdf / --output-customer-html / --output-customer-pdf write "
+            "headers-only (or empty HTML / empty sheet / empty PDF). "
             "At least one output path flag is required."
         ),
     )
@@ -4537,6 +4861,22 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help=(
             "Also write unified rows to a landscape PDF table (.pdf; requires fpdf2)."
+        ),
+    )
+    export_cr.add_argument(
+        "--output-customer-html",
+        type=Path,
+        help=(
+            "Also write a customer-facing HTML table: thermal modulation rows only "
+            "(narrow columns; browser print-to-PDF)."
+        ),
+    )
+    export_cr.add_argument(
+        "--output-customer-pdf",
+        type=Path,
+        help=(
+            "Also write a customer-facing landscape PDF: thermal modulation rows only "
+            "(wider cells than --output-pdf; requires fpdf2)."
         ),
     )
     export_cr.add_argument(
@@ -4815,6 +5155,17 @@ def build_parser() -> argparse.ArgumentParser:
     show_flow.add_argument("--run-dir", required=True, type=Path)
     show_flow.add_argument("--controller-label", required=True)
     show_flow.set_defaults(handler=cmd_show_flow)
+
+    guided_next = subparsers.add_parser(
+        "commissioning-guided-next",
+        help=(
+            "Print compact commissioning flow guidance JSON: next open step, "
+            "per-step status labels, session key list (after init-flow)."
+        ),
+    )
+    guided_next.add_argument("--run-dir", required=True, type=Path)
+    guided_next.add_argument("--controller-label", required=True)
+    guided_next.set_defaults(handler=cmd_commissioning_guided_next)
 
     set_session = subparsers.add_parser(
         "set-session-value",

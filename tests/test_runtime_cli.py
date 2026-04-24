@@ -1155,6 +1155,28 @@ class RuntimeCliTests(unittest.TestCase):
         self.assertIn("flows_listed", events)
         self.assertIn("flow_viewed", events)
 
+        guided = _run_runtime(
+            "commissioning-guided-next",
+            "--run-dir",
+            str(self.run_dir),
+            "--controller-label",
+            "FCU-01A",
+        )
+        self.assertEqual(0, guided.returncode, msg=guided.stdout + guided.stderr)
+        g = json.loads(guided.stdout)
+        self.assertEqual("FCU-01A", g["controller_label"])
+        self.assertIn("guidance", g)
+        self.assertGreater(g["guidance"]["step_count"], 0)
+        self.assertFalse(g["guidance"]["all_sequencing_complete"])
+        self.assertIsNotNone(g["guidance"]["next_open_step"])
+        self.assertEqual(
+            g["guidance"]["next_open_step"]["step_id"],
+            g["guidance"]["steps"][0]["step_id"],
+        )
+        log_tail = (self.run_dir / "logs" / "events.jsonl").read_text(encoding="utf-8")
+        tail_events = [json.loads(x)["event"] for x in log_tail.strip().splitlines()]
+        self.assertIn("commissioning_guided_next_viewed", tail_events)
+
     def test_show_flow_errors_when_controller_has_no_flow_state(self) -> None:
         init_result = _run_runtime(
             "init-run",
@@ -2787,6 +2809,32 @@ class RuntimeCliTests(unittest.TestCase):
         )
         self.assertEqual(0, r4.returncode)
         self.assertTrue(pdf_empty.read_bytes().startswith(b"%PDF"))
+
+        cust_html = self.run_dir / "artifacts" / "empty-customer.html"
+        r4b = _run_runtime(
+            "export-commissioning-report",
+            "--run-dir",
+            str(self.run_dir),
+            "--allow-empty",
+            "--output-customer-html",
+            str(cust_html),
+        )
+        self.assertEqual(0, r4b.returncode)
+        ch = cust_html.read_text(encoding="utf-8")
+        self.assertIn("thermal modulation", ch.lower())
+        self.assertIn("(no modulation entries)", ch)
+
+        cust_pdf = self.run_dir / "artifacts" / "empty-customer.pdf"
+        r4c = _run_runtime(
+            "export-commissioning-report",
+            "--run-dir",
+            str(self.run_dir),
+            "--allow-empty",
+            "--output-customer-pdf",
+            str(cust_pdf),
+        )
+        self.assertEqual(0, r4c.returncode)
+        self.assertTrue(cust_pdf.read_bytes().startswith(b"%PDF"))
 
         uni_empty = self.run_dir / "artifacts" / "empty-unified.csv"
         r5 = _run_runtime(

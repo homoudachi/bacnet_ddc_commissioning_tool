@@ -54,6 +54,7 @@ class DockerBacnetSmokeContractTests(unittest.TestCase):
         for needle in (
             "av_electric_heat_command",
             "ao_chw_valve",
+            "FCU-DOCKER-C:ai_sat",
             "HRV-DOCKER:av_supply_fan_command",
             "HRV-DOCKER:av_exhaust_fan_command",
         ):

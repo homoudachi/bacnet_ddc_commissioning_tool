@@ -65,6 +65,22 @@ services:
     networks:
       - bacnet_lab
 
+  bacnet-fcu-sim-03:
+    build:
+      context: ./bacnet-device
+      dockerfile: Dockerfile
+    image: bacnet-ddc-commissioning-tool/bacnet-fcu-sim:local
+    profiles: ["bacnet-dev"]
+    ports:
+      - "127.0.0.1:47811:47811/udp"
+    environment:
+      DEVICE_INSTANCE: "21003"
+      BACNET_UDP_PORT: "47811"
+      SIM_AI_SAT: "20.5"
+      SIM_MSV_TEST_MODE: "1"
+    networks:
+      - bacnet_lab
+
 networks:
   bacnet_lab:
     driver: bridge

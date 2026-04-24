@@ -7,7 +7,8 @@ Use before tagging a release or handing a **Windows exe** / **Python** drop to t
 | Step | Command / action | Pass |
 |------|------------------|------|
 | Unit tests | `python3 -m unittest discover -s tests -p 'test_*.py'` | All green |
-| Commissioning export | `tools/simulator/commissioning_export_smoke.sh` | Same as CI: empty report → JSON + unified CSV + HTML + XLSX + PDF |
+| Commissioning export | `tools/simulator/commissioning_export_smoke.sh` | Same as CI: empty report → JSON + unified CSV + HTML + XLSX + PDF + customer HTML/PDF |
+| Large-sheet compile bench | `python3 tools/import/benchmark_compile.py --rows 500` | JSON timing line; `compile_ok` true |
 | Unified CSV doc | `python3 tools/schema/gen_commissioning_report_unified_csv_doc.py` | After changing unified columns; commit updated `docs/schema/commissioning-report-unified-csv-v1.md` |
 | Import compile | `python3 tools/runtime/app.py validate-import --run-dir <run>` | `compile_ok` in report |
 | Optional Docker BACnet | `tools/simulator/docker_bacnet_smoke.sh` (requires Docker) | Script exits 0 |
@@ -18,7 +19,7 @@ Use before tagging a release or handing a **Windows exe** / **Python** drop to t
 | Area | Scenario | Notes |
 |------|-----------|--------|
 | Run dir | `init-run` → `compile-import` → `init-flow` | Standard path |
-| List / graph | `print-job-graph`, `list-flows`, `show-flow` | After compile |
+| List / graph | `print-job-graph`, `list-flows`, `show-flow`, `commissioning-guided-next` | After `init-flow` |
 | BACnet read | `bacnet-read` on allowlisted point | Against sim or panel |
 | BACnet write | `dry-run-bacnet-write --execute` | Allowlist + writable |
 | Point checkout | `bacnet-point-checkout` | Profile `point_checkout` |
@@ -26,9 +27,9 @@ Use before tagging a release or handing a **Windows exe** / **Python** drop to t
 | Airflow | `commissioning-airflow-adjust-write`, `commissioning-confirm-tachometer-reference` | Optional profile keys |
 | Manual airflow | `commissioning-record-manual-airflow` | Before pass on `manual_airflow_verification_assisted` steps |
 | Modulation | `bacnet-modulation-sweep` | After `init-flow` |
-| Report | `export-commissioning-report` CSV / unified / HTML / XLSX / PDF | Includes modulation, point checkout, `manual_airflow_measurement`, `tachometer_reference_confirmation`, `airflow_adjust_command` |
+| Report | `export-commissioning-report` CSV / unified / HTML / XLSX / PDF / customer HTML+PDF | Unified = all kinds; customer = modulation-only table |
 
 ## Known gaps (not blocking v1 CLI)
 
-- Code signing for Windows (SmartScreen).
+- Optional **Authenticode** signing: configure GitHub Actions secrets per [`windows-exe.md`](windows-exe.md) (skipped when unset).
 - Full guided UI and closed-loop auto airflow to measured L/s.
