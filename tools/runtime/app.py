@@ -9,19 +9,54 @@ import html
 import json
 import importlib.util
 import shutil
-import subprocess
 import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+from repo_root import repo_root
 
-ROOT = Path(__file__).resolve().parents[2]
+
+ROOT = repo_root()
 IMPORT_COMPILER = ROOT / "tools" / "import" / "compile_job.py"
 SIMULATOR_ORCH = ROOT / "tools" / "simulator" / "orchestrator.py"
 BACNET_ADAPTER = ROOT / "tools" / "bacnet" / "adapter.py"
 
 _bacnet_adapter_singleton = None
+_compile_job_module = None
+_orchestrator_module = None
+
+
+def _compile_job_module_loaded():
+    global _compile_job_module
+    if _compile_job_module is not None:
+        return _compile_job_module
+    spec = importlib.util.spec_from_file_location(
+        "runtime_import_compile_job", IMPORT_COMPILER
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"unable to load import compiler: {IMPORT_COMPILER}")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    _compile_job_module = mod
+    return mod
+
+
+def _orchestrator_module_loaded():
+    global _orchestrator_module
+    if _orchestrator_module is not None:
+        return _orchestrator_module
+    spec = importlib.util.spec_from_file_location(
+        "runtime_simulator_orchestrator", SIMULATOR_ORCH
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"unable to load simulator orchestrator: {SIMULATOR_ORCH}")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    _orchestrator_module = mod
+    return mod
 
 
 def _bacnet_adapter():
@@ -354,30 +389,20 @@ def cmd_compile_import(args: argparse.Namespace) -> int:
     output_json = state_dir / "runtime-job.json"
     report_json = state_dir / "import-report.json"
 
-    cmd = [
-        sys.executable,
-        str(IMPORT_COMPILER),
-        "--controllers-csv",
-        config["controllers_csv"],
-        "--profiles-dir",
-        config["profiles_dir"],
-        "--output-json",
-        str(output_json),
-        "--report-json",
-        str(report_json),
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    if result.stdout:
-        print(result.stdout, end="")
-    if result.stderr:
-        print(result.stderr, end="", file=sys.stderr)
+    cj = _compile_job_module_loaded()
+    code = cj.run_compile(
+        Path(config["controllers_csv"]),
+        Path(config["profiles_dir"]),
+        output_json,
+        report_json,
+    )
 
     _append_event(
         logs_path,
         "import_compiled",
-        {"exit_code": result.returncode, "report_json": str(report_json.resolve())},
+        {"exit_code": code, "report_json": str(report_json.resolve())},
     )
-    return result.returncode
+    return code
 
 
 def cmd_validate_import(args: argparse.Namespace) -> int:
@@ -390,35 +415,25 @@ def cmd_validate_import(args: argparse.Namespace) -> int:
     output_json = out_dir / "runtime-job.json"
     report_json = out_dir / "import-report.json"
 
-    cmd = [
-        sys.executable,
-        str(IMPORT_COMPILER),
-        "--controllers-csv",
-        config["controllers_csv"],
-        "--profiles-dir",
-        config["profiles_dir"],
-        "--output-json",
-        str(output_json),
-        "--report-json",
-        str(report_json),
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    if result.stdout:
-        print(result.stdout, end="")
-    if result.stderr:
-        print(result.stderr, end="", file=sys.stderr)
+    cj = _compile_job_module_loaded()
+    code = cj.run_compile(
+        Path(config["controllers_csv"]),
+        Path(config["profiles_dir"]),
+        output_json,
+        report_json,
+    )
 
     _append_event(
         logs_path,
         "import_validated",
         {
-            "exit_code": result.returncode,
+            "exit_code": code,
             "validation_dir": str(out_dir.resolve()),
             "report_json": str(report_json.resolve()),
         },
     )
     print(f"import_validated=true validation_dir={out_dir.resolve()}")
-    return result.returncode
+    return code
 
 
 def cmd_print_job_graph(args: argparse.Namespace) -> int:
@@ -489,40 +504,28 @@ def cmd_verify_simulator(args: argparse.Namespace) -> int:
     logs_path = run_dir / "logs" / "events.jsonl"
     output_file = artifacts_dir / "simulator" / f"{args.profile}-{args.scenario}.json"
 
-    cmd = [
-        sys.executable,
-        str(SIMULATOR_ORCH),
-        "--controllers-csv",
-        config["controllers_csv"],
-        "--scenarios-dir",
-        config["scenarios_dir"],
-        "--profile",
+    orch = _orchestrator_module_loaded()
+    code = orch.run_orchestrator(
         args.profile,
-        "--scenario",
         args.scenario,
-        "--strict",
-        "--output",
-        "json",
-        "--output-file",
-        str(output_file),
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    if result.stdout:
-        print(result.stdout, end="")
-    if result.stderr:
-        print(result.stderr, end="", file=sys.stderr)
+        strict=True,
+        output="json",
+        output_file=output_file,
+        controllers_csv=Path(config["controllers_csv"]),
+        scenarios_dir=Path(config["scenarios_dir"]),
+    )
 
     _append_event(
         logs_path,
         "simulator_verified",
         {
-            "exit_code": result.returncode,
+            "exit_code": code,
             "profile": args.profile,
             "scenario": args.scenario,
             "artifact_json": str(output_file.resolve()),
         },
     )
-    return result.returncode
+    return code
 
 
 def cmd_init_flow(args: argparse.Namespace) -> int:

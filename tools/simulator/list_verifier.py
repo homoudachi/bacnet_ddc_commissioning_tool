@@ -196,16 +196,22 @@ def emit_summary(
         print(f"{status}={status_counts[status]}")
 
 
-def main() -> int:
-    args = parse_args()
-
+def run_verifier(
+    controllers_csv: Path,
+    scenario_json: Path,
+    *,
+    strict: bool = False,
+    output: str = "text",
+    output_file: Path | None = None,
+) -> int:
+    """Run list-first verification; used by orchestrator and PyInstaller builds."""
     try:
-        controllers = load_controller_rows(args.controllers_csv)
-        scenario_by_label = load_scenario_statuses(args.scenario_json)
+        controllers = load_controller_rows(controllers_csv)
+        scenario_by_label = load_scenario_statuses(scenario_json)
         status_counts, strict_pass, unresolved = evaluate(
             controllers=controllers,
             scenario_by_label=scenario_by_label,
-            strict=args.strict,
+            strict=strict,
         )
     except (OSError, ValueError, json.JSONDecodeError) as err:
         print(f"error: {err}")
@@ -215,16 +221,27 @@ def main() -> int:
         emit_summary(
             total=len(controllers),
             unresolved=unresolved,
-            strict=args.strict,
+            strict=strict,
             strict_pass=strict_pass,
             status_counts=status_counts,
-            output=args.output,
-            output_file=args.output_file,
+            output=output,
+            output_file=output_file,
         )
     except OSError as err:
         print(f"error: {err}")
         return 2
     return 0 if strict_pass else 2
+
+
+def main() -> int:
+    args = parse_args()
+    return run_verifier(
+        args.controllers_csv,
+        args.scenario_json,
+        strict=args.strict,
+        output=args.output,
+        output_file=args.output_file,
+    )
 
 
 if __name__ == "__main__":
