@@ -87,7 +87,7 @@ Use this order to reduce rework and unblock parallel work later.
 
 ### Phase 5 — reporting and Windows distribution
 
-- [ ] Implement report model for unified heating/cooling output tables (SAT + RAT + command + time/step).
+- [x] Implement report model for unified heating/cooling output tables (SAT + RAT + command + time/step) — **partial:** unified export already carries modulation **command** + per-read **SAT/RAT** (and **`read_source`**); **`manual_airflow_measurement`** rows now join the same **CSV/HTML/XLSX/PDF** table with **L/s** + branch + tool for assisted airflow verification. Full **customer table layout** / charting still open.
 - [x] Export CSV first — **partial:** **`export-run-summary --output-csv`** (controller × flow status rollup); **not** yet the unified modulation table contract.
 - [x] **Partial:** append-only **`export-commissioning-report`** / **`artifacts/commissioning_report.json`** for **point checkout after step**, **CLI-appended thermal modulation samples/batches**, **`bacnet-modulation-sweep`** / optional **`record-step`** sweep rows (**`thermal_modulation_sweep`** with BACnet vs session **`read_source`** in CSV). **`export-commissioning-report --output-csv-unified`** flattens **point checkout + modulation** into one CSV (shared column contract v1). **Not** yet PDF tables or a frozen long-lived schema ADR for that CSV.
 - [ ] Then PDF/XLSX from same normalized dataset — **partial:** **`export-commissioning-report`** **`--output-html`** (browser print-to-PDF), **`--output-xlsx`** (**openpyxl**), **`--output-pdf`** (**fpdf2**, landscape table). **Not** yet styled customer PDF templates or charts.

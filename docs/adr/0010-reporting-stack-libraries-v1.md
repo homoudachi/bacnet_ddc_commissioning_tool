@@ -10,7 +10,7 @@ Commissioning outputs must be **technician- and customer-shareable** (CSV, sprea
 
 ## Decision
 
-For **`export-commissioning-report`** unified rows (point checkout + thermal modulation):
+For **`export-commissioning-report`** unified rows (point checkout + **manual airflow measurements** + thermal modulation):
 
 | Output | Library / mechanism | Notes |
 |--------|---------------------|--------|

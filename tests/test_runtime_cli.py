@@ -4572,3 +4572,31 @@ class RuntimeCliTests(unittest.TestCase):
             "--no-run-modulation-on-pass",
         )
         self.assertEqual(0, ok.returncode)
+
+        report_path = self.run_dir / "artifacts" / "commissioning_report.json"
+        self.assertTrue(report_path.is_file())
+        rdoc = json.loads(report_path.read_text(encoding="utf-8"))
+        kinds = [e.get("kind") for e in rdoc.get("entries", []) if isinstance(e, dict)]
+        self.assertIn("manual_airflow_measurement", kinds)
+        man_ent = next(
+            e
+            for e in rdoc["entries"]
+            if isinstance(e, dict) and e.get("kind") == "manual_airflow_measurement"
+        )
+        self.assertEqual("supply_main", man_ent.get("branch_id"))
+        self.assertAlmostEqual(0.44, float(man_ent.get("measured_flow_L_s", 0)))
+
+        unified_csv = self.run_dir / "artifacts" / "man-air-unified.csv"
+        exu = _run_runtime(
+            "export-commissioning-report",
+            "--run-dir",
+            str(self.run_dir),
+            "--output-csv-unified",
+            str(unified_csv),
+        )
+        self.assertEqual(0, exu.returncode)
+        csv_text = unified_csv.read_text(encoding="utf-8")
+        self.assertIn("manual_airflow_measurement", csv_text)
+        self.assertIn("measurement_branch_id", csv_text)
+        self.assertIn("supply_main", csv_text)
+        self.assertIn("0.44", csv_text)

@@ -1550,6 +1550,26 @@ def cmd_commissioning_record_manual_airflow(args: argparse.Namespace) -> int:
             "session_state_json": str(session_path.resolve()),
         },
     )
+    report_entry = {
+        "ts": _utc_timestamp(),
+        "kind": "manual_airflow_measurement",
+        "controller_label": args.controller_label,
+        "step_id": args.step_id,
+        "report_ref": "",
+        "technician_name": str(args.technician_name).strip(),
+        "note": str(getattr(args, "note", "") or ""),
+        "branch_id": branch_id,
+        "session_key": session_key,
+        "measured_flow_L_s": float(flow_ls),
+        "measurement_tool": tool,
+        "design_flow_L_s": design_flow_branch,
+    }
+    report_path = _append_commissioning_report_entry(run_dir, report_entry)
+    _append_event(
+        logs_path,
+        "commissioning_manual_airflow_report_appended",
+        {"commissioning_report_json": str(report_path.resolve())},
+    )
     print(
         json.dumps(
             {
@@ -1560,6 +1580,7 @@ def cmd_commissioning_record_manual_airflow(args: argparse.Namespace) -> int:
                 "session_key": session_key,
                 "measured_flow_L_s": flow_ls,
                 "measurement_tool": tool,
+                "commissioning_report_json": str(report_path.resolve()),
             },
             indent=2,
             sort_keys=True,
@@ -2582,6 +2603,10 @@ COMMISSIONING_REPORT_UNIFIED_FIELDNAMES: tuple[str, ...] = (
     "status",
     "value_str",
     "read_source",
+    "measurement_branch_id",
+    "measured_flow_L_s",
+    "measurement_tool",
+    "design_flow_L_s",
 )
 
 
@@ -2962,6 +2987,41 @@ def _commissioning_report_unified_csv_rows(doc: dict) -> list[dict[str, str]]:
                     )
             continue
 
+        if kind == "manual_airflow_measurement":
+            rows.append(
+                {
+                    "entry_ts": base_ts,
+                    "kind": kind,
+                    "controller_label": ctrl,
+                    "step_id": step_id,
+                    "step_status": "",
+                    "report_ref": report_ref,
+                    "technician_name": tech,
+                    "note": note,
+                    "all_read_ok": "",
+                    "artifact_json": "",
+                    "command_object_id": "",
+                    "command_percent": "",
+                    "dwell_seconds": "",
+                    "sweep_index": "",
+                    "sweep_count": "",
+                    "trigger": "",
+                    "object_id": "",
+                    "property": "",
+                    "status": "",
+                    "value_str": "",
+                    "read_source": "",
+                    "measurement_branch_id": str(ent.get("branch_id", "")),
+                    "measured_flow_L_s": str(ent.get("measured_flow_L_s", "")),
+                    "measurement_tool": str(ent.get("measurement_tool", "")),
+                    "design_flow_L_s": str(ent.get("design_flow_L_s", "")),
+                }
+            )
+            continue
+
+    for row in rows:
+        for k in COMMISSIONING_REPORT_UNIFIED_FIELDNAMES:
+            row.setdefault(k, "")
     return rows
 
 
@@ -2972,60 +3032,20 @@ def _commissioning_report_unified_rows_to_html(
     title = html.escape(f"Commissioning report — job {job_id}")
     esc_job = html.escape(job_id)
     esc_schema = html.escape(schema_version)
-    th = "".join(
-        f"<th>{html.escape(h)}</th>"
-        for h in (
-            "entry_ts",
-            "kind",
-            "controller_label",
-            "step_id",
-            "step_status",
-            "report_ref",
-            "technician_name",
-            "note",
-            "all_read_ok",
-            "command_object_id",
-            "command_percent",
-            "dwell_seconds",
-            "sweep_index",
-            "sweep_count",
-            "trigger",
-            "object_id",
-            "property",
-            "status",
-            "value_str",
-            "read_source",
-        )
-    )
+    cols = list(COMMISSIONING_REPORT_UNIFIED_FIELDNAMES)
+    th = "".join(f"<th>{html.escape(h)}</th>" for h in cols)
     body_rows: list[str] = []
     for row in rows:
         cells = "".join(
-            f"<td>{html.escape(str(row.get(k, '') or ''))}</td>"
-            for k in (
-                "entry_ts",
-                "kind",
-                "controller_label",
-                "step_id",
-                "step_status",
-                "report_ref",
-                "technician_name",
-                "note",
-                "all_read_ok",
-                "command_object_id",
-                "command_percent",
-                "dwell_seconds",
-                "sweep_index",
-                "sweep_count",
-                "trigger",
-                "object_id",
-                "property",
-                "status",
-                "value_str",
-                "read_source",
-            )
+            f"<td>{html.escape(str(row.get(k, '') or ''))}</td>" for k in cols
         )
         body_rows.append(f"<tr>{cells}</tr>")
-    tbody = "\n".join(body_rows) if body_rows else "<tr><td colspan=\"19\">(no entries)</td></tr>"
+    colspan = str(len(cols))
+    tbody = (
+        "\n".join(body_rows)
+        if body_rows
+        else f"<tr><td colspan=\"{colspan}\">(no entries)</td></tr>"
+    )
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
