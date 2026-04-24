@@ -12,7 +12,7 @@ COMPILER = ROOT / "tools" / "import" / "compile_job.py"
 FIXTURES = ROOT / "tests" / "fixtures"
 
 
-def _write_csv(path: pathlib.Path, rows: list[dict[str, str]]) -> None:
+def _write_csv(path: pathlib.Path, rows: list[dict[str, str]], *, extra_columns: tuple[str, ...] = ()) -> None:
     fieldnames = [
         "controller_label",
         "profile_id",
@@ -22,6 +22,7 @@ def _write_csv(path: pathlib.Path, rows: list[dict[str, str]]) -> None:
         "building_floor",
         "notes",
     ]
+    fieldnames = list(fieldnames) + list(extra_columns)
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
@@ -174,6 +175,47 @@ class ImportCompilerTests(unittest.TestCase):
         self.assertTrue(fcu_objs["msv_test_mode"]["writable"])
         report = json.loads(report_json.read_text(encoding="utf-8"))
         self.assertEqual([], report["errors"])
+
+    def test_unknown_csv_column_emits_warning(self) -> None:
+        controllers = FIXTURES / "controllers-unknown-col.csv"
+        output_json = FIXTURES / "runtime-job-unknown-col.json"
+        report_json = FIXTURES / "runtime-job-unknown-col-report.json"
+        _write_csv(
+            controllers,
+            [
+                {
+                    "controller_label": "FCU-01A",
+                    "profile_id": "fcu_2pipe_chw_electric_heat_v1",
+                    "bacnet_device_instance": "21001",
+                    "bacnet_ip": "192.168.1.50",
+                    "bacnet_port": "47808",
+                    "building_floor": "L01",
+                    "notes": "row with extra column",
+                    "panel_name": "should-be-ignored",
+                },
+            ],
+            extra_columns=("panel_name",),
+        )
+        _write_profile(
+            self.profiles_dir / "unit-profile-fcu.example.json",
+            profile_id="fcu_2pipe_chw_electric_heat_v1",
+            display_name="FCU example",
+            write_allowlist=["msv_test_mode"],
+            read_allowlist=["ai_sat"],
+        )
+
+        result = _run_compiler(controllers, self.profiles_dir, output_json, report_json)
+        self.assertEqual(0, result.returncode, msg=result.stdout + result.stderr)
+        report = json.loads(report_json.read_text(encoding="utf-8"))
+        self.assertEqual([], report["errors"])
+        codes = [w["code"] for w in report["warnings"]]
+        self.assertIn("unknown_controller_csv_column", codes)
+        self.assertTrue(
+            any("panel_name" in w.get("message", "") for w in report["warnings"]),
+            report["warnings"],
+        )
+        runtime = json.loads(output_json.read_text(encoding="utf-8"))
+        self.assertNotIn("panel_name", runtime["controllers"][0])
 
     def test_compile_includes_commissioning_step_metadata(self) -> None:
         controllers = FIXTURES / "controllers-compile-stepmeta.csv"

@@ -18,6 +18,14 @@ REQUIRED_COLUMNS = [
     "bacnet_port",
 ]
 
+# Optional columns copied into runtime rows today; anything else is ignored with a warning.
+KNOWN_CONTROLLER_COLUMNS = frozenset(REQUIRED_COLUMNS) | frozenset(
+    [
+        "building_floor",
+        "notes",
+    ]
+)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -136,6 +144,19 @@ def compile_model(
                 profiles_by_id=profiles_by_id,
                 errors=errors,
                 warnings=warnings,
+            )
+
+        for col in sorted(header - KNOWN_CONTROLLER_COLUMNS):
+            name = str(col).strip()
+            if not name:
+                continue
+            _warning(
+                warnings,
+                code="unknown_controller_csv_column",
+                message=(
+                    f"unknown controller CSV column {name!r}: values are ignored in v1; "
+                    f"see docs/schema/site-controllers-v1.csv.md"
+                ),
             )
 
         for row_index, row in enumerate(reader, start=2):
