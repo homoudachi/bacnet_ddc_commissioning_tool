@@ -7,6 +7,7 @@ Use before tagging a release or handing a **Windows exe** / **Python** drop to t
 | Step | Command / action | Pass |
 |------|------------------|------|
 | Unit tests | `python3 -m unittest discover -s tests -p 'test_*.py'` | All green |
+| Commissioning export | `tools/simulator/commissioning_export_smoke.sh` | Same as CI: empty report → JSON + unified CSV + HTML + XLSX + PDF |
 | Import compile | `python3 tools/runtime/app.py validate-import --run-dir <run>` | `compile_ok` in report |
 | Optional Docker BACnet | `tools/simulator/docker_bacnet_smoke.sh` (requires Docker) | Script exits 0 |
 | Windows exe (if shipping) | Build per [`windows-exe.md`](windows-exe.md); run `dist\bacnet-commissioning.exe --help` | Exits 0 |

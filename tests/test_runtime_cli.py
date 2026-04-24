@@ -2788,6 +2788,33 @@ class RuntimeCliTests(unittest.TestCase):
         self.assertEqual(0, r4.returncode)
         self.assertTrue(pdf_empty.read_bytes().startswith(b"%PDF"))
 
+        uni_empty = self.run_dir / "artifacts" / "empty-unified.csv"
+        r5 = _run_runtime(
+            "export-commissioning-report",
+            "--run-dir",
+            str(self.run_dir),
+            "--allow-empty",
+            "--output-csv-unified",
+            str(uni_empty),
+        )
+        self.assertEqual(0, r5.returncode)
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "runtime_app_allow_empty", ROOT / "tools" / "runtime" / "app.py"
+        )
+        assert spec and spec.loader
+        rt_mod = importlib.util.module_from_spec(spec)
+        sys.path.insert(0, str(ROOT / "tools" / "runtime"))
+        spec.loader.exec_module(rt_mod)
+        with uni_empty.open(newline="", encoding="utf-8") as handle:
+            reader = csv.reader(handle)
+            header = next(reader)
+        self.assertEqual(list(header), list(rt_mod.COMMISSIONING_REPORT_UNIFIED_FIELDNAMES))
+        with uni_empty.open(encoding="utf-8") as handle:
+            rows = list(csv.reader(handle))
+        self.assertEqual(1, len(rows))
+
     def test_record_step_point_checkout_failure_leaves_step_pending(self) -> None:
         from test_import_compiler import _write_profile
 

@@ -28,6 +28,10 @@ jobs:
         run: |
           python3 -m unittest discover -s tests -p 'test_*.py'
 
+      - name: Commissioning report export smoke (empty stub)
+        run: |
+          tools/simulator/commissioning_export_smoke.sh
+
       - name: Docker BACnet device smoke (probe-bip)
         run: |
           tools/simulator/docker_bacnet_smoke.sh

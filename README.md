@@ -17,7 +17,7 @@
 ## Windows single-file executable
 
 - Build (on Windows): **[docs/packaging/windows-exe.md](docs/packaging/windows-exe.md)** — produces **`dist/bacnet-commissioning.exe`** via **PyInstaller** (`tools/packaging/runtime.spec`). CI builds on **`windows-latest`** (`.github/workflows/windows-exe.yml`) and uploads the exe as an artifact. Signing is not configured.
-- Pre-release checks: **[docs/packaging/release-checklist.md](docs/packaging/release-checklist.md)** (tests, import validate, optional Docker smoke, exe smoke matrix).
+- Pre-release checks: **[docs/packaging/release-checklist.md](docs/packaging/release-checklist.md)** (tests, import validate, optional Docker smoke, exe smoke matrix). CI also runs **`tools/simulator/commissioning_export_smoke.sh`** (empty commissioning report → unified CSV/HTML/XLSX/PDF).
 
 ## Current implementation slice
 
