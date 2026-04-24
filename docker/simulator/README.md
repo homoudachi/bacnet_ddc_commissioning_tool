@@ -40,7 +40,7 @@ python3 tools/runtime/app.py verify-bip-list \
 
 Expected: `"strict_pass": true`, `"total": 3`, all controllers **`reachable_verified`**.
 
-After probes, CI also runs **`bacnet-read`** against **`FCU-DOCKER`** / **`FCU-DOCKER-B`** (`ai_sat`) and **`HRV-DOCKER`** (`msv_test_mode`) to exercise **ReadProperty** through **bacpypes3** to the containers.
+After probes, CI also runs **`bacnet-read`** (FCU **`ai_sat`**, HRV **`msv_test_mode`** + **`ai_supply_air_temperature`**), **`dry-run-bacnet-write --execute`** on **`msv_test_mode`** for **FCU-DOCKER** and **HRV-DOCKER** (with read-back), and **`bacnet-point-checkout`** for both profiles.
 
 ## Stop
 

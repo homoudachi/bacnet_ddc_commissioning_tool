@@ -57,7 +57,7 @@ assert rows['HRV-DOCKER']['status']=='reachable_verified'
 
 BACNET_READ_FLAGS="--timeout-seconds 2.0 --retries 3"
 
-for pair in "FCU-DOCKER:ai_sat" "FCU-DOCKER-B:ai_sat" "HRV-DOCKER:msv_test_mode"; do
+for pair in "FCU-DOCKER:ai_sat" "FCU-DOCKER-B:ai_sat" "HRV-DOCKER:msv_test_mode" "HRV-DOCKER:ai_supply_air_temperature"; do
   label="${pair%%:*}"
   oid="${pair##*:}"
   out="$(python3 "$ROOT/tools/runtime/app.py" bacnet-read \
@@ -71,5 +71,40 @@ for pair in "FCU-DOCKER:ai_sat" "FCU-DOCKER-B:ai_sat" "HRV-DOCKER:msv_test_mode"
     exit 2
   }
 done
+
+WRITE_FLAGS="$BACNET_READ_FLAGS --technician-name CI-Smoke --note docker-bacnet-smoke"
+
+# FCU: WriteProperty MSV then read back (instance 50).
+w1="$(python3 "$ROOT/tools/runtime/app.py" dry-run-bacnet-write \
+  --run-dir "$RUN_DIR" --controller-label FCU-DOCKER \
+  --object-id msv_test_mode --value 3 --execute $WRITE_FLAGS)"
+echo "$w1"
+echo "$w1" | grep -q '"status": "write_ok"' || { echo "error: FCU-DOCKER MSV write failed"; exit 2; }
+r1="$(python3 "$ROOT/tools/runtime/app.py" bacnet-read --run-dir "$RUN_DIR" \
+  --controller-label FCU-DOCKER --object-id msv_test_mode $BACNET_READ_FLAGS)"
+echo "$r1"
+echo "$r1" | grep -q '"value_str": "3"' || { echo "error: FCU-DOCKER MSV not 3 after write"; exit 2; }
+
+# HRV: WriteProperty MSV (instance 60) then read back.
+w2="$(python3 "$ROOT/tools/runtime/app.py" dry-run-bacnet-write \
+  --run-dir "$RUN_DIR" --controller-label HRV-DOCKER \
+  --object-id msv_test_mode --value 2 --execute $WRITE_FLAGS)"
+echo "$w2"
+echo "$w2" | grep -q '"status": "write_ok"' || { echo "error: HRV-DOCKER MSV write failed"; exit 2; }
+r2="$(python3 "$ROOT/tools/runtime/app.py" bacnet-read --run-dir "$RUN_DIR" \
+  --controller-label HRV-DOCKER --object-id msv_test_mode $BACNET_READ_FLAGS)"
+echo "$r2"
+echo "$r2" | grep -q '"value_str": "2"' || { echo "error: HRV-DOCKER MSV not 2 after write"; exit 2; }
+
+# Profile point_checkout lists (FCU: two points; HRV: one).
+pc1="$(python3 "$ROOT/tools/runtime/app.py" bacnet-point-checkout \
+  --run-dir "$RUN_DIR" --controller-label FCU-DOCKER $BACNET_READ_FLAGS)"
+echo "$pc1"
+echo "$pc1" | grep -q '"all_read_ok": true' || { echo "error: FCU-DOCKER point-checkout failed"; exit 2; }
+
+pc2="$(python3 "$ROOT/tools/runtime/app.py" bacnet-point-checkout \
+  --run-dir "$RUN_DIR" --controller-label HRV-DOCKER $BACNET_READ_FLAGS)"
+echo "$pc2"
+echo "$pc2" | grep -q '"all_read_ok": true' || { echo "error: HRV-DOCKER point-checkout failed"; exit 2; }
 
 echo "docker_bacnet_smoke_ok=true"

@@ -13,7 +13,7 @@ Unit tests use an in-process UDP fake. Operators and CI still need a **portable*
 1. Add **`docker/simulator/bacnet-device/`**: Python 3.12 + **bacpypes3**, UDP server with Who-Is / ReadProperty / WriteProperty **presentValue**; **`SIM_PROFILE=fcu`** matches FCU unittest fake instances; **`SIM_PROFILE=hrv`** matches **`docs/examples/unit-profile-hrv.example.json`** (MSV **60**, fan commands, temps, BI **9**).
 2. **`bacnet-dev`** profile: **three** services on **`127.0.0.1:47808`**, **`47809`**, **`47810`** (FCU ×2 + HRV-shaped sim).
 3. **`docs/examples/site-controllers.docker-bacnet-sim.csv`**: **`FCU-DOCKER`**, **`FCU-DOCKER-B`**, **`HRV-DOCKER`**.
-4. CI: **`docker_bacnet_smoke.sh`** → **`verify-bip-list --strict`** for **three** rows, then **`bacnet-read`** on **`ai_sat`** (FCU sims) and **`msv_test_mode`** (HRV sim), when Docker is available.
+4. CI: **`docker_bacnet_smoke.sh`** → **`verify-bip-list --strict`**, **`bacnet-read`** spot checks (including HRV **`ai_supply_air_temperature`** — allowlist extended in **`unit-profile-hrv.example.json`**), **`dry-run-bacnet-write --execute`** + read-back on **`msv_test_mode`** for FCU and HRV, and **`bacnet-point-checkout`**, when Docker is available.
 
 ## Consequences
 

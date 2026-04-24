@@ -15,7 +15,8 @@
     "msv_test_mode"
   ],
   "commissioning_read_allowlist": [
-    "msv_test_mode"
+    "msv_test_mode",
+    "ai_supply_air_temperature"
   ],
   "point_checkout": [
     { "object_id": "msv_test_mode", "property": "presentValue" }
