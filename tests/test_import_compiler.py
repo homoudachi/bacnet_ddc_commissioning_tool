@@ -225,6 +225,43 @@ class ImportCompilerTests(unittest.TestCase):
         self.assertTrue(flow[1]["run_point_checkout_on_pass"])
         self.assertEqual("test.after_pass", flow[1]["report_ref"])
 
+    def test_compile_includes_arms_test_mode_state_key(self) -> None:
+        controllers = FIXTURES / "controllers-compile-arms.csv"
+        output_json = FIXTURES / "runtime-job-arms.json"
+        report_json = FIXTURES / "runtime-job-arms-report.json"
+        _write_csv(
+            controllers,
+            [
+                {
+                    "controller_label": "FCU-Y",
+                    "profile_id": "profile_arms",
+                    "bacnet_device_instance": "21001",
+                    "bacnet_ip": "192.168.1.50",
+                    "bacnet_port": "47808",
+                    "building_floor": "L01",
+                    "notes": "",
+                },
+            ],
+        )
+        _write_profile(
+            self.profiles_dir / "unit-profile-arms.json",
+            profile_id="profile_arms",
+            display_name="Arms",
+            read_allowlist=["ai_sat"],
+            commissioning_flow=[
+                {
+                    "step_id": "stroke",
+                    "label": "Stroke",
+                    "arms_test_mode_state_key": "chw_valve_stroke_no_plant",
+                }
+            ],
+        )
+        result = _run_compiler(controllers, self.profiles_dir, output_json, report_json)
+        self.assertEqual(0, result.returncode)
+        runtime = json.loads(output_json.read_text(encoding="utf-8"))
+        flow = runtime["controllers"][0]["commissioning_flow"]
+        self.assertEqual("chw_valve_stroke_no_plant", flow[0]["arms_test_mode_state_key"])
+
     def test_compile_preserves_commissioning_flow_actions(self) -> None:
         controllers = FIXTURES / "controllers-compile-actions.csv"
         output_json = FIXTURES / "runtime-job-actions.json"

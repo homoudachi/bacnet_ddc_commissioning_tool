@@ -168,6 +168,36 @@ def _load_session_state(run_dir: Path, controller_label: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+def _chw_valve_stroke_prompt_confirm_session_keys(step: dict) -> list[str]:
+    """Session keys ``prompt_confirm.<prompt_id>`` for CHW valve stroke + operator prompts."""
+    actions = step.get("actions")
+    if not isinstance(actions, list):
+        return []
+    keys: list[str] = []
+    prev_write_oid = ""
+    for act in actions:
+        if not isinstance(act, dict):
+            continue
+        t = str(act.get("type", "")).strip()
+        if t == "write_analog_percent":
+            prev_write_oid = str(act.get("object_id", "")).strip()
+        elif t == "operator_prompt_confirm":
+            pid = str(act.get("prompt_id", "")).strip()
+            if pid and prev_write_oid == "ao_chw_valve":
+                keys.append(f"prompt_confirm.{pid}")
+    return keys
+
+
+def _cooling_valve_stroke_no_chw_gating(step: dict) -> bool:
+    """Steps that require BACnet writes + recorded confirmations before pass."""
+    if str(step.get("step_id", "")).strip() == "cooling_valve_stroke_no_chw":
+        return bool(_chw_valve_stroke_prompt_confirm_session_keys(step))
+    arms = str(step.get("arms_test_mode_state_key", "")).strip()
+    if arms == "chw_valve_stroke_no_plant":
+        return bool(_chw_valve_stroke_prompt_confirm_session_keys(step))
+    return False
+
+
 def _validate_step_transition(
     steps: list[dict],
     step: dict,
@@ -207,6 +237,21 @@ def _validate_step_transition(
                             f"(e.g. true/1/yes)"
                         ),
                     }
+
+    if requested_status in {"passed", "manual_passed"}:
+        if _cooling_valve_stroke_no_chw_gating(step):
+            vals = session_values if session_values is not None else {}
+            pend = _chw_valve_stroke_prompt_confirm_session_keys(step)
+            missing = [k for k in pend if not _session_flag_truthy(vals.get(k, ""))]
+            if missing:
+                return {
+                    "reason_code": "operator_prompts_not_confirmed",
+                    "message": (
+                        f"step '{step.get('step_id')}' requires operator prompt confirmations "
+                        f"before pass; use commissioning-confirm-prompt for each prompt_id "
+                        f"(missing session keys: {missing})"
+                    ),
+                }
 
     if requested_status in {"passed", "manual_passed", "failed"}:
         step_id = step.get("step_id")
@@ -257,6 +302,7 @@ def _normalize_rejection_reason(reason_code: str) -> str:
     mapping = {
         "step_not_skippable": "STEP_NOT_SKIPPABLE",
         "skip_reason_not_recorded": "SKIP_GATE",
+        "operator_prompts_not_confirmed": "PROMPTS_NOT_CONFIRMED",
         "dependency_not_completed": "DEPENDENCY_UNSATISFIED",
         "dependency_missing_from_flow": "DEPENDENCY_UNSATISFIED",
         "prior_step_incomplete": "PREREQ_ORDER",
@@ -558,6 +604,9 @@ def cmd_init_flow(args: argparse.Namespace) -> int:
         report_ref = str(step.get("report_ref", "")).strip()
         if report_ref:
             step_row["report_ref"] = report_ref
+        arms_key = str(step.get("arms_test_mode_state_key", "")).strip()
+        if arms_key:
+            step_row["arms_test_mode_state_key"] = arms_key
         raw_actions = step.get("actions")
         if isinstance(raw_actions, list) and raw_actions:
             step_row["actions"] = raw_actions
@@ -704,6 +753,206 @@ def cmd_set_session_value(args: argparse.Namespace) -> int:
     )
     print(
         f"session_value_set=true controller_label={args.controller_label} key={key}"
+    )
+    return 0
+
+
+def cmd_commissioning_confirm_prompt(args: argparse.Namespace) -> int:
+    """Re-issue CHW valve write for a profile prompt, then record ``prompt_confirm.<id>`` in session."""
+    run_dir = args.run_dir
+    logs_path = run_dir / "logs" / "events.jsonl"
+    runtime_job_path = run_dir / "state" / "runtime-job.json"
+    flow_path = _flow_state_path(run_dir, args.controller_label)
+    if not flow_path.is_file():
+        print(f"error: flow state missing; run init-flow first ({flow_path})")
+        return 2
+    runtime_job = json.loads(runtime_job_path.read_text(encoding="utf-8"))
+    target = None
+    for controller in runtime_job.get("controllers", []):
+        if controller.get("controller_label") == args.controller_label:
+            target = controller
+            break
+    if target is None:
+        print(f"error: controller not found in runtime job: {args.controller_label}")
+        return 2
+
+    flow_state = json.loads(flow_path.read_text(encoding="utf-8"))
+    step = _lookup_step_by_id(flow_state.get("steps", []), args.step_id)
+    if step is None:
+        print(f"error: step_id not found in flow state: {args.step_id}")
+        return 2
+
+    prompt_id = str(args.prompt_id).strip()
+    if not prompt_id:
+        print("error: prompt_id must be non-empty")
+        return 2
+
+    actions = step.get("actions")
+    if not isinstance(actions, list):
+        print("error: step has no actions in flow state")
+        return 2
+
+    write_pct: float | None = None
+    found_prompt = False
+    for idx, act in enumerate(actions):
+        if not isinstance(act, dict):
+            continue
+        if str(act.get("type", "")).strip() != "operator_prompt_confirm":
+            continue
+        if str(act.get("prompt_id", "")).strip() != prompt_id:
+            continue
+        found_prompt = True
+        for j in range(idx - 1, -1, -1):
+            prev = actions[j]
+            if not isinstance(prev, dict):
+                continue
+            if str(prev.get("type", "")).strip() != "write_analog_percent":
+                continue
+            if str(prev.get("object_id", "")).strip() != "ao_chw_valve":
+                continue
+            try:
+                write_pct = float(prev.get("value"))
+            except (TypeError, ValueError):
+                print("error: preceding write_analog_percent has invalid value")
+                return 2
+            break
+        break
+
+    if not found_prompt or write_pct is None:
+        print(
+            f"error: no operator_prompt_confirm with prompt_id={prompt_id!r} "
+            "after write_analog_percent on ao_chw_valve in this step"
+        )
+        return 2
+
+    arms = str(step.get("arms_test_mode_state_key", "")).strip()
+    step_id = str(step.get("step_id", "")).strip()
+    if arms == "chw_valve_stroke_no_plant" or step_id == "cooling_valve_stroke_no_chw":
+        one = _bacnet_read_one(
+            controller_label=args.controller_label,
+            target=target,
+            object_id="msv_test_mode",
+            property_name="presentValue",
+            timeout_seconds=float(args.bacnet_timeout_seconds),
+            retries=int(args.bacnet_retries),
+            bacnet_bind_port=int(getattr(args, "bacnet_bind_port", 0) or 0),
+            apdu_timeout_override=args.apdu_timeout,
+        )
+        if one.get("status") != "read_ok":
+            print(
+                "error: BACnet read of msv_test_mode failed (required to arm "
+                "chw_valve_stroke_no_plant before valve writes)"
+            )
+            print(json.dumps(one, indent=2, sort_keys=True))
+            return 2
+        try:
+            msv_state = int(float(str(one.get("read", {}).get("value_str", ""))))
+        except (TypeError, ValueError):
+            print("error: could not parse msv_test_mode presentValue as integer state")
+            return 2
+        if msv_state != 6:
+            print(
+                f"error: msv_test_mode must be state 6 (chw_valve_stroke_no_plant); "
+                f"got {msv_state} — write MSV first, then retry"
+            )
+            return 2
+
+    cmd_res = _resolve_profile_object_bacnet(target, "ao_chw_valve")
+    if cmd_res is None:
+        print("error: ao_chw_valve not in profile objects_by_id")
+        return 2
+    cmd_ot, cmd_oi = cmd_res
+    objects_by_id = target.get("objects_by_id", {})
+    if not isinstance(objects_by_id, dict) or "ao_chw_valve" not in objects_by_id:
+        print("error: ao_chw_valve missing from objects_by_id")
+        return 2
+    if not bool(objects_by_id["ao_chw_valve"].get("writable")):
+        print("error: ao_chw_valve is not writable in profile")
+        return 2
+
+    addr = target.get("bacnet", {})
+    host = str(addr.get("host", "")).strip()
+    port = int(addr.get("port", 0))
+    expected_instance = int(addr.get("device_instance", 0))
+    bacnet_ad = _bacnet_adapter()
+    target_addr = bacnet_ad.format_ipv4_target(host, port)
+    try:
+        bind_port = int(getattr(args, "bacnet_bind_port", 0) or 0)
+    except ValueError:
+        bind_port = 0
+    try:
+        apdu_t = bacnet_ad.commissioning_apdu_timeout_seconds(args.apdu_timeout)
+    except (TypeError, ValueError) as err:
+        print(f"error: invalid --apdu-timeout: {err}")
+        return 2
+    who_t = bacnet_ad.effective_who_is_timeout(
+        float(args.bacnet_timeout_seconds), int(args.bacnet_retries)
+    )
+
+    write_res = bacnet_ad.write_present_value(
+        bind_port=bind_port,
+        target_address=target_addr,
+        expected_device_instance=expected_instance,
+        object_type=cmd_ot,
+        object_instance=cmd_oi,
+        value=float(write_pct),
+        who_is_timeout=who_t,
+        apdu_timeout=apdu_t,
+    )
+    if write_res.get("status") != "write_ok":
+        print(json.dumps({"status": "write_failed", "write": write_res}, indent=2, sort_keys=True))
+        return 2
+
+    session_key = f"prompt_confirm.{prompt_id}"
+    session_path = _session_state_path(run_dir, args.controller_label)
+    session_path.parent.mkdir(parents=True, exist_ok=True)
+    if session_path.is_file():
+        session_state = json.loads(session_path.read_text(encoding="utf-8"))
+    else:
+        session_state = {
+            "controller_label": args.controller_label,
+            "updated_at": _utc_timestamp(),
+            "values": {},
+        }
+    if not isinstance(session_state.get("values"), dict):
+        session_state["values"] = {}
+    session_state["values"][session_key] = {
+        "value": "true",
+        "technician_name": str(args.technician_name).strip(),
+        "note": str(getattr(args, "note", "") or ""),
+        "ts": _utc_timestamp(),
+        "prompt_id": prompt_id,
+        "step_id": args.step_id,
+        "command_percent": float(write_pct),
+    }
+    session_state["updated_at"] = _utc_timestamp()
+    session_path.write_text(json.dumps(session_state, indent=2), encoding="utf-8")
+
+    _append_event(
+        logs_path,
+        "commissioning_prompt_confirmed",
+        {
+            "controller_label": args.controller_label,
+            "step_id": args.step_id,
+            "prompt_id": prompt_id,
+            "session_key": session_key,
+            "command_percent": float(write_pct),
+            "session_state_json": str(session_path.resolve()),
+        },
+    )
+    print(
+        json.dumps(
+            {
+                "prompt_confirmed": True,
+                "controller_label": args.controller_label,
+                "step_id": args.step_id,
+                "prompt_id": prompt_id,
+                "session_key": session_key,
+                "write_percent": float(write_pct),
+            },
+            indent=2,
+            sort_keys=True,
+        )
     )
     return 0
 
@@ -3760,6 +4009,49 @@ def build_parser() -> argparse.ArgumentParser:
     set_session.add_argument("--technician-name", required=True)
     set_session.add_argument("--note", default="")
     set_session.set_defaults(handler=cmd_set_session_value)
+
+    confirm_prompt = subparsers.add_parser(
+        "commissioning-confirm-prompt",
+        help=(
+            "CHW valve stroke (no CHW): re-write ao_chw_valve for a profile prompt_id, "
+            "then set session prompt_confirm.<id> (required before record-step passed)."
+        ),
+    )
+    confirm_prompt.add_argument("--run-dir", required=True, type=Path)
+    confirm_prompt.add_argument("--controller-label", required=True)
+    confirm_prompt.add_argument("--step-id", required=True)
+    confirm_prompt.add_argument(
+        "--prompt-id",
+        required=True,
+        help="Profile operator_prompt_confirm prompt_id (e.g. chw_valve_at_100).",
+    )
+    confirm_prompt.add_argument("--technician-name", required=True)
+    confirm_prompt.add_argument("--note", default="")
+    confirm_prompt.add_argument(
+        "--bacnet-timeout-seconds",
+        type=float,
+        default=0.5,
+        help="Who-Is timeout base for BACnet read/write in this command.",
+    )
+    confirm_prompt.add_argument(
+        "--bacnet-retries",
+        type=int,
+        default=1,
+        help="Who-Is retries for BACnet I/O.",
+    )
+    confirm_prompt.add_argument(
+        "--bacnet-bind-port",
+        type=int,
+        default=0,
+        help="Local UDP bind port (0 = OS-assigned).",
+    )
+    confirm_prompt.add_argument(
+        "--apdu-timeout",
+        type=float,
+        default=None,
+        help="BACpypes3 APDU timeout override (default: adapter default).",
+    )
+    confirm_prompt.set_defaults(handler=cmd_commissioning_confirm_prompt)
 
     show_session = subparsers.add_parser(
         "show-session",

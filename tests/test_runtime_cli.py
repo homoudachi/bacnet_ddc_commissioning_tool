@@ -3856,3 +3856,230 @@ class RuntimeCliTests(unittest.TestCase):
             "skip with reason",
         )
         self.assertEqual(0, allowed.returncode)
+
+    def test_chw_valve_stroke_confirm_prompt_then_record_step_pass(self) -> None:
+        from test_import_compiler import _write_profile
+
+        server = _FakeBipUdpServer(
+            device_instance=21001,
+            analog_input_present=20.0,
+            msv_present=6,
+            ao_valve_present=0.0,
+        )
+        server.start()
+        try:
+            time.sleep(0.05)
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            profiles_dir = self.run_dir / "profiles-chw-stroke"
+            profiles_dir.mkdir(parents=True, exist_ok=True)
+            _write_profile(
+                profiles_dir / "unit-chw-stroke.json",
+                profile_id="fcu_chw_stroke_v1",
+                display_name="CHW stroke",
+                write_allowlist=["msv_test_mode", "ao_chw_valve"],
+                read_allowlist=["ai_sat", "msv_test_mode", "ao_chw_valve"],
+                objects=[
+                    {
+                        "id": "msv_test_mode",
+                        "writable": True,
+                        "bacnet": {"object_type": "multiStateValue", "instance": 50},
+                    },
+                    {
+                        "id": "ai_sat",
+                        "writable": False,
+                        "bacnet": {"object_type": "analogInput", "instance": 2},
+                    },
+                    {
+                        "id": "ao_chw_valve",
+                        "writable": True,
+                        "bacnet": {"object_type": "analogOutput", "instance": 5},
+                    },
+                ],
+                commissioning_flow=[
+                    {"step_id": "prep", "label": "Prep"},
+                    {
+                        "step_id": "cooling_valve_stroke_no_chw",
+                        "label": "Stroke no CHW",
+                        "arms_test_mode_state_key": "chw_valve_stroke_no_plant",
+                        "actions": [
+                            {
+                                "type": "write_analog_percent",
+                                "object_id": "ao_chw_valve",
+                                "value": 100,
+                            },
+                            {
+                                "type": "operator_prompt_confirm",
+                                "prompt_id": "chw_valve_at_100",
+                                "prompt_text": "Confirm 100%",
+                            },
+                            {
+                                "type": "write_analog_percent",
+                                "object_id": "ao_chw_valve",
+                                "value": 0,
+                            },
+                            {
+                                "type": "operator_prompt_confirm",
+                                "prompt_id": "chw_valve_at_0",
+                                "prompt_text": "Confirm 0%",
+                            },
+                        ],
+                    },
+                ],
+            )
+            csv_path = self.run_dir / "controllers-chw-stroke.csv"
+            with csv_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=[
+                        "controller_label",
+                        "profile_id",
+                        "bacnet_device_instance",
+                        "bacnet_ip",
+                        "bacnet_port",
+                        "building_floor",
+                        "notes",
+                    ],
+                )
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "controller_label": "FCU-STROKE",
+                        "profile_id": "fcu_chw_stroke_v1",
+                        "bacnet_device_instance": "21001",
+                        "bacnet_ip": "127.0.0.1",
+                        "bacnet_port": str(server.port),
+                        "building_floor": "L01",
+                        "notes": "",
+                    }
+                )
+            self.assertEqual(
+                0,
+                _run_runtime(
+                    "init-run",
+                    "--run-dir",
+                    str(self.run_dir),
+                    "--job-id",
+                    "job-chw-stroke",
+                    "--controllers-csv",
+                    str(csv_path),
+                    "--profiles-dir",
+                    str(profiles_dir),
+                    "--scenarios-dir",
+                    str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+                ).returncode,
+            )
+            self.assertEqual(0, _run_runtime("compile-import", "--run-dir", str(self.run_dir)).returncode)
+            job = json.loads(
+                (self.run_dir / "state" / "runtime-job.json").read_text(encoding="utf-8")
+            )
+            stroke_def = [
+                s
+                for s in job["controllers"][0]["commissioning_flow"]
+                if s["step_id"] == "cooling_valve_stroke_no_chw"
+            ][0]
+            self.assertEqual("chw_valve_stroke_no_plant", stroke_def["arms_test_mode_state_key"])
+
+            self.assertEqual(
+                0,
+                _run_runtime(
+                    "init-flow",
+                    "--run-dir",
+                    str(self.run_dir),
+                    "--controller-label",
+                    "FCU-STROKE",
+                ).returncode,
+            )
+            self.assertEqual(
+                0,
+                _run_runtime(
+                    "record-step",
+                    "--run-dir",
+                    str(self.run_dir),
+                    "--controller-label",
+                    "FCU-STROKE",
+                    "--step-id",
+                    "prep",
+                    "--status",
+                    "passed",
+                    "--technician-name",
+                    "Alex Tech",
+                    "--note",
+                    "prep",
+                ).returncode,
+            )
+
+            blocked = _run_runtime(
+                "record-step",
+                "--run-dir",
+                str(self.run_dir),
+                "--controller-label",
+                "FCU-STROKE",
+                "--step-id",
+                "cooling_valve_stroke_no_chw",
+                "--status",
+                "passed",
+                "--technician-name",
+                "Alex Tech",
+                "--note",
+                "no confirms",
+            )
+            self.assertEqual(2, blocked.returncode)
+            self.assertIn("commissioning-confirm-prompt", blocked.stdout)
+            rej = [
+                json.loads(line)
+                for line in (self.run_dir / "logs" / "events.jsonl")
+                .read_text(encoding="utf-8")
+                .strip()
+                .splitlines()
+                if json.loads(line).get("event") == "flow_step_rejected"
+            ]
+            self.assertEqual("PROMPTS_NOT_CONFIRMED", rej[-1]["reason_code"])
+
+            for pid in ("chw_valve_at_100", "chw_valve_at_0"):
+                c = _run_runtime(
+                    "commissioning-confirm-prompt",
+                    "--run-dir",
+                    str(self.run_dir),
+                    "--controller-label",
+                    "FCU-STROKE",
+                    "--step-id",
+                    "cooling_valve_stroke_no_chw",
+                    "--prompt-id",
+                    pid,
+                    "--technician-name",
+                    "Alex Tech",
+                    "--note",
+                    f"confirm {pid}",
+                    "--bacnet-timeout-seconds",
+                    "0.5",
+                    "--bacnet-retries",
+                    "1",
+                )
+                self.assertEqual(0, c.returncode, c.stdout + c.stderr)
+
+            sess = json.loads(
+                (
+                    self.run_dir / "state" / "sessions" / "FCU-STROKE.json"
+                ).read_text(encoding="utf-8")
+            )
+            self.assertEqual("true", sess["values"]["prompt_confirm.chw_valve_at_100"]["value"])
+
+            ok = _run_runtime(
+                "record-step",
+                "--run-dir",
+                str(self.run_dir),
+                "--controller-label",
+                "FCU-STROKE",
+                "--step-id",
+                "cooling_valve_stroke_no_chw",
+                "--status",
+                "passed",
+                "--technician-name",
+                "Alex Tech",
+                "--note",
+                "after confirms",
+                "--no-run-modulation-on-pass",
+            )
+            self.assertEqual(0, ok.returncode)
+        finally:
+            server.stop()

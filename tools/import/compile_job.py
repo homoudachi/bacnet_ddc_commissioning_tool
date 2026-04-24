@@ -411,6 +411,9 @@ def _extract_commissioning_steps(profile: dict[str, Any]) -> list[dict[str, Any]
             "skippable": bool(item.get("skippable", False)),
             "requires_step_ids": requires_step_ids,
         }
+        arms_key = str(item.get("arms_test_mode_state_key", "")).strip()
+        if arms_key:
+            step_row["arms_test_mode_state_key"] = arms_key
         raw_skip_when = item.get("skip_when")
         if isinstance(raw_skip_when, list) and raw_skip_when:
             skip_codes: list[str] = []

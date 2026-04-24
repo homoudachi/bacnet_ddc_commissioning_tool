@@ -105,6 +105,10 @@ python3 tools/runtime/app.py dry-run-bacnet-write \
 # python3 tools/runtime/app.py bacnet-point-checkout --run-dir artifacts/runtime-run \
 #   --controller-label FCU-01A [--strict] [--bacnet-bind-port 47809] [--apdu-timeout 15]
 
+# CHW valve stroke (no CHW): after arming msv_test_mode to chw_valve_stroke_no_plant (state 6),
+# run commissioning-confirm-prompt per profile prompt_id (writes ao_chw_valve + session flag),
+# then record-step passed on cooling_valve_stroke_no_chw.
+
 # 4) Record technician signoff for a step
 python3 tools/runtime/app.py record-step \
   --run-dir artifacts/runtime-run \

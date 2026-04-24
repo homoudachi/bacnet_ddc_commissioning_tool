@@ -76,7 +76,7 @@ Use this order to reduce rework and unblock parallel work later.
 
 - [x] Implement point checkout flow — **v1:** **`bacnet-point-checkout`** CLI; **`record-step`** can run the same reads when a profile step uses **`step_type: bacnet_point_checkout`** or **`run_point_checkout_on_pass`**; results append **`artifacts/commissioning_report.json`**; **guided UI** still future.
 - [ ] Implement airflow adjustment + technician confirmation checkpoints.
-- [ ] Implement cooling valve stroke test (no CHW) with mandatory human confirmation records.
+- [x] Implement cooling valve stroke test (no CHW) with mandatory human confirmation records — **v1:** **`commissioning-confirm-prompt`** re-writes **`ao_chw_valve`** for each **`operator_prompt_confirm`** after a **`write_analog_percent`** on that object, sets **`session prompt_confirm.<prompt_id>`**; **`record-step passed/manual_passed`** on **`cooling_valve_stroke_no_chw`** or steps with **`arms_test_mode_state_key: chw_valve_stroke_no_plant`** requires those session flags ( **`PROMPTS_NOT_CONFIRMED`** if missing). **Not** full UI prompts.
 - [ ] Implement heating/cooling modulation test scaffolds with skippable/manual-pass controls — **partial:** **`bacnet-modulation-sweep`** (multi **`--command-percents`**, session RAT via **`session_return_air_temperature_key`**) + optional **`record-step`** sweep on pass; **`skip_when`** + session truthy gate for **`record-step skipped`**; **`print-job-graph`** surfaces **`skip_gated_steps`** / **`modulation_action_steps`**; **not** full guided step engine / skip UI.
 
 **Deliverables**

@@ -18,3 +18,4 @@ Use when a choice is **non-obvious** or you will forget **why** you chose it.
 | [0004](0004-bacpypes3-for-writeproperty.md) | BACpypes3 for WriteProperty; minimal UDP for smoke probes | Accepted |
 | [0005](0005-commissioning-bacnet-adapter-facade.md) | `CommissioningBACnetAdapter` façade over B/IP probe + BACpypes3 client | Accepted |
 | [0006](0006-commissioning-report-modulation-samples.md) | Commissioning report: thermal modulation samples/batch + CSV export | Accepted |
+| [0007](0007-chw-valve-stroke-prompt-confirm-cli.md) | CHW valve stroke (no CHW): `commissioning-confirm-prompt` + `record-step` gate | Accepted |
