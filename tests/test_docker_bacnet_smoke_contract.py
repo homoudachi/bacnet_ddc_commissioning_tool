@@ -48,6 +48,17 @@ class DockerBacnetSmokeContractTests(unittest.TestCase):
         self.assertIn("av_supply_fan_command", ids)
         self.assertIn("av_exhaust_fan_command", ids)
 
+    def test_docker_bacnet_smoke_script_exercises_analog_writes(self) -> None:
+        script = ROOT / "tools" / "simulator" / "docker_bacnet_smoke.sh"
+        body = script.read_text(encoding="utf-8")
+        for needle in (
+            "av_electric_heat_command",
+            "ao_chw_valve",
+            "HRV-DOCKER:av_supply_fan_command",
+            "HRV-DOCKER:av_exhaust_fan_command",
+        ):
+            self.assertIn(needle, body, msg=f"missing smoke fragment: {needle!r}")
+
 
 if __name__ == "__main__":
     unittest.main()

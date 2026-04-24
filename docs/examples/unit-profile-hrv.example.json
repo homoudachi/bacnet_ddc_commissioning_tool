@@ -12,14 +12,20 @@
     }
   },
   "commissioning_write_allowlist": [
-    "msv_test_mode"
+    "msv_test_mode",
+    "av_supply_fan_command",
+    "av_exhaust_fan_command"
   ],
   "commissioning_read_allowlist": [
     "msv_test_mode",
-    "ai_supply_air_temperature"
+    "ai_supply_air_temperature",
+    "av_supply_fan_command",
+    "av_exhaust_fan_command"
   ],
   "point_checkout": [
-    { "object_id": "msv_test_mode", "property": "presentValue" }
+    { "object_id": "msv_test_mode", "property": "presentValue" },
+    { "object_id": "av_supply_fan_command", "property": "presentValue" },
+    { "object_id": "av_exhaust_fan_command", "property": "presentValue" }
   ],
   "unit_specs": {
     "design_supply_airflow_L_s": 47.2,

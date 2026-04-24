@@ -40,7 +40,7 @@ python3 tools/runtime/app.py verify-bip-list \
 
 Expected: `"strict_pass": true`, `"total": 3`, all controllers **`reachable_verified`**.
 
-After probes, CI also runs **`bacnet-read`** (FCU **`ai_sat`**, HRV **`msv_test_mode`** + **`ai_supply_air_temperature`**), **`dry-run-bacnet-write --execute`** on **`msv_test_mode`** for **FCU-DOCKER** and **HRV-DOCKER** (with read-back), and **`bacnet-point-checkout`** for both profiles.
+After probes, CI also runs **`bacnet-read`** (FCU **`ai_sat`**, HRV **`msv_test_mode`**, **`ai_supply_air_temperature`**, **`av_supply_fan_command`**, **`av_exhaust_fan_command`**), **`dry-run-bacnet-write --execute`** on **`msv_test_mode`** (FCU + HRV) plus **analog** writes on FCU **`av_electric_heat_command`** / **`ao_chw_valve`** and HRV fan commands (each with read-back), and **`bacnet-point-checkout`** for both profiles.
 
 ## Stop
 

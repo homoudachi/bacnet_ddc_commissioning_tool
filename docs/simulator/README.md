@@ -41,7 +41,7 @@ A **runnable** single-device simulator ships in this repository:
 - Image source: `docker/simulator/bacnet-device/` (Python + bacpypes3 UDP server)
 - Runbook: `docker/simulator/README.md`
 
-CI runs `tools/simulator/docker_bacnet_smoke.sh` (builds images, starts **three** sim containers on `127.0.0.1:47808`–`47810`, then **`verify-bip-list --strict`**, **`bacnet-read`**, **`dry-run-bacnet-write --execute`** + read-back, **`bacnet-point-checkout`**, then tears down).
+CI runs `tools/simulator/docker_bacnet_smoke.sh` (builds images, starts **three** sim containers on `127.0.0.1:47808`–`47810`, then **`verify-bip-list --strict`**, **`bacnet-read`**, **`dry-run-bacnet-write --execute`** + read-back on **MSV and analog** points (FCU heat / CHW valve; HRV supply and exhaust fan commands), **`bacnet-point-checkout`**, then tears down).
 
 ## Docker topology profiles (longer-term lab spec)
 

@@ -57,7 +57,13 @@ assert rows['HRV-DOCKER']['status']=='reachable_verified'
 
 BACNET_READ_FLAGS="--timeout-seconds 2.0 --retries 3"
 
-for pair in "FCU-DOCKER:ai_sat" "FCU-DOCKER-B:ai_sat" "HRV-DOCKER:msv_test_mode" "HRV-DOCKER:ai_supply_air_temperature"; do
+for pair in \
+  "FCU-DOCKER:ai_sat" \
+  "FCU-DOCKER-B:ai_sat" \
+  "HRV-DOCKER:msv_test_mode" \
+  "HRV-DOCKER:ai_supply_air_temperature" \
+  "HRV-DOCKER:av_supply_fan_command" \
+  "HRV-DOCKER:av_exhaust_fan_command"; do
   label="${pair%%:*}"
   oid="${pair##*:}"
   out="$(python3 "$ROOT/tools/runtime/app.py" bacnet-read \
@@ -96,7 +102,50 @@ r2="$(python3 "$ROOT/tools/runtime/app.py" bacnet-read --run-dir "$RUN_DIR" \
 echo "$r2"
 echo "$r2" | grep -q '"value_str": "2"' || { echo "error: HRV-DOCKER MSV not 2 after write"; exit 2; }
 
-# Profile point_checkout lists (FCU: two points; HRV: one).
+# FCU: analog WriteProperty (heat AV) + read-back.
+wheat="$(python3 "$ROOT/tools/runtime/app.py" dry-run-bacnet-write \
+  --run-dir "$RUN_DIR" --controller-label FCU-DOCKER \
+  --object-id av_electric_heat_command --value 37.5 --execute $WRITE_FLAGS)"
+echo "$wheat"
+echo "$wheat" | grep -q '"status": "write_ok"' || { echo "error: FCU-DOCKER heat AV write failed"; exit 2; }
+rheat="$(python3 "$ROOT/tools/runtime/app.py" bacnet-read --run-dir "$RUN_DIR" \
+  --controller-label FCU-DOCKER --object-id av_electric_heat_command $BACNET_READ_FLAGS)"
+echo "$rheat"
+echo "$rheat" | grep -q '"value_str": "37.5"' || { echo "error: FCU-DOCKER heat AV not 37.5 after write"; exit 2; }
+
+# FCU: analog WriteProperty (CHW valve AO) + read-back.
+wvalve="$(python3 "$ROOT/tools/runtime/app.py" dry-run-bacnet-write \
+  --run-dir "$RUN_DIR" --controller-label FCU-DOCKER-B \
+  --object-id ao_chw_valve --value 62 --execute $WRITE_FLAGS)"
+echo "$wvalve"
+echo "$wvalve" | grep -q '"status": "write_ok"' || { echo "error: FCU-DOCKER-B valve AO write failed"; exit 2; }
+rvalve="$(python3 "$ROOT/tools/runtime/app.py" bacnet-read --run-dir "$RUN_DIR" \
+  --controller-label FCU-DOCKER-B --object-id ao_chw_valve $BACNET_READ_FLAGS)"
+echo "$rvalve"
+echo "$rvalve" | grep -q '"value_str": "62"' || { echo "error: FCU-DOCKER-B valve AO not 62 after write"; exit 2; }
+
+# HRV: analog WriteProperty on supply + exhaust fan commands + read-back.
+wsup="$(python3 "$ROOT/tools/runtime/app.py" dry-run-bacnet-write \
+  --run-dir "$RUN_DIR" --controller-label HRV-DOCKER \
+  --object-id av_supply_fan_command --value 55 --execute $WRITE_FLAGS)"
+echo "$wsup"
+echo "$wsup" | grep -q '"status": "write_ok"' || { echo "error: HRV-DOCKER supply fan AV write failed"; exit 2; }
+rsup="$(python3 "$ROOT/tools/runtime/app.py" bacnet-read --run-dir "$RUN_DIR" \
+  --controller-label HRV-DOCKER --object-id av_supply_fan_command $BACNET_READ_FLAGS)"
+echo "$rsup"
+echo "$rsup" | grep -q '"value_str": "55"' || { echo "error: HRV-DOCKER supply fan AV not 55 after write"; exit 2; }
+
+wexh="$(python3 "$ROOT/tools/runtime/app.py" dry-run-bacnet-write \
+  --run-dir "$RUN_DIR" --controller-label HRV-DOCKER \
+  --object-id av_exhaust_fan_command --value 33 --execute $WRITE_FLAGS)"
+echo "$wexh"
+echo "$wexh" | grep -q '"status": "write_ok"' || { echo "error: HRV-DOCKER exhaust fan AV write failed"; exit 2; }
+rexh="$(python3 "$ROOT/tools/runtime/app.py" bacnet-read --run-dir "$RUN_DIR" \
+  --controller-label HRV-DOCKER --object-id av_exhaust_fan_command $BACNET_READ_FLAGS)"
+echo "$rexh"
+echo "$rexh" | grep -q '"value_str": "33"' || { echo "error: HRV-DOCKER exhaust fan AV not 33 after write"; exit 2; }
+
+# Profile point_checkout lists (FCU: four points; HRV: three).
 pc1="$(python3 "$ROOT/tools/runtime/app.py" bacnet-point-checkout \
   --run-dir "$RUN_DIR" --controller-label FCU-DOCKER $BACNET_READ_FLAGS)"
 echo "$pc1"
