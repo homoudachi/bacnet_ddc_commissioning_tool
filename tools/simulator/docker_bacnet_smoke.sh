@@ -47,11 +47,12 @@ echo "$SUMMARY"
 echo "$SUMMARY" | python3 -c "import json,sys
 s=json.load(sys.stdin)
 assert s.get('strict_pass') is True, s
-assert s.get('total')==2, s
+assert s.get('total')==3, s
 assert s.get('unresolved')==0, s
 rows={r['controller_label']:r for r in s.get('rows',[])}
 assert rows['FCU-DOCKER']['status']=='reachable_verified'
 assert rows['FCU-DOCKER-B']['status']=='reachable_verified'
+assert rows['HRV-DOCKER']['status']=='reachable_verified'
 "
 
 echo "docker_bacnet_smoke_ok=true"

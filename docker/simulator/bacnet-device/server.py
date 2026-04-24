@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""UDP BACnet/IP loopback-style device for Docker (FCU-style objects).
+"""UDP BACnet/IP lab device for Docker (FCU or HRV profile shapes).
 
 Responds to Who-Is, ReadProperty (present-value), WriteProperty (present-value)
-for a small fixed object set matching docs/examples FCU profile instances.
+for object sets aligned with docs/examples unit-profile-fcu / unit-profile-hrv.
 """
 
 from __future__ import annotations
@@ -28,8 +28,13 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _env_str(name: str, default: str) -> str:
+    return str(os.environ.get(name, default)).strip().lower()
+
+
 DEVICE_INSTANCE = _env_int("DEVICE_INSTANCE", 21001)
 UDP_PORT = _env_int("BACNET_UDP_PORT", 47808)
+SIM_PROFILE = _env_str("SIM_PROFILE", "fcu")
 
 
 def _bvlc_original_unicast(npdu_and_apdu: bytes) -> bytes:
@@ -52,10 +57,20 @@ def _extract_apdu(data: bytes) -> bytes | None:
 class BacnetSimState:
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self.ai_present = _env_float("SIM_AI_SAT", 21.5)
-        self.msv_present = _env_int("SIM_MSV_TEST_MODE", 1)
-        self.av_heat = _env_float("SIM_AV_HEAT", 0.0)
-        self.ao_valve = _env_float("SIM_AO_CHW_VALVE", 0.0)
+        self.profile = SIM_PROFILE
+        if self.profile == "hrv":
+            self.msv_present = _env_int("SIM_MSV_TEST_MODE", 1)
+            self.bi_fan_active = _env_int("SIM_BI_FAN_ACTIVE", 0) != 0
+            self.ai_oa = _env_float("SIM_AI_OA_TEMP", 10.0)
+            self.ai_supply = _env_float("SIM_AI_SUPPLY_TEMP", 20.0)
+            self.ai_exhaust = _env_float("SIM_AI_EXHAUST_TEMP", 19.0)
+            self.av_supply_cmd = _env_float("SIM_AV_SUPPLY_FAN", 50.0)
+            self.av_exhaust_cmd = _env_float("SIM_AV_EXHAUST_FAN", 50.0)
+        else:
+            self.ai_present = _env_float("SIM_AI_SAT", 21.5)
+            self.msv_present = _env_int("SIM_MSV_TEST_MODE", 1)
+            self.av_heat = _env_float("SIM_AV_HEAT", 0.0)
+            self.ao_valve = _env_float("SIM_AO_CHW_VALVE", 0.0)
 
     def handle(self, sock: socket.socket, addr: tuple[str, int], apdu_bytes: bytes) -> None:
         from bacpypes3.apdu import (
@@ -70,9 +85,9 @@ class BacnetSimState:
             UnconfirmedServiceChoice,
             WritePropertyRequest,
         )
-        from bacpypes3.basetypes import PropertyIdentifier, Segmentation
+        from bacpypes3.basetypes import Segmentation
         from bacpypes3.constructeddata import Any
-        from bacpypes3.primitivedata import ObjectIdentifier, Real, Unsigned
+        from bacpypes3.primitivedata import Boolean, ObjectIdentifier, Real, Unsigned
         from bacpypes3.pdu import IPv4Address, PDU
 
         src = IPv4Address(f"{addr[0]}:{addr[1]}")
@@ -102,22 +117,8 @@ class BacnetSimState:
                 return
             ot = int(req.objectIdentifier[0])
             oi = int(req.objectIdentifier[1])
-            with self._lock:
-                ai_val = self.ai_present
-                msv_val = self.msv_present
-                av_heat = self.av_heat
-                ao_valve = self.ao_valve
-            if ot == 0 and oi == 2:
-                payload = Any(Real(ai_val))
-            elif ot == 19 and oi == 50:
-                payload = Any(Unsigned(msv_val))
-            elif ot == 2 and oi == 3:
-                payload = Any(Real(av_heat))
-            elif ot == 2 and oi == 4:
-                payload = Any(Real(av_heat))
-            elif ot == 1 and oi == 5:
-                payload = Any(Real(ao_valve))
-            else:
+            payload = self._read_payload(ot, oi)
+            if payload is None:
                 return
             ack = ReadPropertyACK(
                 objectIdentifier=req.objectIdentifier,
@@ -139,27 +140,101 @@ class BacnetSimState:
                 return
             ot_w = int(wreq.objectIdentifier[0])
             oi_w = int(wreq.objectIdentifier[1])
-            if ot_w == 19 and oi_w == 50:
-                new_val = int(wreq.propertyValue.cast_out(Unsigned))
-                with self._lock:
-                    self.msv_present = new_val
-            elif ot_w == 2 and oi_w == 3:
-                new_val = float(wreq.propertyValue.cast_out(Real))
-                with self._lock:
-                    self.av_heat = new_val
-            elif ot_w == 2 and oi_w == 4:
-                new_val = float(wreq.propertyValue.cast_out(Real))
-                with self._lock:
-                    self.av_heat = new_val
-            elif ot_w == 1 and oi_w == 5:
-                new_val = float(wreq.propertyValue.cast_out(Real))
-                with self._lock:
-                    self.ao_valve = new_val
-            else:
+            if not self._apply_write(ot_w, oi_w, wreq.propertyValue):
                 return
             sack = SimpleAckPDU(service_choice=ConfirmedServiceChoice.writeProperty, context=inc)
             wire = sack.encode().pduData
             sock.sendto(_bvlc_original_unicast(b"\x01\x00" + wire), addr)
+
+    def _read_payload(self, ot: int, oi: int):
+        from bacpypes3.constructeddata import Any
+        from bacpypes3.primitivedata import Boolean, Real, Unsigned
+
+        if self.profile == "hrv":
+            with self._lock:
+                msv = self.msv_present
+                bi_act = self.bi_fan_active
+                oa = self.ai_oa
+                sup = self.ai_supply
+                exh = self.ai_exhaust
+                sc = self.av_supply_cmd
+                ec = self.av_exhaust_cmd
+            if ot == 19 and oi == 60:
+                return Any(Unsigned(msv))
+            if ot == 3 and oi == 9:
+                return Any(Boolean(bool(bi_act)))
+            if ot == 0 and oi == 14:
+                return Any(Real(oa))
+            if ot == 0 and oi == 15:
+                return Any(Real(sup))
+            if ot == 0 and oi == 16:
+                return Any(Real(exh))
+            if ot == 2 and oi == 12:
+                return Any(Real(sc))
+            if ot == 2 and oi == 13:
+                return Any(Real(ec))
+            return None
+
+        with self._lock:
+            ai_val = self.ai_present
+            msv_val = self.msv_present
+            av_heat = self.av_heat
+            ao_valve = self.ao_valve
+        if ot == 0 and oi == 2:
+            return Any(Real(ai_val))
+        if ot == 19 and oi == 50:
+            return Any(Unsigned(msv_val))
+        if ot == 2 and oi == 3:
+            return Any(Real(av_heat))
+        if ot == 2 and oi == 4:
+            return Any(Real(av_heat))
+        if ot == 1 and oi == 5:
+            return Any(Real(ao_valve))
+        return None
+
+    def _apply_write(self, ot_w: int, oi_w: int, prop_value) -> bool:
+        from bacpypes3.primitivedata import Real, Unsigned
+
+        if self.profile == "hrv":
+            if ot_w == 19 and oi_w == 60:
+                new_val = int(prop_value.cast_out(Unsigned))
+                with self._lock:
+                    self.msv_present = new_val
+                return True
+            if ot_w == 2 and oi_w == 12:
+                new_val = float(prop_value.cast_out(Real))
+                with self._lock:
+                    self.av_supply_cmd = new_val
+                return True
+            if ot_w == 2 and oi_w == 13:
+                new_val = float(prop_value.cast_out(Real))
+                with self._lock:
+                    self.av_exhaust_cmd = new_val
+                return True
+            return False
+
+
+        if ot_w == 19 and oi_w == 50:
+            new_val = int(prop_value.cast_out(Unsigned))
+            with self._lock:
+                self.msv_present = new_val
+            return True
+        if ot_w == 2 and oi_w == 3:
+            new_val = float(prop_value.cast_out(Real))
+            with self._lock:
+                self.av_heat = new_val
+            return True
+        if ot_w == 2 and oi_w == 4:
+            new_val = float(prop_value.cast_out(Real))
+            with self._lock:
+                self.av_heat = new_val
+            return True
+        if ot_w == 1 and oi_w == 5:
+            new_val = float(prop_value.cast_out(Real))
+            with self._lock:
+                self.ao_valve = new_val
+            return True
+        return False
 
 
 def main() -> None:
@@ -168,7 +243,7 @@ def main() -> None:
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind(("0.0.0.0", UDP_PORT))
     print(
-        f"bacnet_sim_device listening udp=0.0.0.0:{UDP_PORT} "
+        f"bacnet_sim_device profile={state.profile} udp=0.0.0.0:{UDP_PORT} "
         f"device_instance={DEVICE_INSTANCE}",
         flush=True,
     )

@@ -161,7 +161,7 @@ Exact file format (JSON, YAML, SQLite job DB, etc.) is TBD; the above is the **i
 ### BACnet simulation and CI
 
 - **Goal:** heavy **automated simulation and regression** before relying on field panels alone.
-- **Shipped slice:** `docker/simulator/` **bacnet-dev** profile — one **buildable** BACnet/IP UDP device (`docker/simulator/bacnet-device/`), CI smoke via `tools/simulator/docker_bacnet_smoke.sh` + `docs/examples/site-controllers.docker-bacnet-sim.csv`.
+- **Shipped slice:** `docker/simulator/` **bacnet-dev** profile — **buildable** BACnet/IP UDP sim (`docker/simulator/bacnet-device/`) with **`SIM_PROFILE`** (`fcu` / `hrv`), **three** published ports on loopback, CI smoke via `tools/simulator/docker_bacnet_smoke.sh` + `docs/examples/site-controllers.docker-bacnet-sim.csv`.
 - **Longer-term baseline (spec):** Docker lab with multiple profiles (`ci` / `lab` / `multisubnet`) — see [docs/simulator/README.md](simulator/README.md) “planned” sections.
 - **Discovery and verification mode:** list-first, verify-all. The system attempts every imported controller row and emits a terminal status for each row (no silent skip).
 - **Strict CI gate:** fail CI when required rows are unresolved, identity mismatched, or missing required points.
@@ -243,7 +243,7 @@ These are the main gaps once requirements feel “complete enough” to start co
 - **RAT proxy rules** — if using **HRV return** for **FCU** commissioning, document **eligibility** and UI warnings.
 - **Report layout** — PDF section order, logo/branding, one table vs multiple charts; **CSV vs XLSX** column order frozen for integrators.
 - **Structured log** — **v1 slice:** append-only **JSON Lines** at `logs/events.jsonl` per run-dir; **rotation / retention / portable exe paths** still to define.
-- **Docker BACnet sim (beyond one device)** — multi-device images, orchestrator-in-container, BBMD lab parity; single-device **bacnet-dev** is in-repo.
+- **Docker BACnet sim (beyond bacnet-dev)** — orchestrator-in-container, BBMD / macvlan lab parity; **bacnet-dev** already runs **three** logical devices (two FCU + one HRV-shaped).
 - **BACnet stack** — Windows portable build packaging; **read/write batching**, **COV/subscribe**, and **sweep-timeouts** beyond the current [`CommissioningBACnetAdapter`](../tools/bacnet/adapter.py) façade.
 - **Build and signing** — still **TBD** (toolchain, certificate, release channel).
 

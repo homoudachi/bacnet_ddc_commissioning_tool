@@ -43,6 +43,28 @@ services:
     networks:
       - bacnet_lab
 
+  bacnet-hrv-sim:
+    build:
+      context: ./bacnet-device
+      dockerfile: Dockerfile
+    image: bacnet-ddc-commissioning-tool/bacnet-fcu-sim:local
+    profiles: ["bacnet-dev"]
+    ports:
+      - "127.0.0.1:47810:47810/udp"
+    environment:
+      SIM_PROFILE: "hrv"
+      DEVICE_INSTANCE: "22001"
+      BACNET_UDP_PORT: "47810"
+      SIM_MSV_TEST_MODE: "1"
+      SIM_BI_FAN_ACTIVE: "1"
+      SIM_AI_OA_TEMP: "8.5"
+      SIM_AI_SUPPLY_TEMP: "19.2"
+      SIM_AI_EXHAUST_TEMP: "18.0"
+      SIM_AV_SUPPLY_FAN: "45"
+      SIM_AV_EXHAUST_FAN: "44"
+    networks:
+      - bacnet_lab
+
 networks:
   bacnet_lab:
     driver: bridge

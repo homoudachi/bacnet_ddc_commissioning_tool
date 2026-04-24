@@ -14,8 +14,9 @@ Services (profile **`bacnet-dev`**):
 
 | Container | Host UDP | Device instance | Notes |
 |-----------|----------|-----------------|--------|
-| `bacnet-fcu-sim` | `127.0.0.1:47808` | 21001 | Default SAT/MSV |
-| `bacnet-fcu-sim-02` | `127.0.0.1:47809` | 21002 | Different SAT/MSV via `SIM_*` env |
+| `bacnet-fcu-sim` | `127.0.0.1:47808` | 21001 | `SIM_PROFILE=fcu` (default): FCU object instances |
+| `bacnet-fcu-sim-02` | `127.0.0.1:47809` | 21002 | FCU profile; different SAT/MSV via `SIM_*` |
+| `bacnet-hrv-sim` | `127.0.0.1:47810` | 22001 | `SIM_PROFILE=hrv`: MSV instance **60**, temps, fan cmds (see `server.py`) |
 
 ## Smoke test with the runtime CLI
 
@@ -37,7 +38,7 @@ python3 tools/runtime/app.py verify-bip-list \
   --retries 2
 ```
 
-Expected: `"strict_pass": true`, `"total": 2`, both controllers **`reachable_verified`**.
+Expected: `"strict_pass": true`, `"total": 3`, all controllers **`reachable_verified`**.
 
 ## Stop
 
@@ -48,4 +49,4 @@ docker compose -f docker/simulator/docker-compose.yml --profile bacnet-dev down
 ## Implementation notes
 
 - Image: `docker/simulator/bacnet-device/` — Python 3.12 + **bacpypes3**, same object instances as the in-process test fake (`analogInput` 2, `multiStateValue` 50, `analogValue` 3/4, `analogOutput` 5).
-- Environment: `DEVICE_INSTANCE` (default `21001`), `BACNET_UDP_PORT` (default `47808`), optional `SIM_*` initial values (see `server.py`).
+- Environment: `DEVICE_INSTANCE`, `BACNET_UDP_PORT`, `SIM_PROFILE` (`fcu` default or `hrv` for HRV example objects), optional `SIM_*` initial values (see `server.py`).
