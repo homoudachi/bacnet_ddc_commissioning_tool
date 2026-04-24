@@ -7,7 +7,7 @@ Audience: future you. Update when intent, behavior, or exports change.
 - Repository state: **documentation plus Python CLIs** (`tools/`: simulator list verification, import compiler with **duplicate BACnet/IP endpoint warnings** and **unknown CSV column** warnings per **ADR 0011**, runtime commissioning helpers including **validate-import** dry compile, **print-job-graph** (per-controller **skip_gated_steps** / **modulation_action_steps** counts from compiled flow), **flow/session inspection**, **run summary export** + optional **CSV**, **audited flow re-init**, **BACnet façade** [`tools/bacnet/adapter.py`](../tools/bacnet/adapter.py), **profile allowlisted BACnet read/write**, **`point_checkout`** batch reads, CLI flags **`--apdu-timeout`** / echoed **`bacnet_timeouts`** in artifacts, **record-step** policy (point checkout gate, **skip_when** session gate for skips, optional **modulation sweep** on pass), and **`bacnet-modulation-sweep`** with **multi-setpoint** and **session RAT** fallback). **Windows:** optional **PyInstaller** single-file **`bacnet-commissioning.exe`** ([`docs/packaging/windows-exe.md`](packaging/windows-exe.md), **ADR 0012**). **ADRs 0009–0011** lock **v1 stack** (Python CLI), **reporting libraries** (stdlib + openpyxl + fpdf2), and **`site-controllers` v1 columns** ([`docs/schema/site-controllers-v1.csv.md`](schema/site-controllers-v1.csv.md)). **Unit tests** include a **loopback BACnet fake peer** (BACpypes3-shaped frames) exercising **`bacnet-read`**, **`dry-run-bacnet-write --execute`**, **`bacnet-point-checkout`**, and modulation paths without field hardware.
 - This document is the source of truth for product intent; align runnable steps with [`README.md`](../README.md).
 - Active implementation roadmap lives in: [`docs/plans/2026-04-21-v1-foundation-plan.md`](plans/2026-04-21-v1-foundation-plan.md).
-- **Unified commissioning export contract:** [**ADR 0014**](adr/0014-unified-commissioning-report-export-contract.md) and [**`docs/schema/commissioning-report-unified-csv-v1.md`**](schema/commissioning-report-unified-csv-v1.md) (column order = `COMMISSIONING_REPORT_UNIFIED_FIELDNAMES` in `tools/runtime/app.py`).
+- **Unified commissioning export contract:** [**ADR 0014**](adr/0014-unified-commissioning-report-export-contract.md) and [**`docs/schema/commissioning-report-unified-csv-v1.md`**](schema/commissioning-report-unified-csv-v1.md) (**generated** from `COMMISSIONING_REPORT_UNIFIED_FIELDNAMES` via **`tools/schema/gen_commissioning_report_unified_csv_doc.py`**).
 
 ## Goal
 
@@ -170,7 +170,7 @@ Exact file format (JSON, YAML, SQLite job DB, etc.) is TBD; the above is the **i
 
 ### Build and signing (Windows portable exe)
 
-**Shipped slice:** **PyInstaller** `--onefile` → **`bacnet-commissioning.exe`** (see [**`docs/packaging/windows-exe.md`**](packaging/windows-exe.md) and **ADR 0012**). **Code signing** still TBD (SmartScreen may warn); **AV false-positive** mitigation is operator/IT policy for now.
+**Shipped slice:** **PyInstaller** `--onefile` → **`bacnet-commissioning.exe`** (see [**`docs/packaging/windows-exe.md`**](packaging/windows-exe.md) and **ADR 0012**). **Code signing** is optional for v1 (unsigned builds run; **SmartScreen** may show an extra “unknown publisher” step—see **Code signing** in that doc for cost and when to buy a cert); **AV false-positive** mitigation is operator/IT policy for now.
 
 ### Example profiles (illustrative JSON)
 

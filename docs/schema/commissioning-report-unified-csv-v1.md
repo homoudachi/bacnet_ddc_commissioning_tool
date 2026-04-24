@@ -1,6 +1,11 @@
 # Unified commissioning report CSV — v1 column contract
 
-This document describes the **header row** produced by **`export-commissioning-report --output-csv-unified`** (and mirrored in **HTML / XLSX / PDF** unified exports). The canonical column order is defined in code as **`COMMISSIONING_REPORT_UNIFIED_FIELDNAMES`** in `tools/runtime/app.py`; **ADR 0014** records versioning policy.
+This file is **generated**. Do not edit the **Column list** table by hand.
+
+- **Source of truth (order + names):** `COMMISSIONING_REPORT_UNIFIED_FIELDNAMES` in `tools/runtime/app.py`.
+- **Regenerate:** `python3 tools/schema/gen_commissioning_report_unified_csv_doc.py`
+- **CI:** `python3 tools/schema/gen_commissioning_report_unified_csv_doc.py --check`
+- **ADR:** [0014](../adr/0014-unified-commissioning-report-export-contract.md)
 
 ## Column list (order)
 

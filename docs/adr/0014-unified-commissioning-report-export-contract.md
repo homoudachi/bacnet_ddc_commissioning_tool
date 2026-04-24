@@ -11,7 +11,7 @@ Accepted
 ## Decision
 
 1. **Canonical column order** — **`COMMISSIONING_REPORT_UNIFIED_FIELDNAMES`** in `tools/runtime/app.py` is the **single source of truth** for unified export headers.
-2. **Human-readable mirror** — [`docs/schema/commissioning-report-unified-csv-v1.md`](../schema/commissioning-report-unified-csv-v1.md) documents each column and maps **`kind`** → typical populated fields.
+2. **Human-readable mirror** — [`docs/schema/commissioning-report-unified-csv-v1.md`](../schema/commissioning-report-unified-csv-v1.md) is **generated** from that tuple via **`python3 tools/schema/gen_commissioning_report_unified_csv_doc.py`** (per-column descriptions live in **`COLUMN_HELP`** in that script). **`--check`** is used in CI so the committed doc cannot drift from code.
 3. **Versioning rules**
    - **Additive** changes (new optional column at end, new `kind` with sparse columns) — update the schema doc + this ADR note; prefer **append-only** columns.
    - **Breaking** changes (rename, reorder, remove column) — bump to **unified CSV v2** (new doc filename / section), announce in `docs/project.md`, and treat as a migration for integrators.
@@ -19,5 +19,5 @@ Accepted
 
 ## Consequences
 
-- PRs that change **`COMMISSIONING_REPORT_UNIFIED_FIELDNAMES`** or row shaping must **update the schema doc** (and ADR if versioning rules change).
+- PRs that add/rename/remove unified columns must update **`COMMISSIONING_REPORT_UNIFIED_FIELDNAMES`** and **`COLUMN_HELP`** in `tools/schema/gen_commissioning_report_unified_csv_doc.py`, then run **`python3 tools/schema/gen_commissioning_report_unified_csv_doc.py`** to refresh the markdown (and ADR if versioning rules change).
 - Customer-branded PDF layouts (ADR 0010) still sit on top of this flat contract until a dedicated template ADR exists.
