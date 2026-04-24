@@ -4064,6 +4064,33 @@ class RuntimeCliTests(unittest.TestCase):
                     "1",
                 )
                 self.assertEqual(0, c.returncode, c.stdout + c.stderr)
+                self.assertIn("commissioning_report_json", c.stdout)
+
+            rep_path = self.run_dir / "artifacts" / "commissioning_report.json"
+            self.assertTrue(rep_path.is_file())
+            rdoc = json.loads(rep_path.read_text(encoding="utf-8"))
+            vrows = [
+                e
+                for e in rdoc.get("entries", [])
+                if isinstance(e, dict) and e.get("kind") == "valve_prompt_confirmation"
+            ]
+            self.assertEqual(2, len(vrows))
+            pids = {e.get("prompt_id") for e in vrows}
+            self.assertEqual({"chw_valve_at_100", "chw_valve_at_0"}, pids)
+
+            uni = self.run_dir / "artifacts" / "valve-prompt-unified.csv"
+            exu = _run_runtime(
+                "export-commissioning-report",
+                "--run-dir",
+                str(self.run_dir),
+                "--output-csv-unified",
+                str(uni),
+            )
+            self.assertEqual(0, exu.returncode)
+            ut = uni.read_text(encoding="utf-8")
+            self.assertIn("valve_prompt_confirmation", ut)
+            self.assertIn("prompt_id", ut)
+            self.assertIn("chw_valve_at_100", ut)
 
             sess = json.loads(
                 (

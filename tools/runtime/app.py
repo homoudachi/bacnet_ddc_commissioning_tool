@@ -1062,6 +1062,27 @@ def cmd_commissioning_confirm_prompt(args: argparse.Namespace) -> int:
             "session_state_json": str(session_path.resolve()),
         },
     )
+    rep_path = _append_commissioning_report_entry(
+        run_dir,
+        {
+            "ts": _utc_timestamp(),
+            "kind": "valve_prompt_confirmation",
+            "controller_label": args.controller_label,
+            "step_id": args.step_id,
+            "report_ref": "",
+            "technician_name": str(args.technician_name).strip(),
+            "note": str(getattr(args, "note", "") or ""),
+            "prompt_id": prompt_id,
+            "session_key": session_key,
+            "command_object_id": "ao_chw_valve",
+            "command_percent": float(write_pct),
+        },
+    )
+    _append_event(
+        logs_path,
+        "commissioning_valve_prompt_report_appended",
+        {"commissioning_report_json": str(rep_path.resolve())},
+    )
     print(
         json.dumps(
             {
@@ -1071,6 +1092,7 @@ def cmd_commissioning_confirm_prompt(args: argparse.Namespace) -> int:
                 "prompt_id": prompt_id,
                 "session_key": session_key,
                 "write_percent": float(write_pct),
+                "commissioning_report_json": str(rep_path.resolve()),
             },
             indent=2,
             sort_keys=True,
@@ -2659,6 +2681,7 @@ COMMISSIONING_REPORT_UNIFIED_FIELDNAMES: tuple[str, ...] = (
     "session_key",
     "target_flow_ratio_of_design",
     "design_supply_airflow_L_s",
+    "prompt_id",
 )
 
 
@@ -3070,6 +3093,45 @@ def _commissioning_report_unified_csv_rows(doc: dict) -> list[dict[str, str]]:
                     "session_key": str(ent.get("session_key", "")),
                     "target_flow_ratio_of_design": "",
                     "design_supply_airflow_L_s": "",
+                    "prompt_id": "",
+                }
+            )
+            continue
+
+        if kind == "valve_prompt_confirmation":
+            cmd_oid = str(ent.get("command_object_id", "ao_chw_valve"))
+            cmd_pct = str(ent.get("command_percent", ""))
+            rows.append(
+                {
+                    "entry_ts": base_ts,
+                    "kind": kind,
+                    "controller_label": ctrl,
+                    "step_id": step_id,
+                    "step_status": "",
+                    "report_ref": report_ref,
+                    "technician_name": tech,
+                    "note": note,
+                    "all_read_ok": "",
+                    "artifact_json": "",
+                    "command_object_id": cmd_oid,
+                    "command_percent": cmd_pct,
+                    "dwell_seconds": "",
+                    "sweep_index": "",
+                    "sweep_count": "",
+                    "trigger": "",
+                    "object_id": cmd_oid,
+                    "property": "presentValue",
+                    "status": "write_ok",
+                    "value_str": "confirmed",
+                    "read_source": "bacnet",
+                    "measurement_branch_id": "",
+                    "measured_flow_L_s": "",
+                    "measurement_tool": "",
+                    "design_flow_L_s": "",
+                    "session_key": str(ent.get("session_key", "")),
+                    "target_flow_ratio_of_design": "",
+                    "design_supply_airflow_L_s": "",
+                    "prompt_id": str(ent.get("prompt_id", "")),
                 }
             )
             continue
@@ -3111,6 +3173,7 @@ def _commissioning_report_unified_csv_rows(doc: dict) -> list[dict[str, str]]:
                     "session_key": "",
                     "target_flow_ratio_of_design": ratio_s,
                     "design_supply_airflow_L_s": str(dsa) if dsa != "" else "",
+                    "prompt_id": "",
                 }
             )
             continue
@@ -3146,6 +3209,7 @@ def _commissioning_report_unified_csv_rows(doc: dict) -> list[dict[str, str]]:
                     "session_key": str(ent.get("session_key", "")),
                     "target_flow_ratio_of_design": "",
                     "design_supply_airflow_L_s": "",
+                    "prompt_id": "",
                 }
             )
             continue
