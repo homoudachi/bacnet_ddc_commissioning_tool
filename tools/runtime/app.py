@@ -965,7 +965,14 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
                 )
             if want_pdf:
                 try:
-                    _write_commissioning_report_unified_pdf(Path(args.output_pdf), doc)
+                    logo_p = _resolve_commissioning_pdf_logo_path(
+                        run_dir, getattr(args, "pdf_logo_image", None)
+                    )
+                    _write_commissioning_report_unified_pdf(
+                        Path(args.output_pdf),
+                        doc,
+                        logo_image_path=logo_p,
+                    )
                 except RuntimeError as err:
                     print(f"error: {err}")
                     return 2
@@ -1092,7 +1099,14 @@ def cmd_export_commissioning_report(args: argparse.Namespace) -> int:
     pdf_out = getattr(args, "output_pdf", None)
     if pdf_out:
         try:
-            _write_commissioning_report_unified_pdf(Path(pdf_out), doc)
+            logo_p = _resolve_commissioning_pdf_logo_path(
+                run_dir, getattr(args, "pdf_logo_image", None)
+            )
+            _write_commissioning_report_unified_pdf(
+                Path(pdf_out),
+                doc,
+                logo_image_path=logo_p,
+            )
         except RuntimeError as err:
             print(f"error: {err}")
             return 2
@@ -1732,7 +1746,77 @@ def _pdf_cell_safe(text: str, max_len: int) -> str:
     return t.encode("ascii", errors="replace").decode("ascii")
 
 
-def _write_commissioning_report_unified_pdf(path: Path, doc: dict) -> None:
+def _resolve_commissioning_pdf_logo_path(
+    run_dir: Path, cli_path: Path | None
+) -> Path | None:
+    """Logo for PDF: explicit ``--pdf-logo-image``, else ``artifacts/branding/degree-logo.png``."""
+    if cli_path is not None:
+        p = Path(cli_path)
+        return p if p.is_file() else None
+    default = run_dir / "artifacts" / "branding" / "degree-logo.png"
+    return default if default.is_file() else None
+
+
+def _pdf_draw_degree_logo_vector(pdf, x: float, y: float) -> float:
+    """Draw a compact vector wordmark (brown #7C4200, orange #FF6000). Returns Y below block."""
+    brown = (124, 66, 0)
+    orange = (255, 96, 0)
+    h_main = 7.0
+    h_tag = 3.2
+    gap = 1.0
+    pdf.set_draw_color(*brown)
+    pdf.set_text_color(*brown)
+    pdf.set_font("Helvetica", size=11)
+    word_w = pdf.get_string_width("degree") + 1.0
+    pdf.text(x, y + h_main * 0.72, "degree")
+    # Stylised degree symbol: orange ring (ellipse outline)
+    cx = x + word_w + 3.5
+    cy = y + h_main * 0.35
+    pdf.set_draw_color(*orange)
+    pdf.set_line_width(0.9)
+    pdf.ellipse(cx - 2.8, cy - 2.8, 5.6, 5.6, style="D")
+    pdf.set_line_width(0.2)
+    pdf.set_draw_color(*brown)
+    pdf.set_font("Helvetica", size=5.5)
+    pdf.set_text_color(*brown)
+    tag = "air conditioning & electrical services"
+    pdf.text(x, y + h_main + gap + h_tag * 0.55, _pdf_cell_safe(tag, 120))
+    return y + h_main + gap + h_tag + 1.0
+
+
+def _pdf_draw_commissioning_logo_strip(
+    pdf,
+    *,
+    logo_image_path: Path | None,
+    x: float,
+    y: float,
+) -> float:
+    """Draw logo image (PNG/JPEG) or vector fallback. Returns Y coordinate below strip."""
+    if logo_image_path is not None and logo_image_path.is_file():
+        suffix = logo_image_path.suffix.lower()
+        if suffix in {".png", ".jpg", ".jpeg", ".gif"}:
+            try:
+                target_h = 14.0
+                pdf.image(
+                    str(logo_image_path),
+                    x=x,
+                    y=y,
+                    w=0,
+                    h=target_h,
+                    keep_aspect_ratio=True,
+                )
+                return y + target_h + 2.0
+            except Exception:
+                pass
+    return _pdf_draw_degree_logo_vector(pdf, x, y)
+
+
+def _write_commissioning_report_unified_pdf(
+    path: Path,
+    doc: dict,
+    *,
+    logo_image_path: Path | None = None,
+) -> None:
     """Write unified commissioning rows to PDF (landscape A4; requires fpdf2)."""
     try:
         from fpdf import FPDF
@@ -1751,7 +1835,18 @@ def _write_commissioning_report_unified_pdf(path: Path, doc: dict) -> None:
     pdf = FPDF(orientation="L", unit="mm", format="A4")
     pdf.set_auto_page_break(auto=True, margin=10)
     pdf.add_page()
+    margin_l = pdf.l_margin
+    usable_w = pdf.w - margin_l - pdf.r_margin
+    y_after_logo = _pdf_draw_commissioning_logo_strip(
+        pdf,
+        logo_image_path=logo_image_path,
+        x=margin_l,
+        y=pdf.get_y(),
+    )
+    pdf.set_y(y_after_logo)
+
     pdf.set_font("Helvetica", size=9)
+    pdf.set_text_color(0, 0, 0)
     pdf.cell(
         0,
         6,
@@ -1761,8 +1856,6 @@ def _write_commissioning_report_unified_pdf(path: Path, doc: dict) -> None:
     )
     pdf.ln(1)
 
-    margin_l = pdf.l_margin
-    usable_w = pdf.w - margin_l - pdf.r_margin
     col_w = usable_w / len(headers)
     row_h = 4
     y_bottom = pdf.h - 10
@@ -3352,6 +3445,16 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help=(
             "Also write unified rows to a landscape PDF table (.pdf; requires fpdf2)."
+        ),
+    )
+    export_cr.add_argument(
+        "--pdf-logo-image",
+        type=Path,
+        default=None,
+        help=(
+            "PNG/JPEG logo for PDF header (optional). If omitted, uses "
+            "<run-dir>/artifacts/branding/degree-logo.png when present; else a "
+            "built-in vector wordmark (brown/orange)."
         ),
     )
     export_cr.set_defaults(handler=cmd_export_commissioning_report)
