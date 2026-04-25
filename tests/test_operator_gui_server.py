@@ -49,6 +49,8 @@ class OperatorGuiTests(unittest.TestCase):
         self.assertIn("/api/v1/list-flows", body)
         self.assertIn("/api/v1/guidance", body)
         self.assertIn("/api/v1/record-step", body)
+        self.assertIn("Quick read", body)
+        self.assertIn("bacnet-quick-read", body)
         self.assertIn("Guided commissioning", body)
 
     def test_guided_api_command_allowlist_includes_point_checkout(self) -> None:
@@ -60,6 +62,7 @@ class OperatorGuiTests(unittest.TestCase):
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         self.assertIn("bacnet-point-checkout", mod._GUIDED_API_COMMANDS)
+        self.assertIn("dry-run-bacnet-write", mod._GUIDED_API_COMMANDS)
 
     def test_build_step_hints_valve_and_modulation(self) -> None:
         import importlib.util

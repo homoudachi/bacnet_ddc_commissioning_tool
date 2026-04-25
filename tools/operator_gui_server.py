@@ -44,6 +44,7 @@ ALLOWED_PREFIXES = (
     "set-session-value",
     "record-step",
     "bacnet-read",
+    "dry-run-bacnet-write",
     "bacnet-subscribe-cov",
     "bacnet-write-batch",
     "commissioning-airflow-adjust-write",
@@ -65,6 +66,7 @@ _GUIDED_API_COMMANDS = frozenset(
         "record-step",
         "bacnet-point-checkout",
         "bacnet-read",
+        "dry-run-bacnet-write",
         "bacnet-modulation-sweep",
         "commissioning-airflow-adjust-write",
         "commissioning-airflow-closed-loop-iterate",
@@ -378,6 +380,17 @@ details {{ margin-top: 0.5rem; color: var(--muted); font-size: 0.85rem; }}
 }}
 .action-box h4 {{ margin: 0 0 0.35rem; font-size: 0.88rem; color: var(--text); }}
 .small {{ font-size: 0.78rem; color: var(--muted); margin-top: 0.25rem; }}
+.quick-strip {{
+  display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem;
+  margin-top: 0.75rem; padding: 0.65rem; border-radius: 8px; border: 1px solid var(--border);
+  background: #0d1218;
+}}
+@media (max-width: 700px) {{
+  .quick-strip {{ grid-template-columns: 1fr; }}
+}}
+.quick-strip h4 {{ margin: 0 0 0.35rem; font-size: 0.85rem; color: var(--text); }}
+.chk {{ display: flex; align-items: center; gap: 0.4rem; margin-top: 0.5rem; font-size: 0.85rem; }}
+.chk input {{ width: auto; }}
 </style></head>
 <body>
 <header>
@@ -398,6 +411,25 @@ details {{ margin-top: 0.5rem; color: var(--muted); font-size: 0.85rem; }}
   <div class="panel">
     <h2 id="focusTitle">Select a controller</h2>
     <p id="nextHint" class="meta"></p>
+    <div class="quick-strip">
+      <div>
+        <h4>Quick read (allowlisted)</h4>
+        <label>Object id</label>
+        <input id="qrOid" placeholder="e.g. ai_sat or msv_test_mode"/>
+        <label>Property (optional)</label>
+        <input id="qrProp" placeholder="presentValue" value="presentValue"/>
+        <button type="button" class="secondary" id="btnQrRead">BACnet read</button>
+      </div>
+      <div>
+        <h4>Quick write (allowlisted)</h4>
+        <label>Object id</label>
+        <input id="qwOid" placeholder="e.g. msv_test_mode"/>
+        <label>Value (number; MSV = integer state)</label>
+        <input id="qwVal" placeholder="e.g. 3"/>
+        <div class="chk"><input type="checkbox" id="qwExec"/><label for="qwExec" style="margin:0">Execute write on wire (not dry-run)</label></div>
+        <button type="button" class="secondary" id="btnQwWrite">BACnet write</button>
+      </div>
+    </div>
     <div id="detailFlash" class="flash" style="display:none"></div>
     <div id="blockers" style="display:none">
       <h3>Why this step is blocked</h3>
@@ -960,6 +992,56 @@ document.getElementById("btnCheckout").addEventListener("click", async () => {{
     }});
     const ok = j.all_read_ok ? "Point checkout OK." : "Point checkout had failures (see CLI output).";
     showFlash(document.getElementById("detailFlash"), ok, !j.all_read_ok);
+  }} catch (e) {{
+    showFlash(document.getElementById("detailFlash"), String(e.message), true);
+  }}
+}});
+
+document.getElementById("btnQrRead").addEventListener("click", async () => {{
+  const c = document.getElementById("selCtl").value;
+  const object_id = document.getElementById("qrOid").value.trim();
+  const property = (document.getElementById("qrProp").value.trim() || "presentValue");
+  const technician_name = document.getElementById("commonTech").value.trim();
+  if (!c || !object_id) {{
+    showFlash(document.getElementById("detailFlash"), "Controller and object id required.", true);
+    return;
+  }}
+  try {{
+    const j = await apiJson("/api/v1/bacnet-quick-read", {{
+      method: "POST",
+      headers: {{ "Content-Type": "application/json" }},
+      body: JSON.stringify({{ controller: c, object_id, property }}),
+    }});
+    const st = j.status || "";
+    const vs = j.read && j.read.value_str != null ? j.read.value_str : (j.value_str || "");
+    showFlash(document.getElementById("detailFlash"), "Read " + st + (vs ? ": " + vs : ""), st !== "read_ok");
+  }} catch (e) {{
+    showFlash(document.getElementById("detailFlash"), String(e.message), true);
+  }}
+}});
+
+document.getElementById("btnQwWrite").addEventListener("click", async () => {{
+  const c = document.getElementById("selCtl").value;
+  const object_id = document.getElementById("qwOid").value.trim();
+  const raw = document.getElementById("qwVal").value.trim();
+  const technician_name = document.getElementById("commonTech").value.trim();
+  const execute = document.getElementById("qwExec").checked;
+  if (!c || !object_id || !raw) {{
+    showFlash(document.getElementById("detailFlash"), "Controller, object id, and value required.", true);
+    return;
+  }}
+  if (!technician_name) {{
+    showFlash(document.getElementById("detailFlash"), "Set shared technician name first.", true);
+    return;
+  }}
+  try {{
+    const j = await apiJson("/api/v1/bacnet-quick-write", {{
+      method: "POST",
+      headers: {{ "Content-Type": "application/json" }},
+      body: JSON.stringify({{ controller: c, object_id, value: raw, technician_name, note: "guided quick write", execute }}),
+    }});
+    const st = j.status || "";
+    showFlash(document.getElementById("detailFlash"), "Write result: " + st, st !== "write_ok" && execute);
   }} catch (e) {{
     showFlash(document.getElementById("detailFlash"), String(e.message), true);
   }}
@@ -1592,6 +1674,117 @@ class _Handler(BaseHTTPRequestHandler):
                     400,
                     {
                         "error": "commissioning-confirm-tachometer-reference failed",
+                        "stderr": err[-8000:],
+                        "stdout": out[-8000:],
+                        "parsed": data,
+                    },
+                )
+                return
+            if isinstance(data, dict):
+                self._send_json(200, data)
+            else:
+                self._send_json(200, {"ok": True, "stdout": out.strip()[:8000]})
+            return
+        if path == "/api/v1/bacnet-quick-read":
+            body = self._read_json_body()
+            if body is None:
+                self._send_json(400, {"error": "invalid JSON body"})
+                return
+            ctl = str(body.get("controller", "")).strip()
+            oid = str(body.get("object_id", "")).strip()
+            prop = str(body.get("property", "presentValue") or "presentValue").strip() or "presentValue"
+            if not ctl or not oid:
+                self._send_json(400, {"error": "controller and object_id required"})
+                return
+            if len(oid) > 128 or len(prop) > 64:
+                self._send_json(400, {"error": "object_id or property too long"})
+                return
+            argv = [
+                "bacnet-read",
+                "--controller-label",
+                ctl,
+                "--object-id",
+                oid,
+                "--property",
+                prop,
+            ]
+            _argv_append_optional_bacnet(argv, body)
+            if body.get("timeout_seconds") is not None and str(body.get("timeout_seconds")).strip() != "":
+                argv.extend(["--timeout-seconds", str(body["timeout_seconds"])])
+            if body.get("retries") is not None and str(body.get("retries")).strip() != "":
+                argv.extend(["--retries", str(int(body["retries"]))])
+            code, out, err = self._run_app_argv(argv, timeout=900)
+            data = self._parse_stdout_json(out)
+            if code != 0:
+                self._send_json(
+                    400,
+                    {
+                        "error": "bacnet-read failed",
+                        "stderr": err[-8000:],
+                        "stdout": out[-8000:],
+                        "parsed": data,
+                    },
+                )
+                return
+            if isinstance(data, dict):
+                self._send_json(200, data)
+            else:
+                self._send_json(200, {"ok": False, "raw_stdout": out.strip()[:8000]})
+            return
+        if path == "/api/v1/bacnet-quick-write":
+            body = self._read_json_body()
+            if body is None:
+                self._send_json(400, {"error": "invalid JSON body"})
+                return
+            ctl = str(body.get("controller", "")).strip()
+            oid = str(body.get("object_id", "")).strip()
+            raw_val = body.get("value")
+            tech = str(body.get("technician_name", "")).strip()
+            note = str(body.get("note", "") or "")
+            execute = bool(body.get("execute"))
+            if not ctl or not oid or not tech:
+                self._send_json(400, {"error": "controller, object_id, technician_name required"})
+                return
+            if len(oid) > 128:
+                self._send_json(400, {"error": "object_id too long"})
+                return
+            try:
+                v = float(str(raw_val).strip())
+            except (TypeError, ValueError, AttributeError):
+                self._send_json(400, {"error": "value must be a number"})
+                return
+            try:
+                iv = int(round(v))
+            except (ValueError, OverflowError):
+                self._send_json(400, {"error": "value out of range"})
+                return
+            argv = [
+                "dry-run-bacnet-write",
+                "--controller-label",
+                ctl,
+                "--object-id",
+                oid,
+                "--value",
+                str(iv),
+                "--technician-name",
+                tech,
+                "--note",
+                str(note),
+            ]
+            _argv_append_optional_bacnet(argv, body)
+            if body.get("timeout_seconds") is not None and str(body.get("timeout_seconds")).strip() != "":
+                argv.extend(["--timeout-seconds", str(body["timeout_seconds"])])
+            if body.get("retries") is not None and str(body.get("retries")).strip() != "":
+                argv.extend(["--retries", str(int(body["retries"]))])
+            if execute:
+                argv.append("--execute")
+            code, out, err = self._run_app_argv(argv, timeout=900)
+            data = self._parse_stdout_json(out)
+            if code != 0:
+                self._send_json(
+                    400,
+                    {
+                        "error": "dry-run-bacnet-write failed",
                         "stderr": err[-8000:],
                         "stdout": out[-8000:],
                         "parsed": data,
