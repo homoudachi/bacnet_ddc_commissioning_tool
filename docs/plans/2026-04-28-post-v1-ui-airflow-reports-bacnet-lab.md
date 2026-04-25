@@ -1,6 +1,6 @@
 # Plan: UI, reports, closed-loop airflow, BACnet lab (post–v1 baseline)
 
-Audience: implementers continuing after the **v1 foundation** slice (Python CLI, Docker `bacnet-dev`, unified + customer exports, `commissioning-guided-next`). This document **orders work by difficulty / dependency** so easier wins ship first. **BBMD and macvlan** are **explicitly deferred** unless a concrete need appears—they touch network topology, image layout, and CI runner constraints and are **not** “easy” compared to the items below.
+Audience: implementers continuing after the **v1 foundation** slice (Python CLI, Docker `bacnet-dev`, unified + customer exports, `commissioning-guided-next`). This document **orders work by difficulty / dependency** so easier wins ship first. **Tier C** (BBMD lab, macvlan bench overlay, COV + write batch) is now **shipped** (**ADR 0015**); further transport work (WritePropertyMultiple, multi-BBMD tables) should get a new ADR when prioritized.
 
 ## Principles
 
@@ -33,13 +33,13 @@ These mostly extend **existing** CLI, exports, or profiles without new transport
 
 ---
 
-## Tier C — deferred unless prioritized (includes BBMD)
+## Tier C — BACnet lab transport (shipped)
 
-| # | Item | Rationale | If you revisit later |
-|---|------|-----------|---------------------|
-| C1 | **BBMD / foreign device** | Requires **BACpymes3** (or stack) features, **static BBMD table** in device sim, second subnet in Compose, and CI that can exercise **cross-subnet** paths—easy to get wrong on `ubuntu-latest` and GitHub networking | New ADR: BBMD topology + which commands must work (directed unicast vs broadcast); separate `docker compose` profile `bacnet-bbmd-lab`; extend `list_verifier` / runtime only after sim proves packets |
-| C2 | **macvlan “lab” profile** | Host-specific (parent iface, subnet); poor fit for default CI | Document runbook for on-prem bench only; keep `bacnet-dev` as CI default |
-| C3 | **COV / subscribe, write batching** | Adapter and test matrix growth | ADR for read path; start with COV on 1–2 object types in sim |
+| # | Item | Notes | Done when |
+|---|------|-------|-----------|
+| C1 | **BBMD / foreign device** | Isolated /24 + BBMD + sidecar **ForeignApplication** probe | **`bacnet-bbmd-lab`** profile, **`tools/simulator/docker_bbmd_lab_smoke.sh`**, **ADR 0015** |
+| C2 | **macvlan “lab” profile** | Bench-only overlay | **`docker-compose.macvlan.example.yml`**, **`docs/simulator/macvlan-lab.md`** |
+| C3 | **COV / subscribe, write batching** | Sim SubscribeCOV + sequential multi-write | **`bacnet-subscribe-cov`**, **`bacnet-write-batch`**, **`docker_bacnet_smoke.sh`** |
 
 ---
 
@@ -50,7 +50,7 @@ These mostly extend **existing** CLI, exports, or profiles without new transport
 3. **B1** once profile keys and safety caps are agreed (`docs/project.md` + example profile).  
 4. **B2a** then **B2b** (UI after JSON hints are stable).  
 5. **B3** when a site asks for HRV↔FCU RAT linkage.  
-6. **C1–C3** only with explicit stakeholder ask and ADR.
+6. **C1–C3** shipped (**ADR 0015**); extend only with new ADRs when scope grows (e.g. WritePropertyMultiple).
 
 ### Tauri packaging (optional extras, deferred)
 
@@ -71,5 +71,6 @@ The **Tauri operator** CI ships **Ubuntu `.deb`** and **Windows NSIS** artifacts
 ## Revision
 
 - **2026-04-28:** Initial plan (tiered sequencing; BBMD deferred).
-- **2026-04-28:** Tier A items A1–A4 marked shipped in-repo (see foundation plan current status); Tier B marked shipped; Tier C deferred.
+- **2026-04-28:** Tier A items A1–A4 marked shipped in-repo (see foundation plan current status); Tier B marked shipped; Tier C later shipped **2026-04-25**.
 - **2026-04-24:** Documented intentional deferral of **macOS `.dmg`** and **signed NSIS** for the Tauri operator (CI stays Linux + Windows only).
+- **2026-04-25:** Tier **C1–C3** shipped (BBMD lab profile, macvlan example + runbook, COV + write batch CLI); see **ADR 0015**.

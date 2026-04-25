@@ -41,7 +41,21 @@ python3 tools/runtime/app.py verify-bip-list \
 
 Expected: `"strict_pass": true`, `"total": 4`, all controllers **`reachable_verified`**.
 
-After probes, CI also runs **`bacnet-read`** (FCU **`ai_sat`** on all three FCU rows, HRV **`msv_test_mode`**, **`ai_supply_air_temperature`**, **`av_supply_fan_command`**, **`av_exhaust_fan_command`**), **`dry-run-bacnet-write --execute`** on **`msv_test_mode`** (FCU + HRV) plus **analog** writes on FCU **`av_electric_heat_command`** / **`ao_chw_valve`** and HRV fan commands (each with read-back), and **`bacnet-point-checkout`** for both profiles.
+After probes, CI also runs **`bacnet-read`** (FCU **`ai_sat`** on all three FCU rows, HRV **`msv_test_mode`**, **`ai_supply_air_temperature`**, **`av_supply_fan_command`**, **`av_exhaust_fan_command`**), **`bacnet-subscribe-cov`** on FCU **`ai_sat`**, **`bacnet-write-batch`** (FCU MSV + heat AV), **`dry-run-bacnet-write --execute`** on **`msv_test_mode`** (FCU + HRV) plus **analog** writes on FCU **`av_electric_heat_command`** / **`ao_chw_valve`** and HRV fan commands (each with read-back), and **`bacnet-point-checkout`** for both profiles.
+
+## BBMD + foreign-device lab (profile `bacnet-bbmd-lab`)
+
+Isolated-subnet FCU sim + BACpypes3 **BBMD** + one-shot **foreign-device** read probe. When Docker is available:
+
+```bash
+tools/simulator/docker_bbmd_lab_smoke.sh
+```
+
+Details: **ADR 0015** (`docs/adr/0015-bbmd-lab-cov-write-batch.md`).
+
+## macvlan bench (host LAN)
+
+See **[`docs/simulator/macvlan-lab.md`](../docs/simulator/macvlan-lab.md)** and **`docker-compose.macvlan.example.yml`**.
 
 ## Stop
 

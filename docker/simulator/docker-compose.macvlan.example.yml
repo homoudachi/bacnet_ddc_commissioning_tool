@@ -1,0 +1,36 @@
+# Optional overlay: BACnet lab on a host macvlan network (on-prem bench).
+#
+# Prerequisites:
+# - A Docker macvlan network already created on the host, e.g.:
+#     docker network create -d macvlan \
+#       --subnet=192.168.40.0/24 --gateway=192.168.40.1 \
+#       -o parent=eth0 bacnet_lab_macvlan
+# - Pick static IPs inside that subnet for each service below.
+#
+# Usage (from repo root):
+#   export BACNET_MACVLAN_NETWORK=bacnet_lab_macvlan
+#   docker compose -f docker/simulator/docker-compose.yml \
+#     -f docker/simulator/docker-compose.macvlan.example.yml \
+#     --profile bacnet-macvlan up -d --build
+#
+# See docs/simulator/macvlan-lab.md for a full runbook.
+
+services:
+  bacnet-fcu-sim-macvlan:
+    build:
+      context: ./bacnet-device
+      dockerfile: Dockerfile
+    image: bacnet-ddc-commissioning-tool/bacnet-fcu-sim:local
+    profiles: ["bacnet-macvlan"]
+    networks:
+      bacnet_macvlan:
+        ipv4_address: ${BACNET_MACVLAN_FCU_IP:-192.168.40.20}
+    environment:
+      DEVICE_INSTANCE: "21001"
+      BACNET_UDP_PORT: "47808"
+    # No host port publish: device speaks on LAN from its macvlan IP.
+
+networks:
+  bacnet_macvlan:
+    name: ${BACNET_MACVLAN_NETWORK:-bacnet_lab_macvlan}
+    external: true

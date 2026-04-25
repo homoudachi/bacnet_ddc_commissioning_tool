@@ -80,6 +80,20 @@ for pair in \
   }
 done
 
+# SubscribeCOV (unconfirmed) on FCU supply air temp: first notification from lab sim.
+cov_out="$(python3 "$ROOT/tools/runtime/app.py" bacnet-subscribe-cov \
+  --run-dir "$RUN_DIR" \
+  --controller-label FCU-DOCKER \
+  --object-id ai_sat \
+  $BACNET_READ_FLAGS \
+  --wait-seconds 8.0 \
+  --subscriber-process-id 9001)"
+echo "$cov_out"
+echo "$cov_out" | grep -q '"status": "cov_ok"' || {
+  echo "error: bacnet-subscribe-cov failed for FCU-DOCKER ai_sat"
+  exit 2
+}
+
 WRITE_FLAGS="$BACNET_READ_FLAGS --technician-name CI-Smoke --note docker-bacnet-smoke"
 
 # FCU: WriteProperty MSV then read back (instance 50).
@@ -92,6 +106,24 @@ r1="$(python3 "$ROOT/tools/runtime/app.py" bacnet-read --run-dir "$RUN_DIR" \
   --controller-label FCU-DOCKER --object-id msv_test_mode $BACNET_READ_FLAGS)"
 echo "$r1"
 echo "$r1" | grep -q '"value_str": "3"' || { echo "error: FCU-DOCKER MSV not 3 after write"; exit 2; }
+
+# FCU: batched writes (single Who-Is) — MSV + heat AV, then read-back.
+batch_out="$(python3 "$ROOT/tools/runtime/app.py" bacnet-write-batch \
+  --run-dir "$RUN_DIR" --controller-label FCU-DOCKER --execute $WRITE_FLAGS \
+  --write msv_test_mode=2 --write av_electric_heat_command=41.0)"
+echo "$batch_out"
+echo "$batch_out" | grep -q '"status": "batch_ok"' || {
+  echo "error: bacnet-write-batch failed for FCU-DOCKER"
+  exit 2
+}
+rbatch_msv="$(python3 "$ROOT/tools/runtime/app.py" bacnet-read --run-dir "$RUN_DIR" \
+  --controller-label FCU-DOCKER --object-id msv_test_mode $BACNET_READ_FLAGS)"
+echo "$rbatch_msv"
+echo "$rbatch_msv" | grep -q '"value_str": "2"' || { echo "error: FCU-DOCKER MSV not 2 after batch"; exit 2; }
+rbatch_heat="$(python3 "$ROOT/tools/runtime/app.py" bacnet-read --run-dir "$RUN_DIR" \
+  --controller-label FCU-DOCKER --object-id av_electric_heat_command $BACNET_READ_FLAGS)"
+echo "$rbatch_heat"
+echo "$rbatch_heat" | grep -q '"value_str": "41.0"' || { echo "error: FCU-DOCKER heat AV not 41 after batch"; exit 2; }
 
 # HRV: WriteProperty MSV (instance 60) then read back.
 w2="$(python3 "$ROOT/tools/runtime/app.py" dry-run-bacnet-write \

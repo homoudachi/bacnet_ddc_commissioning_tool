@@ -81,6 +81,62 @@ services:
     networks:
       - bacnet_lab
 
+  # --- bacnet-bbmd-lab: foreign-device path to an isolated subnet device (CI / local) ---
+  bacnet-bbmd-lab:
+    build:
+      context: ./bacnet-device
+      dockerfile: Dockerfile
+    image: bacnet-ddc-commissioning-tool/bacnet-fcu-sim:local
+    profiles: ["bacnet-bbmd-lab"]
+    ports:
+      - "127.0.0.1:47830:47830/udp"
+    command: ["python", "-u", "/app/bbmd_runner.py"]
+    environment:
+      BACNET_BBMD_PORT: "47830"
+      BBMD_DEVICE_INSTANCE: "111000"
+      # Directed broadcast for bacnet_bbmd_isolated /24 (see networks below).
+      BACNET_BDT_BROADCAST_PEERS: "172.29.0.255:47808"
+    networks:
+      bacnet_lab: {}
+      bacnet_bbmd_isolated: {}
+
+  bacnet-fcu-bbmd-isolated:
+    build:
+      context: ./bacnet-device
+      dockerfile: Dockerfile
+    image: bacnet-ddc-commissioning-tool/bacnet-fcu-sim:local
+    profiles: ["bacnet-bbmd-lab"]
+    environment:
+      DEVICE_INSTANCE: "21004"
+      BACNET_UDP_PORT: "47808"
+      SIM_AI_SAT: "22.0"
+      SIM_MSV_TEST_MODE: "1"
+    networks:
+      bacnet_bbmd_isolated:
+        ipv4_address: 172.29.0.10
+
+  bacnet-bbmd-probe:
+    build:
+      context: ./bacnet-device
+      dockerfile: Dockerfile
+    image: bacnet-ddc-commissioning-tool/bacnet-fcu-sim:local
+    profiles: ["bacnet-bbmd-lab"]
+    network_mode: "service:bacnet-bbmd-lab"
+    entrypoint: ["python", "-u", "/app/probe_foreign_read.py"]
+    environment:
+      BACNET_FD_BBMD_HOST: "127.0.0.1"
+      BACNET_FD_BBMD_PORT: "47830"
+      BACNET_FD_TTL_SECONDS: "120"
+      BACNET_FD_TARGET: "172.29.0.10:47808"
+      BACNET_FD_DEVICE_LOW: "21004"
+      BACNET_FD_DEVICE_HIGH: "21004"
+      BACNET_FD_OBJECT: "analogInput,2"
+
 networks:
   bacnet_lab:
     driver: bridge
+  bacnet_bbmd_isolated:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24

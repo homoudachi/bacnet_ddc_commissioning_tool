@@ -37,6 +37,8 @@ ALLOWED_PREFIXES = (
     "set-session-value",
     "record-step",
     "bacnet-read",
+    "bacnet-subscribe-cov",
+    "bacnet-write-batch",
     "commissioning-airflow-adjust-write",
     "commissioning-airflow-closed-loop-iterate",
     "commissioning-confirm-tachometer-reference",

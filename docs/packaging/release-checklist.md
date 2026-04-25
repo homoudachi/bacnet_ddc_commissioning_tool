@@ -12,6 +12,7 @@ Use before tagging a release or handing a **Windows exe** / **Python** drop to t
 | Unified CSV doc | `python3 tools/schema/gen_commissioning_report_unified_csv_doc.py` | After changing unified columns; commit updated `docs/schema/commissioning-report-unified-csv-v1.md` |
 | Import compile | `python3 tools/runtime/app.py validate-import --run-dir <run>` | `compile_ok` in report |
 | Optional Docker BACnet | `tools/simulator/docker_bacnet_smoke.sh` (requires Docker) | Script exits 0 |
+| Optional BBMD lab | `tools/simulator/docker_bbmd_lab_smoke.sh` (requires Docker) | Foreign-device read to isolated subnet sim |
 | Windows exe (if shipping) | Build per [`windows-exe.md`](windows-exe.md); run `dist\bacnet-commissioning.exe --help` | Exits 0 |
 
 ## Smoke matrix (CLI slices)
@@ -22,6 +23,8 @@ Use before tagging a release or handing a **Windows exe** / **Python** drop to t
 | List / graph | `print-job-graph`, `list-flows`, `show-flow`, `commissioning-guided-next` | After `init-flow` |
 | BACnet read | `bacnet-read` on allowlisted point | Against sim or panel |
 | BACnet write | `dry-run-bacnet-write --execute` | Allowlist + writable |
+| BACnet COV | `bacnet-subscribe-cov` | After successful allowlisted read |
+| BACnet batch write | `bacnet-write-batch --execute` | Multiple `--write id=value`; single Who-Is session |
 | Point checkout | `bacnet-point-checkout` | Profile `point_checkout` |
 | Record step | `record-step` pass / skip / CHW stroke confirms | See README |
 | Airflow | `commissioning-airflow-adjust-write`, `commissioning-airflow-closed-loop-iterate`, `commissioning-confirm-tachometer-reference` | Optional **`closed_loop`** block + MSV arm when profile requires |

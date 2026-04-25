@@ -40,6 +40,10 @@ jobs:
         run: |
           tools/simulator/docker_bacnet_smoke.sh
 
+      - name: Docker BBMD lab smoke (foreign device path)
+        run: |
+          tools/simulator/docker_bbmd_lab_smoke.sh
+
       - name: Run simulator matrix
         run: |
           python3 tools/simulator/run_matrix.py --output-dir artifacts/simulator
