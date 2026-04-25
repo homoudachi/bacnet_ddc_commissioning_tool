@@ -23,10 +23,12 @@ IMPORT_COMPILER = ROOT / "tools" / "import" / "compile_job.py"
 SIMULATOR_ORCH = ROOT / "tools" / "simulator" / "orchestrator.py"
 BACNET_ADAPTER = ROOT / "tools" / "bacnet" / "adapter.py"
 OPERATOR_GUI_SERVER = ROOT / "tools" / "operator_gui_server.py"
+EVENTS_LOG = ROOT / "tools" / "runtime" / "events_log.py"
 
 _bacnet_adapter_singleton = None
 _compile_job_module = None
 _orchestrator_module = None
+_events_log_module = None
 
 
 def _compile_job_module_loaded():
@@ -61,6 +63,20 @@ def _orchestrator_module_loaded():
     return mod
 
 
+def _events_log_module_loaded():
+    global _events_log_module
+    if _events_log_module is not None:
+        return _events_log_module
+    spec = importlib.util.spec_from_file_location("runtime_events_log", EVENTS_LOG)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"unable to load events log module: {EVENTS_LOG}")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    _events_log_module = mod
+    return mod
+
+
 def _bacnet_adapter():
     """Lazy singleton :class:`CommissioningBACnetAdapter` (see ``tools/bacnet/adapter.py``)."""
     global _bacnet_adapter_singleton
@@ -86,6 +102,8 @@ def _append_event(log_path: Path, event: str, payload: dict | None = None) -> No
     payload = payload or {}
     entry = {"ts": _utc_timestamp(), "event": event, **payload}
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    run_dir = log_path.parent.parent
+    _events_log_module_loaded().maybe_rotate_events_jsonl(run_dir)
     with log_path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(entry, sort_keys=True) + "\n")
 
@@ -682,6 +700,7 @@ def cmd_init_run(args: argparse.Namespace) -> int:
         "controllers_csv": str(args.controllers_csv.resolve()),
         "profiles_dir": str(args.profiles_dir.resolve()),
         "scenarios_dir": str(args.scenarios_dir.resolve()),
+        "events_log": _events_log_module_loaded().default_events_log_section(),
     }
     config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
     _append_event(log_path, "run_initialized", {"run_dir": str(run_dir.resolve())})
