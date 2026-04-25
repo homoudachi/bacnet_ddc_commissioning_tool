@@ -69,6 +69,29 @@ class BacnetAdapterTests(unittest.TestCase):
             apdu_timeout=2.0,
         )
 
+    def test_subscribe_cov_and_write_batch_delegate_to_client(self) -> None:
+        mod = _load_adapter_module()
+        adapter = mod.CommissioningBACnetAdapter(ROOT)
+        mock_client = MagicMock()
+        mock_client.subscribe_cov_unconfirmed_wait_value.return_value = {"status": "cov_ok"}
+        mock_client.write_present_values_batch.return_value = {"status": "batch_ok"}
+        adapter._client_mod = mock_client
+        cov = adapter.subscribe_cov_unconfirmed_wait_value(
+            bind_port=0,
+            target_address="127.0.0.1:1",
+            expected_device_instance=21001,
+            object_type=0,
+            object_instance=2,
+        )
+        self.assertEqual("cov_ok", cov["status"])
+        batch = adapter.write_present_values_batch(
+            bind_port=0,
+            target_address="127.0.0.1:1",
+            expected_device_instance=21001,
+            writes=[(19, 50, 1)],
+        )
+        self.assertEqual("batch_ok", batch["status"])
+
     def test_probe_device_delegates_to_bip_module(self) -> None:
         mod = _load_adapter_module()
         adapter = mod.CommissioningBACnetAdapter(ROOT)

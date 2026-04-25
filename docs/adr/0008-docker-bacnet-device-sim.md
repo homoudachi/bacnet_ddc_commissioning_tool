@@ -17,5 +17,6 @@ Unit tests use an in-process UDP fake. Operators and CI still need a **portable*
 
 ## Consequences
 
-- Multi-device / BBMD / macvlan topologies remain **documentation-only** until separate images exist.
+- **`bacnet-dev`** remains the default multi-device CI profile (localhost UDP maps).
+- Optional **`bacnet-bbmd-lab`** profile + **SubscribeCOV** in the same image are documented in **ADR 0015**; **macvlan** bench overlay is documented in **`docs/simulator/macvlan-lab.md`** (not default CI).
 - Host port **47808** must be free when using the published mapping.

@@ -26,3 +26,4 @@ Use when a choice is **non-obvious** or you will forget **why** you chose it.
 | [0012](0012-windows-single-exe-pyinstaller.md) | Windows single-file exe via PyInstaller; in-process import/simulator | Accepted |
 | [0013](0013-airflow-tachometer-checkpoint-cli.md) | Airflow adjust + tachometer confirm CLIs and record-step gates | Accepted |
 | [0014](0014-unified-commissioning-report-export-contract.md) | Unified commissioning CSV/HTML/XLSX/PDF column contract (v1) | Accepted |
+| [0015](0015-bbmd-lab-cov-write-batch.md) | BBMD lab compose, sim SubscribeCOV, CLI batch writes | Accepted |

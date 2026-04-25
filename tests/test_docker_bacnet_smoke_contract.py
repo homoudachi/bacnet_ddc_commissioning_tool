@@ -57,8 +57,16 @@ class DockerBacnetSmokeContractTests(unittest.TestCase):
             "FCU-DOCKER-C:ai_sat",
             "HRV-DOCKER:av_supply_fan_command",
             "HRV-DOCKER:av_exhaust_fan_command",
+            "bacnet-subscribe-cov",
+            "bacnet-write-batch",
         ):
             self.assertIn(needle, body, msg=f"missing smoke fragment: {needle!r}")
+
+    def test_bbmd_lab_smoke_script_exists(self) -> None:
+        script = ROOT / "tools" / "simulator" / "docker_bbmd_lab_smoke.sh"
+        body = script.read_text(encoding="utf-8")
+        self.assertIn("bacnet-bbmd-lab", body)
+        self.assertIn("bacnet-bbmd-probe", body)
 
 
 if __name__ == "__main__":

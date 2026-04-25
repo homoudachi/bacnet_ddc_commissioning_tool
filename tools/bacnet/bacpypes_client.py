@@ -166,6 +166,164 @@ def read_present_value(
     )
 
 
+async def _subscribe_cov_unconfirmed_wait_value_async(
+    *,
+    bind_port: int,
+    target_address: str,
+    expected_device_instance: int,
+    object_type: int,
+    object_instance: int,
+    subscriber_process_id: int,
+    lifetime_seconds: int,
+    wait_seconds: float,
+    who_is_timeout: float,
+) -> dict[str, Any]:
+    """SubscribeCOV (unconfirmed notifications), return first present-value from notify."""
+    local_device_instance = 999000 + (bind_port % 900000)
+    device = DeviceObject(
+        objectIdentifier=ObjectIdentifier(("device", local_device_instance)),
+        objectName=CharacterString("commissioning-tool-client"),
+    )
+    app = NormalApplication(device, IPv4Address(f"0.0.0.0:{bind_port}"))
+
+    try:
+        await asyncio.sleep(0.05)
+        who_future = app.who_is(
+            low_limit=expected_device_instance,
+            high_limit=expected_device_instance,
+            address=IPv4Address(target_address),
+            timeout=who_is_timeout,
+        )
+        iams = await asyncio.wait_for(who_future, timeout=who_is_timeout + 1.0)
+        if not iams:
+            return {"status": "blocked_probe_failed", "message": "no I-Am from target"}
+
+        dest = IPv4Address(target_address)
+        monitored = ObjectIdentifier((object_type, object_instance))
+        async with app.change_of_value(
+            dest,
+            monitored,
+            subscriber_process_identifier=subscriber_process_id,
+            issue_confirmed_notifications=False,
+            lifetime=int(lifetime_seconds),
+        ) as scm:
+            _prop_id, val = await asyncio.wait_for(scm.get_value(), timeout=wait_seconds)
+            return {"status": "cov_ok", "value_str": str(val), "value_repr": repr(val)}
+    finally:
+        app.close()
+
+
+def subscribe_cov_unconfirmed_wait_value(
+    *,
+    bind_port: int,
+    target_address: str,
+    expected_device_instance: int,
+    object_type: int,
+    object_instance: int,
+    subscriber_process_id: int = 4242,
+    lifetime_seconds: int = 60,
+    wait_seconds: float = 6.0,
+    who_is_timeout: float = 3.0,
+) -> dict[str, Any]:
+    """Synchronous SubscribeCOV + wait for first unconfirmed notification presentValue."""
+    return asyncio.run(
+        _subscribe_cov_unconfirmed_wait_value_async(
+            bind_port=bind_port,
+            target_address=target_address,
+            expected_device_instance=expected_device_instance,
+            object_type=object_type,
+            object_instance=object_instance,
+            subscriber_process_id=subscriber_process_id,
+            lifetime_seconds=lifetime_seconds,
+            wait_seconds=wait_seconds,
+            who_is_timeout=who_is_timeout,
+        )
+    )
+
+
+async def _write_present_values_batch_async(
+    *,
+    bind_port: int,
+    target_address: str,
+    expected_device_instance: int,
+    writes: list[tuple[int, int, int | float]],
+    who_is_timeout: float,
+    apdu_timeout: float,
+) -> dict[str, Any]:
+    """Sequential WriteProperty present-value on one device (single Who-Is)."""
+    local_device_instance = 999000 + (bind_port % 900000)
+    device = DeviceObject(
+        objectIdentifier=ObjectIdentifier(("device", local_device_instance)),
+        objectName=CharacterString("commissioning-tool-client"),
+    )
+    app = NormalApplication(device, IPv4Address(f"0.0.0.0:{bind_port}"))
+
+    try:
+        await asyncio.sleep(0.05)
+        who_future = app.who_is(
+            low_limit=expected_device_instance,
+            high_limit=expected_device_instance,
+            address=IPv4Address(target_address),
+            timeout=who_is_timeout,
+        )
+        iams = await asyncio.wait_for(who_future, timeout=who_is_timeout + 1.0)
+        if not iams:
+            return {"status": "blocked_probe_failed", "message": "no I-Am from target"}
+
+        dest = IPv4Address(target_address)
+        results: list[dict[str, Any]] = []
+        for object_type, object_instance, value in writes:
+            obj_tag = f"{_object_type_tag(object_type)},{object_instance}"
+            payload = _encode_present_value_write(object_type, object_instance, value)
+            result = await asyncio.wait_for(
+                app.write_property(dest, obj_tag, "presentValue", payload),
+                timeout=apdu_timeout,
+            )
+            row: dict[str, Any] = {
+                "object_type": object_type,
+                "object_instance": object_instance,
+            }
+            if isinstance(result, ErrorRejectAbortNack):
+                row["status"] = "write_rejected"
+                row["message"] = str(result)
+                results.append(row)
+                return {
+                    "status": "batch_partial_failure",
+                    "writes": results,
+                    "message": f"write failed at {obj_tag}",
+                }
+            if result is None:
+                row["status"] = "write_ok"
+            else:
+                row["status"] = "write_unexpected_response"
+                row["message"] = repr(result)
+            results.append(row)
+        return {"status": "batch_ok", "writes": results}
+    finally:
+        app.close()
+
+
+def write_present_values_batch(
+    *,
+    bind_port: int,
+    target_address: str,
+    expected_device_instance: int,
+    writes: list[tuple[int, int, int | float]],
+    who_is_timeout: float = 3.0,
+    apdu_timeout: float = 8.0,
+) -> dict[str, Any]:
+    return asyncio.run(
+        _write_present_values_batch_async(
+            bind_port=bind_port,
+            target_address=target_address,
+            expected_device_instance=expected_device_instance,
+            writes=writes,
+            who_is_timeout=who_is_timeout,
+            apdu_timeout=apdu_timeout,
+        )
+    )
+
+
 def write_present_value(
     *,
     bind_port: int,

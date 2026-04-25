@@ -3097,6 +3097,247 @@ def cmd_bacnet_read(args: argparse.Namespace) -> int:
     return 0 if result.get("status") == "read_ok" else 2
 
 
+def cmd_bacnet_subscribe_cov(args: argparse.Namespace) -> int:
+    """SubscribeCOV (unconfirmed) on allowlisted object; print first notified presentValue."""
+    run_dir = args.run_dir
+    logs_path = run_dir / "logs" / "events.jsonl"
+    runtime_job_path = run_dir / "state" / "runtime-job.json"
+    runtime_job = json.loads(runtime_job_path.read_text(encoding="utf-8"))
+
+    target = None
+    for controller in runtime_job.get("controllers", []):
+        if controller.get("controller_label") == args.controller_label:
+            target = controller
+            break
+    if target is None:
+        print(f"error: controller not found in runtime job: {args.controller_label}")
+        return 2
+
+    object_id = str(args.object_id).strip()
+    result = _bacnet_read_one(
+        controller_label=args.controller_label,
+        target=target,
+        object_id=object_id,
+        property_name="presentValue",
+        timeout_seconds=args.timeout_seconds,
+        retries=args.retries,
+        bacnet_bind_port=int(getattr(args, "bacnet_bind_port", 0) or 0),
+        apdu_timeout_override=args.apdu_timeout,
+    )
+    if result.get("status") == "config_error":
+        print(f"error: {result.get('message', 'invalid configuration')}")
+        return 2
+    if result.get("status") != "read_ok":
+        print(json.dumps(result, sort_keys=True))
+        return 2
+
+    objects_by_id = target.get("objects_by_id", {})
+    meta = objects_by_id.get(object_id, {})
+    bacnet = meta.get("bacnet", {}) if isinstance(meta, dict) else {}
+    type_name = str(bacnet.get("object_type", "")).strip()
+    try:
+        object_instance = int(bacnet.get("instance"))
+    except (TypeError, ValueError):
+        print("error: invalid BACnet instance for subscribe-cov")
+        return 2
+    bacnet_ad = _bacnet_adapter()
+    object_type_int = bacnet_ad.object_type_name_to_int(type_name)
+    if object_type_int is None:
+        print(f"error: unsupported BACnet object_type: {type_name!r}")
+        return 2
+
+    addr = target.get("bacnet", {})
+    host = str(addr.get("host", "")).strip()
+    port = int(addr.get("port", 0))
+    expected_instance = int(addr.get("device_instance", 0))
+
+    try:
+        bind_port = int(getattr(args, "bacnet_bind_port", 0) or 0)
+    except ValueError:
+        bind_port = 0
+    who_is_timeout = bacnet_ad.effective_who_is_timeout(args.timeout_seconds, args.retries)
+
+    try:
+        cov = bacnet_ad.subscribe_cov_unconfirmed_wait_value(
+            bind_port=bind_port,
+            target_address=bacnet_ad.format_ipv4_target(host, port),
+            expected_device_instance=expected_instance,
+            object_type=object_type_int,
+            object_instance=object_instance,
+            subscriber_process_id=int(args.subscriber_process_id),
+            lifetime_seconds=int(args.lifetime_seconds),
+            wait_seconds=float(args.wait_seconds),
+            who_is_timeout=who_is_timeout,
+        )
+    except ModuleNotFoundError as err:
+        print(
+            "error: bacpypes3 is required for bacnet-subscribe-cov "
+            f"(pip install -r requirements.txt): {err}"
+        )
+        return 2
+    except Exception as err:  # noqa: BLE001
+        print(json.dumps({"status": "cov_failed", "message": str(err)}, sort_keys=True))
+        return 2
+
+    out = {
+        "controller_label": args.controller_label,
+        "profile_object_id": object_id,
+        "subscribe_cov": cov,
+        "status": str(cov.get("status", "cov_failed")),
+    }
+    reads_dir = run_dir / "artifacts" / "bacnet_reads"
+    reads_dir.mkdir(parents=True, exist_ok=True)
+    artifact = reads_dir / f"{args.controller_label}-{object_id}-cov.json"
+    artifact.write_text(json.dumps(out, indent=2, sort_keys=True), encoding="utf-8")
+    _append_event(
+        logs_path,
+        "bacnet_subscribe_cov",
+        {
+            "controller_label": args.controller_label,
+            "object_id": object_id,
+            "status": out.get("status"),
+            "artifact_json": str(artifact.resolve()),
+        },
+    )
+    print(json.dumps(out, sort_keys=True))
+    return 0 if out.get("status") == "cov_ok" else 2
+
+
+def cmd_bacnet_write_batch(args: argparse.Namespace) -> int:
+    """Sequential WriteProperty present-value for multiple allowlisted objects (one Who-Is)."""
+    run_dir = args.run_dir
+    logs_path = run_dir / "logs" / "events.jsonl"
+    runtime_job_path = run_dir / "state" / "runtime-job.json"
+    runtime_job = json.loads(runtime_job_path.read_text(encoding="utf-8"))
+
+    target = None
+    for controller in runtime_job.get("controllers", []):
+        if controller.get("controller_label") == args.controller_label:
+            target = controller
+            break
+    if target is None:
+        print(f"error: controller not found in runtime job: {args.controller_label}")
+        return 2
+
+    profile_allow = target.get("commissioning_write_allowlist", [])
+    if not isinstance(profile_allow, list) or not profile_allow:
+        print("error: profile has no commissioning_write_allowlist")
+        return 2
+    allowed = {str(x).strip() for x in profile_allow if str(x).strip()}
+
+    pairs: list[tuple[str, float]] = []
+    for spec in getattr(args, "write", None) or []:
+        s = str(spec).strip()
+        if "=" not in s:
+            print(f"error: invalid --write (expected object_id=value): {s!r}")
+            return 2
+        oid, _, rest = s.partition("=")
+        oid = oid.strip()
+        rest = rest.strip()
+        if oid not in allowed:
+            print(f"error: object_id not in commissioning_write_allowlist: {oid!r}")
+            return 2
+        try:
+            val = float(rest)
+        except ValueError:
+            print(f"error: invalid numeric value in --write for {oid!r}")
+            return 2
+        pairs.append((oid, val))
+
+    if not pairs:
+        print("error: provide at least one --write object_id=value")
+        return 2
+
+    objects_by_id = target.get("objects_by_id", {})
+    bacnet_ad = _bacnet_adapter()
+    writes: list[tuple[int, int, int | float]] = []
+    for oid, val in pairs:
+        meta = objects_by_id.get(oid)
+        if not isinstance(meta, dict) or not bool(meta.get("writable")):
+            print(f"error: object {oid!r} is not writable in profile")
+            return 2
+        bacnet = meta.get("bacnet", {})
+        if not isinstance(bacnet, dict):
+            print(f"error: invalid objects_by_id for {oid!r}")
+            return 2
+        type_name = str(bacnet.get("object_type", "")).strip()
+        try:
+            oi = int(bacnet.get("instance"))
+        except (TypeError, ValueError):
+            print(f"error: invalid BACnet instance for {oid!r}")
+            return 2
+        ot = bacnet_ad.object_type_name_to_int(type_name)
+        if ot is None:
+            print(f"error: unsupported BACnet object_type for {oid!r}: {type_name!r}")
+            return 2
+        wval: int | float = int(val) if ot == 19 else val
+        writes.append((ot, oi, wval))
+
+    addr = target.get("bacnet", {})
+    host = str(addr.get("host", "")).strip()
+    port = int(addr.get("port", 0))
+    expected_instance = int(addr.get("device_instance", 0))
+
+    try:
+        bind_port = int(getattr(args, "bacnet_bind_port", 0) or 0)
+    except ValueError:
+        bind_port = 0
+    who_is_timeout = bacnet_ad.effective_who_is_timeout(args.timeout_seconds, args.retries)
+    try:
+        apdu_timeout = bacnet_ad.commissioning_apdu_timeout_seconds(args.apdu_timeout)
+    except (TypeError, ValueError) as err:
+        print(f"error: invalid --apdu-timeout: {err}")
+        return 2
+
+    if not bool(getattr(args, "execute", False)):
+        print(
+            "error: bacnet-write-batch requires --execute (confirmed BACnet writes); "
+            "dry-run is not supported for batch."
+        )
+        return 2
+
+    try:
+        batch = bacnet_ad.write_present_values_batch(
+            bind_port=bind_port,
+            target_address=bacnet_ad.format_ipv4_target(host, port),
+            expected_device_instance=expected_instance,
+            writes=writes,
+            who_is_timeout=who_is_timeout,
+            apdu_timeout=apdu_timeout,
+        )
+    except ModuleNotFoundError as err:
+        print(
+            "error: bacpypes3 is required for bacnet-write-batch "
+            f"(pip install -r requirements.txt): {err}"
+        )
+        return 2
+    except Exception as err:  # noqa: BLE001
+        print(json.dumps({"status": "batch_failed", "message": str(err)}, sort_keys=True))
+        return 2
+
+    result = {
+        "controller_label": args.controller_label,
+        "writes_requested": [oid for oid, _ in pairs],
+        "batch": batch,
+        "status": str(batch.get("status", "batch_failed")),
+    }
+    plans_dir = run_dir / "artifacts" / "bacnet_write_plans"
+    plans_dir.mkdir(parents=True, exist_ok=True)
+    artifact = plans_dir / f"{args.controller_label}-batch.json"
+    artifact.write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
+    _append_event(
+        logs_path,
+        "bacnet_write_batch",
+        {
+            "controller_label": args.controller_label,
+            "status": result.get("status"),
+            "artifact_json": str(artifact.resolve()),
+        },
+    )
+    print(json.dumps(result, sort_keys=True))
+    return 0 if result.get("status") == "batch_ok" else 2
+
+
 def _run_point_checkout_reads(
     *,
     controller_label: str,
@@ -5735,6 +5976,81 @@ def build_parser() -> argparse.ArgumentParser:
         help="BACpypes3 ReadProperty timeout in seconds (default: adapter default, typically 8).",
     )
     bacnet_read.set_defaults(handler=cmd_bacnet_read)
+
+    cov_sub = subparsers.add_parser(
+        "bacnet-subscribe-cov",
+        help=(
+            "SubscribeCOV (unconfirmed notifications) on allowlisted object; "
+            "prints first notified presentValue (requires bacpypes3)."
+        ),
+    )
+    cov_sub.add_argument("--run-dir", required=True, type=Path)
+    cov_sub.add_argument("--controller-label", required=True)
+    cov_sub.add_argument(
+        "--object-id",
+        required=True,
+        help="Profile object id (must be in commissioning_read_allowlist).",
+    )
+    cov_sub.add_argument("--timeout-seconds", type=float, default=0.5)
+    cov_sub.add_argument("--retries", type=int, default=1)
+    cov_sub.add_argument("--bacnet-bind-port", type=int, default=0)
+    cov_sub.add_argument(
+        "--apdu-timeout",
+        type=float,
+        default=None,
+        help="BACpypes3 timeout for prerequisite read (default: adapter default).",
+    )
+    cov_sub.add_argument(
+        "--subscriber-process-id",
+        type=int,
+        default=4242,
+        help="BACnet subscriberProcessIdentifier for SubscribeCOV.",
+    )
+    cov_sub.add_argument(
+        "--lifetime-seconds",
+        type=int,
+        default=60,
+        help="Subscription lifetime sent to the device.",
+    )
+    cov_sub.add_argument(
+        "--wait-seconds",
+        type=float,
+        default=6.0,
+        help="Max time to wait for first unconfirmed COV notification after subscribe.",
+    )
+    cov_sub.set_defaults(handler=cmd_bacnet_subscribe_cov)
+
+    write_batch = subparsers.add_parser(
+        "bacnet-write-batch",
+        help=(
+            "Sequential WriteProperty present-value for multiple allowlisted objects "
+            "on one controller (single Who-Is; requires bacpypes3 and --execute)."
+        ),
+    )
+    write_batch.add_argument("--run-dir", required=True, type=Path)
+    write_batch.add_argument("--controller-label", required=True)
+    write_batch.add_argument(
+        "--write",
+        action="append",
+        required=True,
+        metavar="OBJECT_ID=VALUE",
+        help="Repeatable. Logical object id and present value (e.g. msv_test_mode=2).",
+    )
+    write_batch.add_argument("--timeout-seconds", type=float, default=0.5)
+    write_batch.add_argument("--retries", type=int, default=1)
+    write_batch.add_argument("--bacnet-bind-port", type=int, default=0)
+    write_batch.add_argument(
+        "--apdu-timeout",
+        type=float,
+        default=None,
+        help="BACpypes3 WriteProperty timeout per write (default: adapter default).",
+    )
+    write_batch.add_argument(
+        "--execute",
+        action="store_true",
+        help="Required: perform BACnet writes (no dry-run for batch).",
+    )
+    write_batch.set_defaults(handler=cmd_bacnet_write_batch)
 
     point_checkout = subparsers.add_parser(
         "bacnet-point-checkout",
