@@ -21,7 +21,13 @@ Static captures (example run with `docs/examples/site-controllers.template.csv` 
 From the repository root (requires **`google-chrome-stable`** on `PATH`):
 
 ```bash
-tools/packaging/capture_operator_guided_screenshots.sh
+tools/packaging/capture_operator_guided_screenshots.sh update
 ```
 
 Optional: `RUN_DIR`, `OPERATOR_GUI_SCREENSHOT_PORT`, `CHROME_BIN`.
+
+After changing **`/guided`** or **`/`** HTML/CSS, re-run **`update`**, commit the three PNGs, and update **`tests/test_operator_guided_screenshots_checksums.py`** (the script prints the new SHA-256 lines).
+
+## CI
+
+`simulator-verification` runs **`tools/packaging/capture_operator_guided_screenshots.sh check`** so accidental PNG drift is caught unless checksums are updated with the images.
