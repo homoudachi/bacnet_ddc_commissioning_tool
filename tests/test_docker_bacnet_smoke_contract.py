@@ -59,6 +59,7 @@ class DockerBacnetSmokeContractTests(unittest.TestCase):
             "HRV-DOCKER:av_exhaust_fan_command",
             "bacnet-subscribe-cov",
             "bacnet-write-batch",
+            "--mode multiple",
         ):
             self.assertIn(needle, body, msg=f"missing smoke fragment: {needle!r}")
 

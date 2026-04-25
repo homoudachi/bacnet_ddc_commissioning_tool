@@ -225,6 +225,25 @@ class CommissioningBACnetAdapter:
             apdu_timeout=apdu_timeout,
         )
 
+    def write_present_values_property_multiple(
+        self,
+        *,
+        bind_port: int,
+        target_address: str,
+        expected_device_instance: int,
+        writes: list[tuple[int, int, int | float]],
+        who_is_timeout: float = 3.0,
+        apdu_timeout: float = 8.0,
+    ) -> dict[str, Any]:
+        return self._client().write_present_values_property_multiple(
+            bind_port=bind_port,
+            target_address=target_address,
+            expected_device_instance=expected_device_instance,
+            writes=writes,
+            who_is_timeout=who_is_timeout,
+            apdu_timeout=apdu_timeout,
+        )
+
 
 def target_address(host: str, port: int) -> str:
     """Format ``host:port`` for BACpypes3 ``IPv4Address``."""

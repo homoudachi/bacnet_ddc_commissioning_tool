@@ -125,6 +125,29 @@ rbatch_heat="$(python3 "$ROOT/tools/runtime/app.py" bacnet-read --run-dir "$RUN_
 echo "$rbatch_heat"
 echo "$rbatch_heat" | grep -q '"value_str": "41.0"' || { echo "error: FCU-DOCKER heat AV not 41 after batch"; exit 2; }
 
+# FCU: single WritePropertyMultiple APDU (MSV + heat AV), then read-back.
+batch_wpm="$(python3 "$ROOT/tools/runtime/app.py" bacnet-write-batch \
+  --run-dir "$RUN_DIR" --controller-label FCU-DOCKER --execute $WRITE_FLAGS \
+  --mode multiple \
+  --write msv_test_mode=4 --write av_electric_heat_command=12.5)"
+echo "$batch_wpm"
+echo "$batch_wpm" | grep -q '"bacnet_service": "writePropertyMultiple"' || {
+  echo "error: expected writePropertyMultiple in batch JSON"
+  exit 2
+}
+echo "$batch_wpm" | grep -q '"status": "batch_ok"' || {
+  echo "error: bacnet-write-batch --mode multiple failed"
+  exit 2
+}
+rwpm_msv="$(python3 "$ROOT/tools/runtime/app.py" bacnet-read --run-dir "$RUN_DIR" \
+  --controller-label FCU-DOCKER --object-id msv_test_mode $BACNET_READ_FLAGS)"
+echo "$rwpm_msv"
+echo "$rwpm_msv" | grep -q '"value_str": "4"' || { echo "error: FCU-DOCKER MSV not 4 after WPM batch"; exit 2; }
+rwpm_heat="$(python3 "$ROOT/tools/runtime/app.py" bacnet-read --run-dir "$RUN_DIR" \
+  --controller-label FCU-DOCKER --object-id av_electric_heat_command $BACNET_READ_FLAGS)"
+echo "$rwpm_heat"
+echo "$rwpm_heat" | grep -q '"value_str": "12.5"' || { echo "error: FCU-DOCKER heat AV not 12.5 after WPM batch"; exit 2; }
+
 # HRV: WriteProperty MSV (instance 60) then read back.
 w2="$(python3 "$ROOT/tools/runtime/app.py" dry-run-bacnet-write \
   --run-dir "$RUN_DIR" --controller-label HRV-DOCKER \

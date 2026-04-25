@@ -173,6 +173,7 @@ class BacnetSimState:
             SubscribeCOVRequest,
             UnconfirmedRequestPDU,
             UnconfirmedServiceChoice,
+            WritePropertyMultipleRequest,
             WritePropertyRequest,
         )
         from bacpypes3.basetypes import Segmentation
@@ -257,6 +258,40 @@ class BacnetSimState:
             sock.sendto(_bvlc_original_unicast(b"\x01\x00" + wire), addr)
             return
 
+        if svc == int(ConfirmedServiceChoice.writePropertyMultiple):
+            mreq = WritePropertyMultipleRequest.decode(inc)
+            all_ok = True
+            for spec in mreq.listOfWriteAccessSpecs:
+                oid = spec.objectIdentifier
+                ot_w = int(oid[0])
+                oi_w = int(oid[1])
+                for pv in spec.listOfProperties:
+                    if str(pv.propertyIdentifier) != "present-value":
+                        continue
+                    if not self._apply_write(ot_w, oi_w, pv.value):
+                        all_ok = False
+                        break
+                    if self.profile == "hrv":
+                        if ot_w == 0 and oi_w == 15:
+                            with self._lock:
+                                supv = float(self.ai_supply)
+                            self._notify_cov_present_value(sock, ot_w, oi_w, supv)
+                    else:
+                        if ot_w == 0 and oi_w == 2:
+                            with self._lock:
+                                aipv = float(self.ai_present)
+                            self._notify_cov_present_value(sock, ot_w, oi_w, aipv)
+                if not all_ok:
+                    break
+            if not all_ok:
+                return
+            sack = SimpleAckPDU(
+                service_choice=ConfirmedServiceChoice.writePropertyMultiple, context=inc
+            )
+            wire = sack.encode().pduData
+            sock.sendto(_bvlc_original_unicast(b"\x01\x00" + wire), addr)
+            return
+
         if svc == int(ConfirmedServiceChoice.writeProperty):
             wreq = WritePropertyRequest.decode(inc)
             if str(wreq.propertyIdentifier) != "present-value":
@@ -278,6 +313,7 @@ class BacnetSimState:
             sack = SimpleAckPDU(service_choice=ConfirmedServiceChoice.writeProperty, context=inc)
             wire = sack.encode().pduData
             sock.sendto(_bvlc_original_unicast(b"\x01\x00" + wire), addr)
+            return
 
     def _read_payload(self, ot: int, oi: int):
         from bacpypes3.constructeddata import Any
