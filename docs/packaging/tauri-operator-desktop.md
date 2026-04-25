@@ -25,10 +25,12 @@ npm ci
 npx tauri build
 ```
 
-Artifacts (Linux):
+Artifacts:
 
-- Binary: `desktop/tauri-operator/src-tauri/target/release/desktoptauri-operator`
-- Debian package: `desktop/tauri-operator/src-tauri/target/release/bundle/deb/*.deb`
+- **Linux binary:** `desktop/tauri-operator/src-tauri/target/release/bacnet-commissioning-operator`
+- **Linux `.deb`:** `desktop/tauri-operator/src-tauri/target/release/bundle/deb/*.deb`  
+  (`npx tauri build -c '{"bundle":{"targets":["deb"]}}'` keeps CI fast when you also build Windows installers.)
+- **Windows NSIS installer:** `desktop/tauri-operator/src-tauri/target/release/bundle/nsis/*.exe` (from `npx tauri build -b nsis` on Windows)
 
 ## Run directory
 

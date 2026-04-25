@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    desktoptauri_operator_lib::run()
+    bacnet_commissioning_operator_lib::run()
 }

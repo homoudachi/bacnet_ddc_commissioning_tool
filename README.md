@@ -20,7 +20,7 @@
 
 ## Tauri desktop operator (optional)
 
-- **Tauri 2** app under **`desktop/tauri-operator/`** wraps the same Python CLI in a small window (runs `python3 tools/runtime/app.py` from the repo root). Build and Linux deps: **[`docs/packaging/tauri-operator-desktop.md`](docs/packaging/tauri-operator-desktop.md)**. CI: **`.github/workflows/tauri-operator.yml`** uploads a **`.deb`** when that tree changes.
+- **Tauri 2** app under **`desktop/tauri-operator/`** wraps the same Python CLI in a small window (runs `python3 tools/runtime/app.py` from the repo root). Build and Linux deps: **[`docs/packaging/tauri-operator-desktop.md`](docs/packaging/tauri-operator-desktop.md)**. CI: **`.github/workflows/tauri-operator.yml`** uploads a **Linux `.deb`** and a **Windows NSIS `.exe`** when that tree changes.
 - Pre-release checks: **[docs/packaging/release-checklist.md](docs/packaging/release-checklist.md)** (tests, import validate, optional Docker smoke, exe smoke matrix). CI also runs **`tools/simulator/commissioning_export_smoke.sh`** (empty commissioning report → unified CSV/HTML/XLSX/PDF + customer HTML/PDF) and **`tools/import/benchmark_compile.py`** (120-row synthetic compile).
 
 ## Current implementation slice
