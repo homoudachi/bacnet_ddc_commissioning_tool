@@ -1,11 +1,23 @@
 #!/usr/bin/env sh
 # Capture /guided and / operator UI screenshots (headless Chrome). Run from repo root.
+#
+# Usage:
+#   tools/packaging/capture_operator_guided_screenshots.sh          # same as "update"
+#   tools/packaging/capture_operator_guided_screenshots.sh update   # write docs/assets/*.png
+#   tools/packaging/capture_operator_guided_screenshots.sh check    # CI: compare to committed PNGs
+#
 # Requires: google-chrome-stable, Python 3, compiled examples (same as README quick start).
 
 set -eu
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
+
+MODE="${1:-update}"
+case "$MODE" in
+  update|check) ;;
+  *) echo "error: usage: $0 [update|check]"; exit 2 ;;
+esac
 
 RUN_DIR="${RUN_DIR:-$ROOT/artifacts/operator-ui-screenshot-run}"
 PORT="${OPERATOR_GUI_SCREENSHOT_PORT:-9788}"
@@ -46,8 +58,40 @@ shot() {
   }
 }
 
+sha_file() {
+  sha256sum "$1" | awk '{print $1}'
+}
+
+if [ "$MODE" = "check" ]; then
+  WORK="$(mktemp -d)"
+  trap 'rm -rf "$WORK"; cleanup' EXIT
+  shot "http://127.0.0.1:${PORT}/guided" "$WORK/operator-guided-ui-wide.png" 1400 900
+  shot "http://127.0.0.1:${PORT}/guided" "$WORK/operator-guided-ui-mobile.png" 420 900
+  shot "http://127.0.0.1:${PORT}/" "$WORK/operator-advanced-cli-form.png" 900 820
+  for name in operator-guided-ui-wide.png operator-guided-ui-mobile.png operator-advanced-cli-form.png; do
+    a="$ASSETS/$name"
+    b="$WORK/$name"
+    ha="$(sha_file "$a")"
+    hb="$(sha_file "$b")"
+    if [ "$ha" != "$hb" ]; then
+      echo "error: screenshot mismatch for $name"
+      echo "  committed: $ha"
+      echo "  captured:  $hb"
+      echo "  Run: tools/packaging/capture_operator_guided_screenshots.sh update"
+      echo "  Then commit docs/assets/$name and tests/test_operator_guided_screenshots_checksums.py"
+      exit 2
+    fi
+  done
+  echo "operator_guided_screenshots_checksum_ok=true"
+  exit 0
+fi
+
 shot "http://127.0.0.1:${PORT}/guided" "$ASSETS/operator-guided-ui-wide.png" 1400 900
 shot "http://127.0.0.1:${PORT}/guided" "$ASSETS/operator-guided-ui-mobile.png" 420 900
 shot "http://127.0.0.1:${PORT}/" "$ASSETS/operator-advanced-cli-form.png" 900 820
 
 echo "screenshots_ok=true paths=$ASSETS/operator-guided-ui-wide.png ..."
+echo "sha256 (update tests/test_operator_guided_screenshots_checksums.py if UI changed):"
+for f in "$ASSETS/operator-guided-ui-wide.png" "$ASSETS/operator-guided-ui-mobile.png" "$ASSETS/operator-advanced-cli-form.png"; do
+  echo "  $(basename "$f") $(sha_file "$f")"
+done

@@ -28,7 +28,7 @@ These mostly extend **existing** CLI, exports, or profiles without new transport
 | # | Item | Why harder | Suggested approach | Done when |
 |---|------|------------|---------------------|-----------|
 | B1 | **Closed-loop assisted airflow** (tool drives fan toward target L/s using measured feedback) | Needs stable measurement cadence, safety bounds, and profile contract for “stop” conditions | **`commissioning-airflow-closed-loop-iterate`** + profile **`automatic_airflow_adjustment.closed_loop`** (BACnet flow read + iterative fan %). | Shipped **2026-04-28**; ADR 0013 §6; `tests/test_runtime_cli.py` |
-| B2 | **Guided operator UI** (minimal desktop shell) | Packaging, state sync with run-dir, UX scope | **`operator-gui`** (stdlib **HTTPServer**): **`/guided`** flow UI + **`/`** CLI form; **`desktop/tauri-operator/`** **Tauri 2** shell (Rust spawns **`python3 tools/runtime/app.py`**; see **`docs/packaging/tauri-operator-desktop.md`**). | Shipped **2026-04-28**; guided UI expanded **2026-04-25** |
+| B2 | **Guided operator UI** (minimal desktop shell) | Packaging, state sync with run-dir, UX scope | **`operator-gui`** (stdlib **HTTPServer**): **`/guided`** flow UI + **`/`** CLI form; **`desktop/tauri-operator/`** **Tauri 2** shell (Rust spawns **`python3 tools/runtime/app.py`**; see **`docs/packaging/tauri-operator-desktop.md`**). | Shipped **2026-04-28**; guided UI expanded **2026-04-25**; README screenshots + **CI checksum** for PNGs (**`tools/packaging/capture_operator_guided_screenshots.sh`**) |
 | B3 | **RAT / HRV proxy rules** | Product policy + validation warnings | Profile **`rat_temperature_proxy`** (`enabled`, `proxy_controller_label`, `proxy_read_object_id`); **`compile-import`** copies into **`commissioning_meta`** and emits **`rat_temperature_proxy_*`** warnings when misconfigured. | Shipped **2026-04-28**; `tests/test_import_compiler.py` |
 
 ---
@@ -83,3 +83,4 @@ The **Tauri operator** CI ships **Ubuntu `.deb`** and **Windows NSIS** artifacts
 - **2026-04-25:** Tier **C1–C3** shipped (BBMD lab profile, macvlan example + runbook, COV + write batch CLI); see **ADR 0015**.
 - **2026-04-25:** **WritePropertyMultiple** path: lab sim + **`bacnet-write-batch --mode multiple`** + CI smoke; ADR 0015 updated.
 - **2026-04-25:** **`operator-gui` `/guided`** — graphical commissioning flow (controllers, steps, blockers, session, record-step, point checkout API).
+- **2026-04-25:** Guided UI **screenshots in README** + **`capture_operator_guided_screenshots.sh check`** in CI; PNG SHA-256 unit test.
