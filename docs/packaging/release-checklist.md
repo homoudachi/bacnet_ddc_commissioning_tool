@@ -28,7 +28,7 @@ Use before tagging a release or handing a **Windows exe** / **Python** drop to t
 | Point checkout | `bacnet-point-checkout` | Profile `point_checkout` |
 | Record step | `record-step` pass / skip / CHW stroke confirms | See README |
 | Airflow | `commissioning-airflow-adjust-write`, `commissioning-airflow-closed-loop-iterate`, `commissioning-confirm-tachometer-reference` | Optional **`closed_loop`** block + MSV arm when profile requires |
-| Operator UI | `operator-gui --run-dir <run> --gui-port 8765` | Localhost only; smoke allowlisted commands |
+| Operator UI | `operator-gui --run-dir <run> --gui-port 8765` | Open **`/guided`** for flow UI; **`/`** for advanced CLI form |
 | Tauri desktop | `cd desktop/tauri-operator && npm ci && npx tauri build` | Linux: `-c '{"bundle":{"targets":["deb"]}}'` for `.deb`; Windows: `npx tauri build -b nsis`; see **`docs/packaging/tauri-operator-desktop.md`** |
 | Manual airflow | `commissioning-record-manual-airflow` | Before pass on `manual_airflow_verification_assisted` steps |
 | Modulation | `bacnet-modulation-sweep` | After `init-flow` |

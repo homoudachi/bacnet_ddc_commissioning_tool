@@ -72,8 +72,9 @@ python3 tools/runtime/app.py commissioning-guided-next \
   --run-dir artifacts/runtime-run \
   --controller-label FCU-01A
 
-# 3a3) Local browser UI (127.0.0.1) for allowlisted CLI actions — open printed URL
+# 3a3) Local browser UI (127.0.0.1) — open printed URL; use /guided for graphical flow
 python3 tools/runtime/app.py operator-gui --run-dir artifacts/runtime-run --gui-port 8765
+# Then open http://127.0.0.1:8765/guided (step list, next step, record-step, session keys).
 
 # 3b) Operator-entered session values (requires init-flow); state/sessions/<label>.json
 python3 tools/runtime/app.py set-session-value \
