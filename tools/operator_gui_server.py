@@ -44,6 +44,7 @@ ALLOWED_PREFIXES = (
     "set-session-value",
     "record-step",
     "bacnet-read",
+    "bacnet-read-batch",
     "dry-run-bacnet-write",
     "bacnet-subscribe-cov",
     "bacnet-write-batch",
@@ -66,6 +67,7 @@ _GUIDED_API_COMMANDS = frozenset(
         "record-step",
         "bacnet-point-checkout",
         "bacnet-read",
+        "bacnet-read-batch",
         "dry-run-bacnet-write",
         "bacnet-modulation-sweep",
         "commissioning-airflow-adjust-write",
@@ -423,6 +425,18 @@ details {{ margin-top: 0.5rem; color: var(--muted); font-size: 0.85rem; }}
         <label>Property (optional)</label>
         <input id="qrProp" placeholder="presentValue" value="presentValue"/>
         <button type="button" class="secondary" id="btnQrRead">BACnet read</button>
+      </div>
+      <div>
+        <h4>Quick read batch (allowlisted)</h4>
+        <p class="meta">One object per line (optional <code>object:property</code>); default ReadPropertyMultiple.</p>
+        <label>Object ids (one per line)</label>
+        <textarea id="qrbReads" rows="4" placeholder="ai_sat&#10;msv_test_mode"></textarea>
+        <label>Mode</label>
+        <select id="qrbMode">
+          <option value="multiple" selected>multiple (ReadPropertyMultiple)</option>
+          <option value="sequential">sequential (ReadProperty each)</option>
+        </select>
+        <button type="button" class="secondary" id="btnQrBatch">BACnet read batch</button>
       </div>
       <div>
         <h4>Quick write (allowlisted)</h4>
@@ -1019,6 +1033,28 @@ document.getElementById("btnQrRead").addEventListener("click", async () => {{
     const st = j.status || "";
     const vs = j.read && j.read.value_str != null ? j.read.value_str : (j.value_str || "");
     showFlash(document.getElementById("detailFlash"), "Read " + st + (vs ? ": " + vs : ""), st !== "read_ok");
+  }} catch (e) {{
+    showFlash(document.getElementById("detailFlash"), String(e.message), true);
+  }}
+}});
+
+document.getElementById("btnQrBatch").addEventListener("click", async () => {{
+  const c = document.getElementById("selCtl").value;
+  const raw = document.getElementById("qrbReads").value || "";
+  const mode = document.getElementById("qrbMode").value || "multiple";
+  const reads = raw.split(/\\r?\\n/).map(s => s.trim()).filter(Boolean);
+  if (!c || reads.length === 0) {{
+    showFlash(document.getElementById("detailFlash"), "Controller and at least one read line required.", true);
+    return;
+  }}
+  try {{
+    const j = await apiJson("/api/v1/bacnet-quick-read-batch", {{
+      method: "POST",
+      headers: {{ "Content-Type": "application/json" }},
+      body: JSON.stringify({{ controller: c, reads, mode }}),
+    }});
+    const ok = j.all_read_ok ? "Read batch OK." : "Read batch had failures (see JSON).";
+    showFlash(document.getElementById("detailFlash"), ok, !j.all_read_ok);
   }} catch (e) {{
     showFlash(document.getElementById("detailFlash"), String(e.message), true);
   }}
@@ -1731,6 +1767,64 @@ class _Handler(BaseHTTPRequestHandler):
                     400,
                     {
                         "error": "bacnet-read failed",
+                        "stderr": err[-8000:],
+                        "stdout": out[-8000:],
+                        "parsed": data,
+                    },
+                )
+                return
+            if isinstance(data, dict):
+                self._send_json(200, data)
+            else:
+                self._send_json(200, {"ok": False, "raw_stdout": out.strip()[:8000]})
+            return
+        if path == "/api/v1/bacnet-quick-read-batch":
+            body = self._read_json_body()
+            if body is None:
+                self._send_json(400, {"error": "invalid JSON body"})
+                return
+            ctl = str(body.get("controller", "")).strip()
+            reads_raw = body.get("reads")
+            mode = str(body.get("mode", "multiple") or "multiple").strip().lower()
+            if not ctl:
+                self._send_json(400, {"error": "controller required"})
+                return
+            if mode not in {"multiple", "sequential"}:
+                self._send_json(400, {"error": "mode must be multiple or sequential"})
+                return
+            if not isinstance(reads_raw, list) or not reads_raw:
+                self._send_json(400, {"error": "reads must be a non-empty JSON array of strings"})
+                return
+            specs: list[str] = []
+            for item in reads_raw:
+                s = str(item).strip()
+                if not s:
+                    continue
+                if len(s) > 160:
+                    self._send_json(400, {"error": "read spec too long"})
+                    return
+                specs.append(s)
+            if len(specs) > 32:
+                self._send_json(400, {"error": "too many read specs (max 32)"})
+                return
+            if not specs:
+                self._send_json(400, {"error": "no non-empty read specs"})
+                return
+            argv = ["bacnet-read-batch", "--controller-label", ctl, "--mode", mode]
+            for spec in specs:
+                argv.extend(["--read", spec])
+            _argv_append_optional_bacnet(argv, body)
+            if body.get("timeout_seconds") is not None and str(body.get("timeout_seconds")).strip() != "":
+                argv.extend(["--timeout-seconds", str(body["timeout_seconds"])])
+            if body.get("retries") is not None and str(body.get("retries")).strip() != "":
+                argv.extend(["--retries", str(int(body["retries"]))])
+            code, out, err = self._run_app_argv(argv, timeout=900)
+            data = self._parse_stdout_json(out)
+            if code != 0:
+                self._send_json(
+                    400,
+                    {
+                        "error": "bacnet-read-batch failed",
                         "stderr": err[-8000:],
                         "stdout": out[-8000:],
                         "parsed": data,

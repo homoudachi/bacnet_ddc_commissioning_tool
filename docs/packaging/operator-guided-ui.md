@@ -6,6 +6,8 @@ The **guided** view is at **`http://127.0.0.1:<port>/guided`** after starting:
 python3 tools/runtime/app.py operator-gui --run-dir <run-dir> --gui-port 8765
 ```
 
+The guided strip includes **Quick read** (single allowlisted point), **Quick read batch** (multiple **`--read`** lines → **`bacnet-read-batch`**, default ReadPropertyMultiple), and **Quick write**.
+
 ## Screenshots in this repo
 
 Static captures (example run with `docs/examples/site-controllers.template.csv` + **`init-flow`** for **FCU-01A**) live under **`docs/assets/`**:
