@@ -1,7 +1,9 @@
 import csv
 import json
+import os
 import pathlib
 import shutil
+import tempfile
 import zipfile
 import socket
 import subprocess
@@ -264,6 +266,9 @@ class RuntimeCliTests(unittest.TestCase):
         )
         self.assertEqual("job-001", config["job_id"])
         self.assertIn("controllers_csv", config)
+        self.assertIn("events_log", config)
+        self.assertIn("rotate_max_bytes", config["events_log"])
+        self.assertIn("retention_files", config["events_log"])
 
         lines = (
             self.run_dir / "logs" / "events.jsonl"
@@ -4889,3 +4894,44 @@ class RuntimeCliTests(unittest.TestCase):
         self.assertIn("measurement_branch_id", csv_text)
         self.assertIn("supply_main", csv_text)
         self.assertIn("0.44", csv_text)
+
+
+class RuntimeEventsJsonlTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.run_dir = pathlib.Path(tempfile.mkdtemp())
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.run_dir, ignore_errors=True)
+        for key in (
+            "COMMISSIONING_EVENTS_MAX_BYTES",
+            "COMMISSIONING_EVENTS_RETENTION_FILES",
+        ):
+            os.environ.pop(key, None)
+
+    def test_events_jsonl_rotates_on_append_when_over_limit(self) -> None:
+        os.environ["COMMISSIONING_EVENTS_MAX_BYTES"] = "500"
+        os.environ["COMMISSIONING_EVENTS_RETENTION_FILES"] = "3"
+        init_result = _run_runtime(
+            "init-run",
+            "--run-dir",
+            str(self.run_dir),
+            "--job-id",
+            "job-rotate",
+            "--controllers-csv",
+            str(ROOT / "docs" / "examples" / "site-controllers.template.csv"),
+            "--profiles-dir",
+            str(ROOT / "docs" / "examples"),
+            "--scenarios-dir",
+            str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+        )
+        self.assertEqual(0, init_result.returncode)
+        log_path = self.run_dir / "logs" / "events.jsonl"
+        log_path.write_text("x" * 600 + "\n", encoding="utf-8")
+        compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+        self.assertEqual(0, compile_result.returncode)
+        self.assertTrue(log_path.is_file())
+        self.assertTrue((self.run_dir / "logs" / "events.jsonl.1").is_file())
+        tail = log_path.read_text(encoding="utf-8").strip().splitlines()
+        self.assertGreaterEqual(len(tail), 1)
+        last = json.loads(tail[-1])
+        self.assertEqual("import_compiled", last["event"])

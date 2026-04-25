@@ -19,7 +19,7 @@ Use before tagging a release or handing a **Windows exe** / **Python** drop to t
 
 | Area | Scenario | Notes |
 |------|-----------|--------|
-| Run dir | `init-run` → `compile-import` → `init-flow` | Standard path |
+| Run dir | `init-run` → `compile-import` → `init-flow` | Standard path; `config/runtime-config.json` includes **`events_log`** defaults (**ADR 0017**); optional env **`COMMISSIONING_EVENTS_MAX_BYTES`** / **`COMMISSIONING_EVENTS_RETENTION_FILES`** |
 | List / graph | `print-job-graph`, `list-flows`, `show-flow`, `commissioning-guided-next` | After `init-flow` |
 | BACnet read | `bacnet-read` on allowlisted point | Against sim or panel |
 | BACnet write | `dry-run-bacnet-write --execute` | Allowlist + writable |

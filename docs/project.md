@@ -68,7 +68,7 @@ CLI and JSON artifacts use a small set of **terminal statuses** (see also artifa
 | `read_rejected` / `write_rejected` | Device returned a BACnet **error, reject, or abort** (string captured in the artifact). |
 | `read_failed` / `execute_failed` / `client_load_failed` | Local exception, timeout waiting for the stack, or **bacpypes3 not installed** (`pip install -r requirements.txt`). |
 
-Structured **audit lines** continue to append to `logs/events.jsonl` for each command invocation.
+Structured **audit lines** continue to append to `logs/events.jsonl` for each command invocation (with optional size-based rotation to `events.jsonl.N`; see **ADR 0017**).
 
 ## Commissioning scope (v1 capabilities described so far)
 
@@ -244,7 +244,7 @@ These are the main gaps once requirements feel “complete enough” to start co
 - **RAT proxy rules** — optional profile **`rat_temperature_proxy`** (`enabled`, `proxy_controller_label`, `proxy_read_object_id`); **`compile-import`** warns on unknown controller / missing read allowlist; metadata under **`commissioning_meta.rat_temperature_proxy`** (runtime use still profile-driven).
 - **Tauri desktop operator** — optional **`desktop/tauri-operator/`** app (see **`docs/packaging/tauri-operator-desktop.md`**) for a packaged window around the Python CLI; **`rust-toolchain.toml`** pins stable for CI/agents.
 - **Report layout** — PDF section order, logo/branding, one table vs multiple charts; **CSV vs XLSX** column order frozen for integrators.
-- **Structured log** — **v1 slice:** append-only **JSON Lines** at `logs/events.jsonl` per run-dir; **rotation / retention / portable exe paths** still to define.
+- **Structured log** — append-only **JSON Lines** at `logs/events.jsonl` per run-dir; **size-based rotation** with defaults in `config/runtime-config.json` → **`events_log`** (`rotate_max_bytes`, `retention_files`) and optional env **`COMMISSIONING_EVENTS_MAX_BYTES`** / **`COMMISSIONING_EVENTS_RETENTION_FILES`** (**ADR 0017**). Archives: `logs/events.jsonl.1`, `.2`, …
 - **Docker BACnet sim (beyond bacnet-dev)** — **`bacnet-bbmd-lab`** + optional **macvlan** overlay shipped (**ADR 0015**, `docs/simulator/macvlan-lab.md`); **orchestrator-in-container** multi-site topology still optional.
 - **BACnet stack** — **PyInstaller exe** baseline shipped; **COV subscribe**; **`bacnet-write-batch`** with **`--mode sequential`** (multiple WriteProperty) or **`--mode multiple`** (single **WritePropertyMultiple** APDU, lab-sim tested); **ReadPropertyMultiple** and richer **sweep-timeouts** still optional.
 - **Build and signing** — still **TBD** (toolchain, certificate, release channel).
