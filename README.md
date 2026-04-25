@@ -76,6 +76,16 @@ python3 tools/runtime/app.py commissioning-guided-next \
 python3 tools/runtime/app.py operator-gui --run-dir artifacts/runtime-run --gui-port 8765
 # Then open http://127.0.0.1:8765/guided (step list, quick BACnet read/write, action forms, record-step, session).
 
+### Guided UI screenshots (static examples)
+
+Captured with headless Chrome against a small demo run (see **`tools/packaging/capture_operator_guided_screenshots.sh`** to regenerate):
+
+| Guided (wide) | Guided (narrow) | Advanced `/` form |
+|---------------|-----------------|-------------------|
+| ![Guided commissioning UI wide](docs/assets/operator-guided-ui-wide.png) | ![Guided commissioning UI mobile](docs/assets/operator-guided-ui-mobile.png) | ![Advanced operator CLI form](docs/assets/operator-advanced-cli-form.png) |
+
+More detail: **[`docs/packaging/operator-guided-ui.md`](docs/packaging/operator-guided-ui.md)**.
+
 # 3b) Operator-entered session values (requires init-flow); state/sessions/<label>.json
 python3 tools/runtime/app.py set-session-value \
   --run-dir artifacts/runtime-run \

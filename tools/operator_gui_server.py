@@ -81,6 +81,10 @@ def _flow_state_path(run_dir: Path, controller_label: str) -> Path:
     return run_dir / "state" / "flows" / f"{controller_label}.json"
 
 
+def _session_state_path(run_dir: Path, controller_label: str) -> Path:
+    return run_dir / "state" / "sessions" / f"{controller_label}.json"
+
+
 def _runtime_job_path(run_dir: Path) -> Path:
     return run_dir / "state" / "runtime-job.json"
 
@@ -1132,6 +1136,10 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         path = self.path.split("?", 1)[0]
+        if path == "/favicon.ico":
+            self.send_response(204)
+            self.end_headers()
+            return
         if path == "/":
             if self.path != "/" and not self.path.startswith("/?"):
                 self.send_error(404)
@@ -1195,6 +1203,9 @@ class _Handler(BaseHTTPRequestHandler):
             ctl = (q.get("controller") or [""])[0].strip()
             if not ctl:
                 self._send_json(400, {"error": "missing controller query parameter"})
+                return
+            if not _session_state_path(self.run_dir, ctl).is_file():
+                self._send_json(200, {"session_keys": [], "session": None})
                 return
             code, out, err = self._run_app_argv(["show-session", "--controller-label", ctl])
             if code != 0:
