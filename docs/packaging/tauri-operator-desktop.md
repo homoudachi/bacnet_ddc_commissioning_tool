@@ -32,6 +32,15 @@ Artifacts:
   (`npx tauri build -c '{"bundle":{"targets":["deb"]}}'` keeps CI fast when you also build Windows installers.)
 - **Windows NSIS installer:** `desktop/tauri-operator/src-tauri/target/release/bundle/nsis/*.exe` (from `npx tauri build -b nsis` on Windows)
 
+## Not in default CI (optional later)
+
+The **`.github/workflows/tauri-operator.yml`** job builds **Linux `.deb`** and **Windows NSIS** only. The following are **intentionally deferred** until there is a concrete release need:
+
+- **macOS `.dmg`** (extra runner type, notarization/signing policy).
+- **Code-signed NSIS installer** (same story as the PyInstaller signing notes in [`windows-exe.md`](windows-exe.md): optional, secret-driven).
+
+Local builds can still produce other bundle targets with `npx tauri build` on a Mac or with extra Tauri bundle flags when you need them.
+
 ## Run directory
 
 The UI asks for an **absolute** path to a commissioning **run directory** (same as `--run-dir` for the Python CLI). The app validates that the path exists before invoking Python.

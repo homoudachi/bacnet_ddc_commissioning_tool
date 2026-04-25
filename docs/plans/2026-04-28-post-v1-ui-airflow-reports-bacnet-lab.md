@@ -52,6 +52,10 @@ These mostly extend **existing** CLI, exports, or profiles without new transport
 5. **B3** when a site asks for HRV↔FCU RAT linkage.  
 6. **C1–C3** only with explicit stakeholder ask and ADR.
 
+### Tauri packaging (optional extras, deferred)
+
+The **Tauri operator** CI ships **Ubuntu `.deb`** and **Windows NSIS** artifacts only. **macOS `.dmg`** builds and **signed NSIS** installers remain **out of scope** for default automation until a release asks for them (runner cost, Apple notarization, and certificate handling). See [`docs/packaging/tauri-operator-desktop.md`](../packaging/tauri-operator-desktop.md).
+
 ---
 
 ## References
@@ -67,4 +71,5 @@ These mostly extend **existing** CLI, exports, or profiles without new transport
 ## Revision
 
 - **2026-04-28:** Initial plan (tiered sequencing; BBMD deferred).
-- **2026-04-28:** Tier A items A1–A4 marked shipped in-repo (see foundation plan current status); Tier B/C unchanged.
+- **2026-04-28:** Tier A items A1–A4 marked shipped in-repo (see foundation plan current status); Tier B marked shipped; Tier C deferred.
+- **2026-04-24:** Documented intentional deferral of **macOS `.dmg`** and **signed NSIS** for the Tauri operator (CI stays Linux + Windows only).
