@@ -25,7 +25,7 @@ Use before tagging a release or handing a **Windows exe** / **Python** drop to t
 | BACnet write | `dry-run-bacnet-write --execute` | Allowlist + writable |
 | BACnet COV | `bacnet-subscribe-cov` | After successful allowlisted read |
 | BACnet batch write | `bacnet-write-batch --execute` | Default `--mode sequential`; optional **`--mode multiple`** (WritePropertyMultiple; device-dependent) |
-| Point checkout | `bacnet-point-checkout` | Profile `point_checkout` |
+| Point checkout | `bacnet-point-checkout` | Profile `point_checkout`; default **ReadPropertyMultiple** when ≥2 points (`--no-read-property-multiple` to force per-point reads) |
 | Record step | `record-step` pass / skip / CHW stroke confirms | See README |
 | Airflow | `commissioning-airflow-adjust-write`, `commissioning-airflow-closed-loop-iterate`, `commissioning-confirm-tachometer-reference` | Optional **`closed_loop`** block + MSV arm when profile requires |
 | Operator UI | `operator-gui --run-dir <run> --gui-port 8765` | Open **`/guided`** for flow UI; **`/`** for advanced CLI form |

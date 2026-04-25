@@ -46,7 +46,8 @@ These mostly extend **existing** CLI, exports, or profiles without new transport
 | Item | Notes |
 |------|--------|
 | **Multi-BBMD / distributed BDT** | More than one BBMD peer table row, NAT-BBMD, or production FDT policy—needs site-driven ADR. |
-| **ReadPropertyMultiple** in façade | Useful for checkout bursts; same allowlist / object-resolution rules as reads today. |
+
+**Shipped follow-on:** **ReadPropertyMultiple** — `CommissioningBACnetAdapter.read_present_values_property_multiple`; **`bacnet-point-checkout`** and automatic **`record-step`** checkout batch with one RPM when two or more points resolve (**ADR 0016**); Docker lab sim handles RPM for present-value.
 
 ---
 

@@ -3353,6 +3353,109 @@ def cmd_bacnet_write_batch(args: argparse.Namespace) -> int:
     return 0 if result.get("status") == "batch_ok" else 2
 
 
+def _resolve_point_checkout_row(
+    *,
+    controller_label: str,
+    target: dict,
+    object_id: str,
+    property_name: str,
+) -> tuple[dict | None, tuple[int, int] | None]:
+    """Validate allowlist and ``objects_by_id``; return (error_row, (object_type, instance)) or (None, spec)."""
+    oid = str(object_id).strip()
+    prop = str(property_name or "presentValue").strip() or "presentValue"
+    profile_allow = target.get("commissioning_read_allowlist", [])
+    if not isinstance(profile_allow, list) or not profile_allow:
+        return (
+            {
+                "controller_label": controller_label,
+                "profile_object_id": oid,
+                "property": prop,
+                "status": "config_error",
+                "message": "profile has no commissioning_read_allowlist",
+            },
+            None,
+        )
+    allowed = {str(x).strip() for x in profile_allow if str(x).strip()}
+    if oid not in allowed:
+        return (
+            {
+                "controller_label": controller_label,
+                "profile_object_id": oid,
+                "property": prop,
+                "status": "config_error",
+                "message": (
+                    "object_id not in commissioning_read_allowlist "
+                    f"(allowed: {sorted(allowed)})"
+                ),
+            },
+            None,
+        )
+    objects_by_id = target.get("objects_by_id", {})
+    if not isinstance(objects_by_id, dict) or oid not in objects_by_id:
+        return (
+            {
+                "controller_label": controller_label,
+                "profile_object_id": oid,
+                "property": prop,
+                "status": "config_error",
+                "message": "object_id not found in objects_by_id",
+            },
+            None,
+        )
+    meta = objects_by_id[oid]
+    if not isinstance(meta, dict):
+        return (
+            {
+                "controller_label": controller_label,
+                "profile_object_id": oid,
+                "property": prop,
+                "status": "config_error",
+                "message": "invalid objects_by_id entry",
+            },
+            None,
+        )
+    bacnet = meta.get("bacnet", {})
+    if not isinstance(bacnet, dict):
+        return (
+            {
+                "controller_label": controller_label,
+                "profile_object_id": oid,
+                "property": prop,
+                "status": "config_error",
+                "message": "invalid objects_by_id entry",
+            },
+            None,
+        )
+    type_name = str(bacnet.get("object_type", "")).strip()
+    try:
+        object_instance = int(bacnet.get("instance"))
+    except (TypeError, ValueError):
+        return (
+            {
+                "controller_label": controller_label,
+                "profile_object_id": oid,
+                "property": prop,
+                "status": "config_error",
+                "message": "invalid BACnet instance",
+            },
+            None,
+        )
+    bacnet_ad = _bacnet_adapter()
+    object_type_int = bacnet_ad.object_type_name_to_int(type_name)
+    if object_type_int is None:
+        return (
+            {
+                "controller_label": controller_label,
+                "profile_object_id": oid,
+                "property": prop,
+                "status": "config_error",
+                "message": f"unsupported BACnet object_type: {type_name!r}",
+            },
+            None,
+        )
+    return None, (object_type_int, object_instance)
+
+
 def _run_point_checkout_reads(
     *,
     controller_label: str,
@@ -3362,13 +3465,14 @@ def _run_point_checkout_reads(
     bacnet_bind_port: int,
     apdu_timeout_override: float | None,
     strict: bool,
+    use_read_property_multiple: bool = True,
 ) -> tuple[list[dict], bool]:
     """Execute profile ``point_checkout`` reads; returns (rows, all_read_ok)."""
     checkout = target.get("point_checkout", [])
     if not isinstance(checkout, list) or not checkout:
         return [], False
-    rows: list[dict] = []
-    all_ok = True
+
+    ordered: list[tuple[str, str, int, int] | dict] = []
     for entry in checkout:
         if not isinstance(entry, dict):
             continue
@@ -3376,21 +3480,226 @@ def _run_point_checkout_reads(
         if not oid:
             continue
         prop = str(entry.get("property", "presentValue")).strip() or "presentValue"
-        one = _bacnet_read_one(
+        err, resolved = _resolve_point_checkout_row(
             controller_label=controller_label,
             target=target,
             object_id=oid,
             property_name=prop,
-            timeout_seconds=timeout_seconds,
-            retries=retries,
-            bacnet_bind_port=bacnet_bind_port,
-            apdu_timeout_override=apdu_timeout_override,
         )
+        if err is not None:
+            ordered.append(err)
+        elif resolved is not None:
+            ot, oi = resolved
+            ordered.append((oid, prop, ot, oi))
+
+    rows: list[dict] = []
+    all_ok = True
+
+    rpm_candidates: list[tuple[str, str, int, int]] = [
+        x for x in ordered if isinstance(x, tuple)
+    ]
+    use_rpm = bool(use_read_property_multiple) and len(rpm_candidates) >= 2
+
+    if not use_rpm:
+        for item in ordered:
+            if isinstance(item, dict):
+                rows.append(item)
+                if item.get("status") != "read_ok":
+                    all_ok = False
+                    if strict:
+                        return rows, False
+                continue
+            oid, prop, _ot, _oi = item
+            one = _bacnet_read_one(
+                controller_label=controller_label,
+                target=target,
+                object_id=oid,
+                property_name=prop,
+                timeout_seconds=timeout_seconds,
+                retries=retries,
+                bacnet_bind_port=bacnet_bind_port,
+                apdu_timeout_override=apdu_timeout_override,
+            )
+            rows.append(one)
+            if one.get("status") != "read_ok":
+                all_ok = False
+                if strict:
+                    break
+        return rows, all_ok
+
+    addr = target.get("bacnet", {})
+    host = str(addr.get("host", "")).strip()
+    port = int(addr.get("port", 0))
+    expected_instance = int(addr.get("device_instance", 0))
+    bacnet_ad = _bacnet_adapter()
+    probe = bacnet_ad.probe_device(
+        host=host,
+        port=port,
+        expected_device_instance=expected_instance,
+        timeout_seconds=timeout_seconds,
+        retries=retries,
+    )
+    try:
+        bind_port = int(bacnet_bind_port or 0)
+    except ValueError:
+        bind_port = 0
+    who_is_timeout = bacnet_ad.effective_who_is_timeout(timeout_seconds, retries)
+    try:
+        apdu_timeout = bacnet_ad.commissioning_apdu_timeout_seconds(apdu_timeout_override)
+    except ValueError as terr:
+        for item in ordered:
+            if isinstance(item, dict):
+                rows.append(item)
+                if item.get("status") != "read_ok":
+                    all_ok = False
+                    if strict:
+                        return rows, False
+                continue
+            oid, prop, _ot, _oi = item
+            rows.append(
+                {
+                    "controller_label": controller_label,
+                    "profile_object_id": oid,
+                    "property": prop,
+                    "probe": probe,
+                    "status": "config_error",
+                    "message": str(terr),
+                    "bacnet_service": "readPropertyMultiple",
+                }
+            )
+            all_ok = False
+            if strict:
+                return rows, False
+        return rows, all_ok
+
+    rpm_reads = [(ot, oi, prop) for _oid, prop, ot, oi in rpm_candidates]
+    batch: dict = {}
+    if probe.get("status") == "reachable_verified":
+        try:
+            batch = bacnet_ad.read_present_values_property_multiple(
+                bind_port=bind_port,
+                target_address=bacnet_ad.format_ipv4_target(host, port),
+                expected_device_instance=expected_instance,
+                reads=rpm_reads,
+                who_is_timeout=who_is_timeout,
+                apdu_timeout=apdu_timeout,
+            )
+        except (OSError, RuntimeError) as err:
+            batch = {"status": "client_load_failed", "message": str(err)}
+        except ModuleNotFoundError as err:
+            batch = {"status": "bacpypes_missing", "message": str(err)}
+        except Exception as err:  # noqa: BLE001
+            batch = {"status": "read_failed", "message": str(err)}
+
+    sub_by: dict[tuple[int, int, str], dict] = {}
+    br = batch.get("reads") if isinstance(batch, dict) else None
+    if isinstance(br, list):
+        for sub in br:
+            if not isinstance(sub, dict):
+                continue
+            try:
+                key = (
+                    int(sub.get("object_type", -1)),
+                    int(sub.get("object_instance", -1)),
+                    str(sub.get("property", "")).strip() or "presentValue",
+                )
+            except (TypeError, ValueError):
+                continue
+            sub_by[key] = sub
+
+    tuple_cursor = 0
+    for item in ordered:
+        if isinstance(item, dict):
+            rows.append(item)
+            if item.get("status") != "read_ok":
+                all_ok = False
+                if strict:
+                    return rows, False
+            continue
+
+        oid, prop, ot, oi = item
+        if item != rpm_candidates[tuple_cursor]:
+            one = _bacnet_read_one(
+                controller_label=controller_label,
+                target=target,
+                object_id=oid,
+                property_name=prop,
+                timeout_seconds=timeout_seconds,
+                retries=retries,
+                bacnet_bind_port=bacnet_bind_port,
+                apdu_timeout_override=apdu_timeout_override,
+            )
+            rows.append(one)
+            if one.get("status") != "read_ok":
+                all_ok = False
+                if strict:
+                    break
+            continue
+
+        tuple_cursor += 1
+        one = {
+            "controller_label": controller_label,
+            "profile_object_id": oid,
+            "property": prop,
+            "probe": probe,
+            "bacnet_timeouts": {
+                "who_is_timeout_seconds": who_is_timeout,
+                "apdu_timeout_seconds": apdu_timeout,
+            },
+            "bacnet_service": "readPropertyMultiple",
+        }
+        if probe.get("status") != "reachable_verified":
+            one["status"] = "blocked_probe_failed"
+            rows.append(one)
+            all_ok = False
+            if strict:
+                break
+            continue
+
+        bstatus = str(batch.get("status", "")) if isinstance(batch, dict) else ""
+        if bstatus in {"read_rejected", "read_unexpected_response", "client_load_failed"}:
+            one["status"] = bstatus
+            one["message"] = str(batch.get("message", ""))
+            if batch.get("detail"):
+                one["detail"] = batch.get("detail")
+            rows.append(one)
+            all_ok = False
+            if strict:
+                break
+            continue
+        if bstatus == "bacpypes_missing":
+            one["status"] = "bacpypes_missing"
+            one["message"] = str(batch.get("message", ""))
+            rows.append(one)
+            all_ok = False
+            if strict:
+                break
+            continue
+        if bstatus == "read_failed":
+            one["status"] = "read_failed"
+            one["read_error"] = str(batch.get("message", ""))
+            rows.append(one)
+            all_ok = False
+            if strict:
+                break
+            continue
+
+        sub = sub_by.get((ot, oi, prop))
+        if not isinstance(sub, dict):
+            one["status"] = "read_missing_in_ack"
+            rows.append(one)
+            all_ok = False
+            if strict:
+                break
+            continue
+        one["read"] = {k: v for k, v in sub.items() if k != "property"}
+        one["status"] = str(sub.get("status", "read_failed"))
         rows.append(one)
         if one.get("status") != "read_ok":
             all_ok = False
             if strict:
                 break
+
     return rows, all_ok
 
 
@@ -5118,6 +5427,9 @@ def cmd_bacnet_point_checkout(args: argparse.Namespace) -> int:
         bacnet_bind_port=bind_port,
         apdu_timeout_override=args.apdu_timeout,
         strict=strict,
+        use_read_property_multiple=not bool(
+            getattr(args, "bacnet_checkout_no_read_property_multiple", False)
+        ),
     )
 
     payload = {
@@ -5126,6 +5438,9 @@ def cmd_bacnet_point_checkout(args: argparse.Namespace) -> int:
         "point_count": len(rows),
         "all_read_ok": bool(all_ok),
         "reads": rows,
+        "bacnet_read_property_multiple": not bool(
+            getattr(args, "bacnet_checkout_no_read_property_multiple", False)
+        ),
     }
 
     out_dir = run_dir / "artifacts" / "bacnet_point_checkout"
@@ -5257,6 +5572,9 @@ def cmd_record_step(args: argparse.Namespace) -> int:
             bacnet_bind_port=bind_port,
             apdu_timeout_override=args.apdu_timeout,
             strict=bool(args.bacnet_checkout_strict),
+            use_read_property_multiple=not bool(
+                getattr(args, "bacnet_checkout_no_read_property_multiple", False)
+            ),
         )
         out_dir = run_dir / "artifacts" / "bacnet_point_checkout"
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -5270,6 +5588,9 @@ def cmd_record_step(args: argparse.Namespace) -> int:
             "point_count": len(rows),
             "all_read_ok": bool(all_ok),
             "reads": rows,
+            "bacnet_read_property_multiple": not bool(
+                getattr(args, "bacnet_checkout_no_read_property_multiple", False)
+            ),
         }
         artifact.write_text(
             json.dumps(checkout_payload, indent=2, sort_keys=True), encoding="utf-8"
@@ -6105,7 +6426,19 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Stop after first failed read instead of continuing.",
     )
-    point_checkout.set_defaults(handler=cmd_bacnet_point_checkout)
+    point_checkout.add_argument(
+        "--no-read-property-multiple",
+        dest="bacnet_checkout_no_read_property_multiple",
+        action="store_true",
+        help=(
+            "Use one ReadProperty per point instead of a single ReadPropertyMultiple "
+            "when two or more checkout points resolve."
+        ),
+    )
+    point_checkout.set_defaults(
+        handler=cmd_bacnet_point_checkout,
+        bacnet_checkout_no_read_property_multiple=False,
+    )
 
     init_flow = subparsers.add_parser(
         "init-flow", help="Initialize commissioning flow state for one controller."
@@ -6450,6 +6783,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Stop point checkout after first failed read (default: run all points).",
     )
     record_step.add_argument(
+        "--bacnet-checkout-no-read-property-multiple",
+        dest="bacnet_checkout_no_read_property_multiple",
+        action="store_true",
+        help=(
+            "Use sequential ReadProperty for automatic point checkout instead of "
+            "ReadPropertyMultiple when two or more points resolve."
+        ),
+    )
+    record_step.add_argument(
         "--no-run-modulation-on-pass",
         dest="run_modulation_on_pass",
         action="store_false",
@@ -6490,7 +6832,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="BACpypes3 APDU timeout override for modulation sweep (default: adapter default).",
     )
-    record_step.set_defaults(handler=cmd_record_step, run_modulation_on_pass=True)
+    record_step.set_defaults(
+        handler=cmd_record_step,
+        run_modulation_on_pass=True,
+        bacnet_checkout_no_read_property_multiple=False,
+    )
 
     return parser
 

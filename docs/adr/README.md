@@ -27,3 +27,4 @@ Use when a choice is **non-obvious** or you will forget **why** you chose it.
 | [0013](0013-airflow-tachometer-checkpoint-cli.md) | Airflow adjust + tachometer confirm CLIs and record-step gates | Accepted |
 | [0014](0014-unified-commissioning-report-export-contract.md) | Unified commissioning CSV/HTML/XLSX/PDF column contract (v1) | Accepted |
 | [0015](0015-bbmd-lab-cov-write-batch.md) | BBMD lab compose, sim SubscribeCOV, CLI batch writes | Accepted |
+| [0016](0016-read-property-multiple-facade.md) | ReadPropertyMultiple façade + point-checkout batching | Accepted |

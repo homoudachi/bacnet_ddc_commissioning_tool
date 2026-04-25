@@ -246,7 +246,7 @@ These are the main gaps once requirements feel “complete enough” to start co
 - **Report layout** — PDF section order, logo/branding, one table vs multiple charts; **CSV vs XLSX** column order frozen for integrators.
 - **Structured log** — **v1 slice:** append-only **JSON Lines** at `logs/events.jsonl` per run-dir; **rotation / retention / portable exe paths** still to define.
 - **Docker BACnet sim (beyond bacnet-dev)** — **`bacnet-bbmd-lab`** + optional **macvlan** overlay shipped (**ADR 0015**, `docs/simulator/macvlan-lab.md`); **orchestrator-in-container** multi-site topology still optional.
-- **BACnet stack** — **PyInstaller exe** baseline shipped; **COV subscribe**; **`bacnet-write-batch`** with **`--mode sequential`** (multiple WriteProperty) or **`--mode multiple`** (single **WritePropertyMultiple** APDU, lab-sim tested); **ReadPropertyMultiple** and richer **sweep-timeouts** still optional.
+- **BACnet stack** — **PyInstaller exe** baseline shipped; **COV subscribe**; **`bacnet-write-batch`** with **`--mode sequential`** (multiple WriteProperty) or **`--mode multiple`** (single **WritePropertyMultiple** APDU, lab-sim tested); **`bacnet-point-checkout`** batches with **ReadPropertyMultiple** when two or more points resolve (**ADR 0016**; opt-out flags on CLI); richer **sweep-timeouts** still optional.
 - **Build and signing** — still **TBD** (toolchain, certificate, release channel).
 
 ## Open questions

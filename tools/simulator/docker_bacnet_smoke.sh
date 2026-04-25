@@ -207,6 +207,14 @@ pc1="$(python3 "$ROOT/tools/runtime/app.py" bacnet-point-checkout \
   --run-dir "$RUN_DIR" --controller-label FCU-DOCKER $BACNET_READ_FLAGS)"
 echo "$pc1"
 echo "$pc1" | grep -q '"all_read_ok": true' || { echo "error: FCU-DOCKER point-checkout failed"; exit 2; }
+echo "$pc1" | grep -q '"bacnet_read_property_multiple": true' || {
+  echo "error: expected ReadPropertyMultiple path for FCU-DOCKER point-checkout"
+  exit 2
+}
+echo "$pc1" | grep -q '"bacnet_service": "readPropertyMultiple"' || {
+  echo "error: expected readPropertyMultiple on FCU-DOCKER checkout rows"
+  exit 2
+}
 
 pc2="$(python3 "$ROOT/tools/runtime/app.py" bacnet-point-checkout \
   --run-dir "$RUN_DIR" --controller-label HRV-DOCKER $BACNET_READ_FLAGS)"

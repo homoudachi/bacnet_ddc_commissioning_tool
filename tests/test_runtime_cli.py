@@ -87,14 +87,22 @@ class _FakeBipUdpServer:
             ConfirmedServiceChoice,
             IAmRequest,
             ReadPropertyACK,
+            ReadPropertyMultipleACK,
+            ReadPropertyMultipleRequest,
             ReadPropertyRequest,
             SimpleAckPDU,
             UnconfirmedRequestPDU,
             UnconfirmedServiceChoice,
             WritePropertyRequest,
         )
-        from bacpypes3.basetypes import PropertyIdentifier, Segmentation
-        from bacpypes3.constructeddata import Any
+        from bacpypes3.basetypes import (
+            PropertyIdentifier,
+            ReadAccessResult,
+            ReadAccessResultElement,
+            ReadAccessResultElementChoice,
+            Segmentation,
+        )
+        from bacpypes3.constructeddata import Any, SequenceOf
         from bacpypes3.primitivedata import ObjectIdentifier, Real, Unsigned
         from bacpypes3.pdu import IPv4Address, PDU
 
@@ -153,6 +161,66 @@ class _FakeBipUdpServer:
                 objectIdentifier=req.objectIdentifier,
                 propertyIdentifier=req.propertyIdentifier,
                 propertyValue=payload,
+            )
+            inner = ack.encode()
+            inner.apduInvokeID = inc.apduInvokeID
+            inner.apduSeg = 0
+            inner.apduMor = 0
+            inner.set_context(inc)
+            wire = inner.encode().pduData
+            sock.sendto(_bvlc_original_unicast(b"\x01\x00" + wire), addr)
+            return
+
+        if svc == int(ConfirmedServiceChoice.readPropertyMultiple):
+            mreq = ReadPropertyMultipleRequest.decode(inc)
+            access_results: list[ReadAccessResult] = []
+            for spec in mreq.listOfReadAccessSpecs:
+                oid = spec.objectIdentifier
+                ot_r = int(oid[0])
+                oi_r = int(oid[1])
+                elems: list[ReadAccessResultElement] = []
+                for pref in spec.listOfPropertyReferences:
+                    if str(pref.propertyIdentifier) != "present-value":
+                        continue
+                    with self._lock:
+                        ai_val = self._ai_present
+                        msv_val = self._msv_present
+                        av_tacho = self._av_tacho_present
+                        av_fan = self._av_supply_fan_present
+                        av_air = self._av_supply_airflow_L_s
+                        av_heat = self._av_heat_present
+                        ao_valve = self._ao_valve_present
+                    if ot_r == 0 and oi_r == 2:
+                        payload = Any(Real(ai_val))
+                    elif ot_r == 19 and oi_r == 50:
+                        payload = Any(Unsigned(msv_val))
+                    elif ot_r == 2 and oi_r == 1:
+                        payload = Any(Real(av_tacho))
+                    elif ot_r == 2 and oi_r == 3:
+                        payload = Any(Real(av_fan))
+                    elif ot_r == 2 and oi_r == 7:
+                        payload = Any(Real(av_air))
+                    elif ot_r == 2 and oi_r == 4:
+                        payload = Any(Real(av_heat))
+                    elif ot_r == 1 and oi_r == 5:
+                        payload = Any(Real(ao_valve))
+                    else:
+                        continue
+                    elems.append(
+                        ReadAccessResultElement(
+                            propertyIdentifier=pref.propertyIdentifier,
+                            propertyArrayIndex=pref.propertyArrayIndex,
+                            readResult=ReadAccessResultElementChoice(propertyValue=payload),
+                        )
+                    )
+                access_results.append(
+                    ReadAccessResult(
+                        objectIdentifier=oid,
+                        listOfResults=SequenceOf(ReadAccessResultElement)(elems),
+                    )
+                )
+            ack = ReadPropertyMultipleACK(
+                listOfReadAccessResults=SequenceOf(ReadAccessResult)(access_results),
             )
             inner = ack.encode()
             inner.apduInvokeID = inc.apduInvokeID
@@ -890,11 +958,13 @@ class RuntimeCliTests(unittest.TestCase):
         self.assertEqual(0, result.returncode)
         payload = json.loads(result.stdout)
         self.assertTrue(payload["all_read_ok"])
+        self.assertTrue(payload.get("bacnet_read_property_multiple"))
         self.assertEqual(2, payload["point_count"])
         statuses = [r.get("status") for r in payload.get("reads", [])]
         self.assertEqual(["read_ok", "read_ok"], statuses)
         for row in payload["reads"]:
             self.assertEqual(9.0, row.get("bacnet_timeouts", {}).get("apdu_timeout_seconds"))
+            self.assertEqual("readPropertyMultiple", row.get("bacnet_service"))
         self.assertIn("22.0", payload["reads"][0].get("read", {}).get("value_str", ""))
         self.assertIn("2", payload["reads"][1].get("read", {}).get("value_str", ""))
 

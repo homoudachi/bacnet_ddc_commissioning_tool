@@ -19,7 +19,7 @@ Post–v1 work needed:
    - **`bacnet-fcu-bbmd-isolated`**: FCU-shaped sim on **`172.29.0.10:47808`** (device instance **21004**) reachable only from the lab networks (not published on localhost).
    - **`bacnet-bbmd-probe`**: one-shot **foreign device** client (`probe_foreign_read.py`) using **`network_mode: service:bacnet-bbmd-lab`**, registering with the local BBMD and reading **`analogInput,2`** from the isolated device.
 2. **COV in lab sim** (`docker/simulator/bacnet-device/server.py`): handles **SubscribeCOV** for **FCU `analogInput,2`** and **HRV `analogInput,15`** (supply air); sends **UnconfirmedCOVNotification** on subscribe and after matching **WriteProperty** / **WritePropertyMultiple**; cancel via SubscribeCOV with null lifetime/confirmed per BACnet stack behavior.
-3. **WritePropertyMultiple in lab sim**: same `server.py` handles **WritePropertyMultiple** for **present-value** on the same object set as single **WriteProperty** (all writes in the APDU must succeed or the sim sends no ack).
+3. **WritePropertyMultiple in lab sim**: same `server.py` handles **WritePropertyMultiple** for **present-value** on the same object set as single **WriteProperty** (all writes in the APDU must succeed or the sim sends no ack). **ReadPropertyMultiple** for **present-value** is also implemented for checkout bursts (**ADR 0016**)..
 4. **Adapter + CLI**:
    - **`CommissioningBACnetAdapter.subscribe_cov_unconfirmed_wait_value`** → **`bacnet-subscribe-cov`** (requires prior read allowlist + successful read).
    - **`CommissioningBACnetAdapter.write_present_values_batch`** → **`bacnet-write-batch --execute --mode sequential`** (sequential WriteProperty, single NormalApplication / Who-Is).
