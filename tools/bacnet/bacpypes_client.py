@@ -324,6 +324,114 @@ def write_present_values_batch(
     )
 
 
+async def _write_present_values_property_multiple_async(
+    *,
+    bind_port: int,
+    target_address: str,
+    expected_device_instance: int,
+    writes: list[tuple[int, int, int | float]],
+    who_is_timeout: float,
+    apdu_timeout: float,
+) -> dict[str, Any]:
+    """Single WritePropertyMultiple confirmed service (one APDU) for presentValue."""
+    from bacpypes3.apdu import WritePropertyMultipleRequest
+    from bacpypes3.basetypes import PropertyIdentifier, PropertyValue, WriteAccessSpecification
+    from bacpypes3.constructeddata import Any, SequenceOf
+
+    local_device_instance = 999000 + (bind_port % 900000)
+    device = DeviceObject(
+        objectIdentifier=ObjectIdentifier(("device", local_device_instance)),
+        objectName=CharacterString("commissioning-tool-client"),
+    )
+    app = NormalApplication(device, IPv4Address(f"0.0.0.0:{bind_port}"))
+
+    try:
+        await asyncio.sleep(0.05)
+        who_future = app.who_is(
+            low_limit=expected_device_instance,
+            high_limit=expected_device_instance,
+            address=IPv4Address(target_address),
+            timeout=who_is_timeout,
+        )
+        iams = await asyncio.wait_for(who_future, timeout=who_is_timeout + 1.0)
+        if not iams:
+            return {"status": "blocked_probe_failed", "message": "no I-Am from target"}
+
+        dest = IPv4Address(target_address)
+        access_specs: list[Any] = []
+        rows: list[dict[str, Any]] = []
+        for object_type, object_instance, value in writes:
+            payload = _encode_present_value_write(object_type, object_instance, value)
+            prop_val = PropertyValue(
+                propertyIdentifier=PropertyIdentifier("present-value"),
+                value=Any(payload),
+            )
+            access_specs.append(
+                WriteAccessSpecification(
+                    objectIdentifier=ObjectIdentifier((object_type, object_instance)),
+                    listOfProperties=SequenceOf(PropertyValue)([prop_val]),
+                )
+            )
+            rows.append(
+                {
+                    "object_type": object_type,
+                    "object_instance": object_instance,
+                    "status": "pending",
+                }
+            )
+
+        wpm = WritePropertyMultipleRequest(
+            listOfWriteAccessSpecs=SequenceOf(WriteAccessSpecification)(access_specs),
+            destination=dest,
+        )
+        result = await asyncio.wait_for(app.request(wpm), timeout=apdu_timeout)
+        if isinstance(result, ErrorRejectAbortNack):
+            return {
+                "status": "write_rejected",
+                "message": str(result),
+                "detail": repr(result),
+                "bacnet_service": "writePropertyMultiple",
+                "writes": rows,
+            }
+        if result is None:
+            for r in rows:
+                r["status"] = "write_ok"
+            return {
+                "status": "batch_ok",
+                "bacnet_service": "writePropertyMultiple",
+                "writes": rows,
+            }
+        return {
+            "status": "write_unexpected_response",
+            "message": repr(result),
+            "bacnet_service": "writePropertyMultiple",
+            "writes": rows,
+        }
+    finally:
+        app.close()
+
+
+def write_present_values_property_multiple(
+    *,
+    bind_port: int,
+    target_address: str,
+    expected_device_instance: int,
+    writes: list[tuple[int, int, int | float]],
+    who_is_timeout: float = 3.0,
+    apdu_timeout: float = 8.0,
+) -> dict[str, Any]:
+    return asyncio.run(
+        _write_present_values_property_multiple_async(
+            bind_port=bind_port,
+            target_address=target_address,
+            expected_device_instance=expected_device_instance,
+            writes=writes,
+            who_is_timeout=who_is_timeout,
+            apdu_timeout=apdu_timeout,
+        )
+    )
+
+
 def write_present_value(
     *,
     bind_port: int,

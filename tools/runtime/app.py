@@ -3296,15 +3296,29 @@ def cmd_bacnet_write_batch(args: argparse.Namespace) -> int:
         )
         return 2
 
+    mode = str(getattr(args, "mode", "sequential") or "sequential").strip().lower()
     try:
-        batch = bacnet_ad.write_present_values_batch(
-            bind_port=bind_port,
-            target_address=bacnet_ad.format_ipv4_target(host, port),
-            expected_device_instance=expected_instance,
-            writes=writes,
-            who_is_timeout=who_is_timeout,
-            apdu_timeout=apdu_timeout,
-        )
+        if mode == "multiple":
+            batch = bacnet_ad.write_present_values_property_multiple(
+                bind_port=bind_port,
+                target_address=bacnet_ad.format_ipv4_target(host, port),
+                expected_device_instance=expected_instance,
+                writes=writes,
+                who_is_timeout=who_is_timeout,
+                apdu_timeout=apdu_timeout,
+            )
+        elif mode == "sequential":
+            batch = bacnet_ad.write_present_values_batch(
+                bind_port=bind_port,
+                target_address=bacnet_ad.format_ipv4_target(host, port),
+                expected_device_instance=expected_instance,
+                writes=writes,
+                who_is_timeout=who_is_timeout,
+                apdu_timeout=apdu_timeout,
+            )
+        else:
+            print(f"error: unknown --mode {mode!r} (use sequential or multiple)")
+            return 2
     except ModuleNotFoundError as err:
         print(
             "error: bacpypes3 is required for bacnet-write-batch "
@@ -3318,6 +3332,7 @@ def cmd_bacnet_write_batch(args: argparse.Namespace) -> int:
     result = {
         "controller_label": args.controller_label,
         "writes_requested": [oid for oid, _ in pairs],
+        "mode": mode,
         "batch": batch,
         "status": str(batch.get("status", "batch_failed")),
     }
@@ -6023,12 +6038,22 @@ def build_parser() -> argparse.ArgumentParser:
     write_batch = subparsers.add_parser(
         "bacnet-write-batch",
         help=(
-            "Sequential WriteProperty present-value for multiple allowlisted objects "
-            "on one controller (single Who-Is; requires bacpypes3 and --execute)."
+            "Write present-value for multiple allowlisted objects on one controller "
+            "(single Who-Is): sequential WriteProperty (default) or one "
+            "WritePropertyMultiple (--mode multiple; requires bacpypes3 and --execute)."
         ),
     )
     write_batch.add_argument("--run-dir", required=True, type=Path)
     write_batch.add_argument("--controller-label", required=True)
+    write_batch.add_argument(
+        "--mode",
+        choices=("sequential", "multiple"),
+        default="sequential",
+        help=(
+            "sequential: one WriteProperty per object; "
+            "multiple: single WritePropertyMultiple APDU (device must support it)."
+        ),
+    )
     write_batch.add_argument(
         "--write",
         action="append",
@@ -6043,7 +6068,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--apdu-timeout",
         type=float,
         default=None,
-        help="BACpypes3 WriteProperty timeout per write (default: adapter default).",
+        help=(
+            "BACpypes3 confirmed timeout: per WriteProperty when --mode sequential; "
+            "single timeout for the whole WritePropertyMultiple when --mode multiple."
+        ),
     )
     write_batch.add_argument(
         "--execute",

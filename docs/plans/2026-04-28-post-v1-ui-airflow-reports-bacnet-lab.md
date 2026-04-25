@@ -1,6 +1,6 @@
 # Plan: UI, reports, closed-loop airflow, BACnet lab (post–v1 baseline)
 
-Audience: implementers continuing after the **v1 foundation** slice (Python CLI, Docker `bacnet-dev`, unified + customer exports, `commissioning-guided-next`). This document **orders work by difficulty / dependency** so easier wins ship first. **Tier C** (BBMD lab, macvlan bench overlay, COV + write batch) is now **shipped** (**ADR 0015**); further transport work (WritePropertyMultiple, multi-BBMD tables) should get a new ADR when prioritized.
+Audience: implementers continuing after the **v1 foundation** slice (Python CLI, Docker `bacnet-dev`, unified + customer exports, `commissioning-guided-next`). This document **orders work by difficulty / dependency** so easier wins ship first. **Tier C** (BBMD lab, macvlan bench overlay, COV + write batch + **WritePropertyMultiple**) is **shipped** (**ADR 0015**); larger transport work (multi-BBMD tables, full router lab) remains backlog until an ADR scopes it.
 
 ## Principles
 
@@ -39,7 +39,14 @@ These mostly extend **existing** CLI, exports, or profiles without new transport
 |---|------|-------|-----------|
 | C1 | **BBMD / foreign device** | Isolated /24 + BBMD + sidecar **ForeignApplication** probe | **`bacnet-bbmd-lab`** profile, **`tools/simulator/docker_bbmd_lab_smoke.sh`**, **ADR 0015** |
 | C2 | **macvlan “lab” profile** | Bench-only overlay | **`docker-compose.macvlan.example.yml`**, **`docs/simulator/macvlan-lab.md`** |
-| C3 | **COV / subscribe, write batching** | Sim SubscribeCOV + sequential multi-write | **`bacnet-subscribe-cov`**, **`bacnet-write-batch`**, **`docker_bacnet_smoke.sh`** |
+| C3 | **COV / subscribe, write batching** | Sim SubscribeCOV + **`bacnet-write-batch`** (`sequential` or **`multiple`** = WritePropertyMultiple) | **`bacnet-subscribe-cov`**, **`bacnet-write-batch`**, **`docker_bacnet_smoke.sh`** |
+
+### Tier C — follow-on backlog (not shipped)
+
+| Item | Notes |
+|------|--------|
+| **Multi-BBMD / distributed BDT** | More than one BBMD peer table row, NAT-BBMD, or production FDT policy—needs site-driven ADR. |
+| **ReadPropertyMultiple** in façade | Useful for checkout bursts; same allowlist / object-resolution rules as reads today. |
 
 ---
 
@@ -50,7 +57,7 @@ These mostly extend **existing** CLI, exports, or profiles without new transport
 3. **B1** once profile keys and safety caps are agreed (`docs/project.md` + example profile).  
 4. **B2a** then **B2b** (UI after JSON hints are stable).  
 5. **B3** when a site asks for HRV↔FCU RAT linkage.  
-6. **C1–C3** shipped (**ADR 0015**); extend only with new ADRs when scope grows (e.g. WritePropertyMultiple).
+6. **C1–C3** shipped (**ADR 0015**, including **WritePropertyMultiple** on **`bacnet-write-batch --mode multiple`**); use the **Tier C follow-on** table above for the next transport slices.
 
 ### Tauri packaging (optional extras, deferred)
 
@@ -74,3 +81,4 @@ The **Tauri operator** CI ships **Ubuntu `.deb`** and **Windows NSIS** artifacts
 - **2026-04-28:** Tier A items A1–A4 marked shipped in-repo (see foundation plan current status); Tier B marked shipped; Tier C later shipped **2026-04-25**.
 - **2026-04-24:** Documented intentional deferral of **macOS `.dmg`** and **signed NSIS** for the Tauri operator (CI stays Linux + Windows only).
 - **2026-04-25:** Tier **C1–C3** shipped (BBMD lab profile, macvlan example + runbook, COV + write batch CLI); see **ADR 0015**.
+- **2026-04-25:** **WritePropertyMultiple** path: lab sim + **`bacnet-write-batch --mode multiple`** + CI smoke; ADR 0015 updated.

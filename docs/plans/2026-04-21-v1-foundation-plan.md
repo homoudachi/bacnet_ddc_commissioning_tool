@@ -72,7 +72,7 @@ Use this order to reduce rework and unblock parallel work later.
 **Deliverables**
 
 - Stable adapter interface usable by commissioning flow engine — **yes** (`CommissioningBACnetAdapter`).
-- CI integration suite using simulator containers or mock devices — **partial:** list verifier + **loopback BACnet fake** in unittest; **Docker BACnet sim** — **`docker/simulator/`** `bacnet-dev` profile (**four** UDP ports: three FCU-shaped + one **HRV**-shaped via `SIM_PROFILE=hrv`) + CI **`verify-bip-list --strict`** smoke (`tools/simulator/docker_bacnet_smoke.sh`, includes **`bacnet-subscribe-cov`** + **`bacnet-write-batch`**). Optional **`bacnet-bbmd-lab`** + `docker_bbmd_lab_smoke.sh` exercises BBMD/foreign-device path (**ADR 0015**). Full orchestrator-in-container topology still optional.
+- CI integration suite using simulator containers or mock devices — **partial:** list verifier + **loopback BACnet fake** in unittest; **Docker BACnet sim** — **`docker/simulator/`** `bacnet-dev` profile (**four** UDP ports: three FCU-shaped + one **HRV**-shaped via `SIM_PROFILE=hrv`) + CI **`verify-bip-list --strict`** smoke (`tools/simulator/docker_bacnet_smoke.sh`, includes **`bacnet-subscribe-cov`** + **`bacnet-write-batch`** sequential + **`--mode multiple`**). Optional **`bacnet-bbmd-lab`** + `docker_bbmd_lab_smoke.sh` exercises BBMD/foreign-device path (**ADR 0015**). Full orchestrator-in-container topology still optional.
 - First operator-visible diagnostic logs for comms failures — **partial:** JSON artifacts + `events.jsonl`; richer comms diagnostics TBD.
 
 ### Phase 4 — commissioning flow engine (v1 slices)

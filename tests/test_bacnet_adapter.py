@@ -75,6 +75,10 @@ class BacnetAdapterTests(unittest.TestCase):
         mock_client = MagicMock()
         mock_client.subscribe_cov_unconfirmed_wait_value.return_value = {"status": "cov_ok"}
         mock_client.write_present_values_batch.return_value = {"status": "batch_ok"}
+        mock_client.write_present_values_property_multiple.return_value = {
+            "status": "batch_ok",
+            "bacnet_service": "writePropertyMultiple",
+        }
         adapter._client_mod = mock_client
         cov = adapter.subscribe_cov_unconfirmed_wait_value(
             bind_port=0,
@@ -91,6 +95,14 @@ class BacnetAdapterTests(unittest.TestCase):
             writes=[(19, 50, 1)],
         )
         self.assertEqual("batch_ok", batch["status"])
+        wpm = adapter.write_present_values_property_multiple(
+            bind_port=0,
+            target_address="127.0.0.1:1",
+            expected_device_instance=21001,
+            writes=[(19, 50, 2), (2, 3, 5.0)],
+        )
+        self.assertEqual("batch_ok", wpm["status"])
+        self.assertEqual("writePropertyMultiple", wpm.get("bacnet_service"))
 
     def test_probe_device_delegates_to_bip_module(self) -> None:
         mod = _load_adapter_module()
