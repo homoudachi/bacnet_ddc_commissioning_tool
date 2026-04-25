@@ -5,6 +5,7 @@ from __future__ import annotations
 import pathlib
 import subprocess
 import sys
+import tempfile
 import unittest
 
 
@@ -136,6 +137,20 @@ class OperatorGuiTests(unittest.TestCase):
                 run_dir=rd, controller_label="FCU-1", step_id="manual_airflow_verify_half_then_design"
             )
             self.assertEqual(hints2.get("error"), "step_not_found")
+
+    def test_session_state_path_helper(self) -> None:
+        import importlib.util
+        import tempfile
+
+        p = ROOT / "tools" / "operator_gui_server.py"
+        spec = importlib.util.spec_from_file_location("ogs5", p)
+        assert spec and spec.loader
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        with tempfile.TemporaryDirectory() as td:
+            rd = pathlib.Path(td)
+            sp = mod._session_state_path(rd, "FCU-1")
+            self.assertFalse(sp.is_file())
 
 
 if __name__ == "__main__":
