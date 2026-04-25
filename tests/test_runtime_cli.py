@@ -648,6 +648,88 @@ class RuntimeCliTests(unittest.TestCase):
         self.assertEqual(3.0, timeouts.get("who_is_timeout_seconds"))
         self.assertEqual(8.0, timeouts.get("apdu_timeout_seconds"))
 
+    def test_bacnet_read_batch_multiple_mode_with_fake_server(self) -> None:
+        server = _FakeBipUdpServer(device_instance=21001, analog_input_present=21.5, msv_present=3)
+        server.start()
+        try:
+            time.sleep(0.05)
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            csv_path = self.run_dir / "controllers-local.csv"
+            with csv_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=[
+                        "controller_label",
+                        "profile_id",
+                        "bacnet_device_instance",
+                        "bacnet_ip",
+                        "bacnet_port",
+                        "building_floor",
+                        "notes",
+                    ],
+                )
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "controller_label": "FCU-LOCAL",
+                        "profile_id": "fcu_2pipe_chw_electric_heat_v1",
+                        "bacnet_device_instance": "21001",
+                        "bacnet_ip": "127.0.0.1",
+                        "bacnet_port": str(server.port),
+                        "building_floor": "L01",
+                        "notes": "test",
+                    }
+                )
+
+            init_result = _run_runtime(
+                "init-run",
+                "--run-dir",
+                str(self.run_dir),
+                "--job-id",
+                "job-bacnet-read-batch-fake",
+                "--controllers-csv",
+                str(csv_path),
+                "--profiles-dir",
+                str(ROOT / "docs" / "examples"),
+                "--scenarios-dir",
+                str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+            )
+            self.assertEqual(0, init_result.returncode)
+            compile_result = _run_runtime("compile-import", "--run-dir", str(self.run_dir))
+            self.assertEqual(0, compile_result.returncode)
+
+            result = _run_runtime(
+                "bacnet-read-batch",
+                "--run-dir",
+                str(self.run_dir),
+                "--controller-label",
+                "FCU-LOCAL",
+                "--read",
+                "ai_sat",
+                "--read",
+                "msv_test_mode",
+                "--mode",
+                "multiple",
+                "--timeout-seconds",
+                "0.5",
+                "--retries",
+                "1",
+            )
+        finally:
+            server.stop()
+
+        self.assertEqual(0, result.returncode)
+        payload = json.loads(result.stdout)
+        self.assertTrue(payload.get("all_read_ok"))
+        self.assertEqual("multiple", payload.get("mode"))
+        rows = payload.get("reads", [])
+        self.assertEqual(2, len(rows))
+        self.assertEqual("readPropertyMultiple", rows[0].get("bacnet_service"))
+        self.assertEqual("read_ok", rows[0].get("status"))
+        self.assertIn("21.5", rows[0].get("read", {}).get("value_str", ""))
+        self.assertEqual("read_ok", rows[1].get("status"))
+        self.assertIn("3", rows[1].get("read", {}).get("value_str", ""))
+
     def test_bacnet_read_rejects_invalid_apdu_timeout(self) -> None:
         init_result = _run_runtime(
             "init-run",

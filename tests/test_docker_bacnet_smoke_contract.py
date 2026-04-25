@@ -61,6 +61,7 @@ class DockerBacnetSmokeContractTests(unittest.TestCase):
             "bacnet-write-batch",
             "--mode multiple",
             "bacnet_read_property_multiple",
+            "bacnet-read-batch",
             "readPropertyMultiple",
         ):
             self.assertIn(needle, body, msg=f"missing smoke fragment: {needle!r}")

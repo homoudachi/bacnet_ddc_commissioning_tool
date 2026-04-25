@@ -3041,6 +3041,109 @@ def _bacnet_read_one(
     return result
 
 
+def _resolve_read_for_batch(
+    *,
+    controller_label: str,
+    target: dict,
+    object_id: str,
+    property_name: str,
+) -> tuple[dict | None, tuple[str, str, int, int] | None]:
+    """Validate read allowlist and ``objects_by_id``; return (error_row, (oid, prop, type_int, instance))."""
+    oid = str(object_id).strip()
+    prop = str(property_name or "presentValue").strip() or "presentValue"
+    profile_allow = target.get("commissioning_read_allowlist", [])
+    if not isinstance(profile_allow, list) or not profile_allow:
+        return (
+            {
+                "controller_label": controller_label,
+                "profile_object_id": oid,
+                "property": prop,
+                "status": "config_error",
+                "message": "profile has no commissioning_read_allowlist",
+            },
+            None,
+        )
+    allowed = {str(x).strip() for x in profile_allow if str(x).strip()}
+    if oid not in allowed:
+        return (
+            {
+                "controller_label": controller_label,
+                "profile_object_id": oid,
+                "property": prop,
+                "status": "config_error",
+                "message": (
+                    "object_id not in commissioning_read_allowlist "
+                    f"(allowed: {sorted(allowed)})"
+                ),
+            },
+            None,
+        )
+    objects_by_id = target.get("objects_by_id", {})
+    if not isinstance(objects_by_id, dict) or oid not in objects_by_id:
+        return (
+            {
+                "controller_label": controller_label,
+                "profile_object_id": oid,
+                "property": prop,
+                "status": "config_error",
+                "message": "object_id not found in objects_by_id",
+            },
+            None,
+        )
+    meta = objects_by_id[oid]
+    if not isinstance(meta, dict):
+        return (
+            {
+                "controller_label": controller_label,
+                "profile_object_id": oid,
+                "property": prop,
+                "status": "config_error",
+                "message": "invalid objects_by_id entry",
+            },
+            None,
+        )
+    bacnet = meta.get("bacnet", {})
+    if not isinstance(bacnet, dict):
+        return (
+            {
+                "controller_label": controller_label,
+                "profile_object_id": oid,
+                "property": prop,
+                "status": "config_error",
+                "message": "invalid objects_by_id entry",
+            },
+            None,
+        )
+    type_name = str(bacnet.get("object_type", "")).strip()
+    try:
+        object_instance = int(bacnet.get("instance"))
+    except (TypeError, ValueError):
+        return (
+            {
+                "controller_label": controller_label,
+                "profile_object_id": oid,
+                "property": prop,
+                "status": "config_error",
+                "message": "invalid BACnet instance",
+            },
+            None,
+        )
+    bacnet_ad = _bacnet_adapter()
+    object_type_int = bacnet_ad.object_type_name_to_int(type_name)
+    if object_type_int is None:
+        return (
+            {
+                "controller_label": controller_label,
+                "profile_object_id": oid,
+                "property": prop,
+                "status": "config_error",
+                "message": f"unsupported BACnet object_type: {type_name!r}",
+            },
+            None,
+        )
+    return None, (oid, prop, object_type_int, object_instance)
+
+
 def cmd_bacnet_read(args: argparse.Namespace) -> int:
     run_dir = args.run_dir
     logs_path = run_dir / "logs" / "events.jsonl"
@@ -3114,6 +3217,280 @@ def cmd_bacnet_read(args: argparse.Namespace) -> int:
     )
     print(json.dumps(result, sort_keys=True))
     return 0 if result.get("status") == "read_ok" else 2
+
+
+def cmd_bacnet_read_batch(args: argparse.Namespace) -> int:
+    """Read multiple allowlisted points on one controller (single Who-Is): RPM or sequential ReadProperty."""
+    run_dir = args.run_dir
+    logs_path = run_dir / "logs" / "events.jsonl"
+    runtime_job_path = run_dir / "state" / "runtime-job.json"
+    runtime_job = json.loads(runtime_job_path.read_text(encoding="utf-8"))
+
+    target = None
+    for controller in runtime_job.get("controllers", []):
+        if controller.get("controller_label") == args.controller_label:
+            target = controller
+            break
+    if target is None:
+        print(f"error: controller not found in runtime job: {args.controller_label}")
+        return 2
+
+    read_specs: list[tuple[str, str]] = []
+    for item in getattr(args, "read", None) or []:
+        try:
+            read_specs.append(_parse_read_spec(str(item)))
+        except ValueError as err:
+            print(f"error: invalid --read value {item!r}: {err}")
+            return 2
+    if not read_specs:
+        print("error: provide at least one --read object_id or object_id:property")
+        return 2
+
+    resolved_rows: list[tuple[str, str, int, int]] = []
+    for oid, prop in read_specs:
+        err, resolved = _resolve_read_for_batch(
+            controller_label=args.controller_label,
+            target=target,
+            object_id=oid,
+            property_name=prop,
+        )
+        if err is not None:
+            print(f"error: {err.get('message', 'invalid configuration')}")
+            return 2
+        if resolved is None:
+            print("error: internal resolution failure for read batch")
+            return 2
+        lo, lp, ot, oi = resolved
+        resolved_rows.append((lo, lp, ot, oi))
+
+    addr = target.get("bacnet", {})
+    host = str(addr.get("host", "")).strip()
+    port = int(addr.get("port", 0))
+    expected_instance = int(addr.get("device_instance", 0))
+
+    try:
+        bind_port = int(getattr(args, "bacnet_bind_port", 0) or 0)
+    except ValueError:
+        bind_port = 0
+
+    bacnet_ad = _bacnet_adapter()
+    try:
+        apdu_timeout = bacnet_ad.commissioning_apdu_timeout_seconds(args.apdu_timeout)
+    except (TypeError, ValueError) as err:
+        print(f"error: invalid --apdu-timeout: {err}")
+        return 2
+
+    who_is_timeout = bacnet_ad.effective_who_is_timeout(args.timeout_seconds, args.retries)
+    probe = bacnet_ad.probe_device(
+        host=host,
+        port=port,
+        expected_device_instance=expected_instance,
+        timeout_seconds=args.timeout_seconds,
+        retries=args.retries,
+    )
+
+    mode = str(getattr(args, "mode", "multiple") or "multiple").strip().lower()
+    reads_tuples = [(ot, oi, prop) for _oid, prop, ot, oi in resolved_rows]
+
+    rows_out: list[dict] = []
+    batch: dict = {}
+
+    if probe.get("status") != "reachable_verified":
+        for lo, prop, _ot, _oi in resolved_rows:
+            rows_out.append(
+                {
+                    "controller_label": args.controller_label,
+                    "profile_object_id": lo,
+                    "property": prop,
+                    "probe": probe,
+                    "status": "blocked_probe_failed",
+                }
+            )
+        batch = {"status": "blocked_probe_failed", "reads": []}
+    else:
+        timeouts = {
+            "who_is_timeout_seconds": who_is_timeout,
+            "apdu_timeout_seconds": apdu_timeout,
+        }
+        try:
+            if mode == "multiple":
+                batch = bacnet_ad.read_present_values_property_multiple(
+                    bind_port=bind_port,
+                    target_address=bacnet_ad.format_ipv4_target(host, port),
+                    expected_device_instance=expected_instance,
+                    reads=reads_tuples,
+                    who_is_timeout=who_is_timeout,
+                    apdu_timeout=apdu_timeout,
+                )
+            elif mode == "sequential":
+                batch = bacnet_ad.read_present_values_batch(
+                    bind_port=bind_port,
+                    target_address=bacnet_ad.format_ipv4_target(host, port),
+                    expected_device_instance=expected_instance,
+                    reads=reads_tuples,
+                    who_is_timeout=who_is_timeout,
+                    apdu_timeout=apdu_timeout,
+                )
+            else:
+                print(f"error: unknown --mode {mode!r} (use multiple or sequential)")
+                return 2
+        except ModuleNotFoundError as err:
+            print(
+                "error: bacpypes3 is required for bacnet-read-batch "
+                f"(pip install -r requirements.txt): {err}"
+            )
+            return 2
+        except Exception as err:  # noqa: BLE001
+            print(json.dumps({"status": "batch_failed", "message": str(err)}, sort_keys=True))
+            return 2
+
+        bstatus = str(batch.get("status", ""))
+        if bstatus in {
+            "read_rejected",
+            "read_unexpected_response",
+            "client_load_failed",
+            "blocked_probe_failed",
+        }:
+            for lo, prop, ot, oi in resolved_rows:
+                one: dict = {
+                    "controller_label": args.controller_label,
+                    "profile_object_id": lo,
+                    "property": prop,
+                    "probe": probe,
+                    "bacnet_timeouts": timeouts,
+                    "bacnet_service": batch.get("bacnet_service", "readPropertyMultiple"),
+                    "status": bstatus,
+                }
+                if batch.get("message"):
+                    one["message"] = str(batch["message"])
+                if batch.get("detail"):
+                    one["detail"] = batch["detail"]
+                rows_out.append(one)
+        elif bstatus == "bacpypes_missing":
+            for lo, prop, _ot, _oi in resolved_rows:
+                rows_out.append(
+                    {
+                        "controller_label": args.controller_label,
+                        "profile_object_id": lo,
+                        "property": prop,
+                        "probe": probe,
+                        "bacnet_timeouts": timeouts,
+                        "status": "bacpypes_missing",
+                        "message": str(batch.get("message", "")),
+                    }
+                )
+        elif bstatus == "read_failed":
+            for lo, prop, _ot, _oi in resolved_rows:
+                rows_out.append(
+                    {
+                        "controller_label": args.controller_label,
+                        "profile_object_id": lo,
+                        "property": prop,
+                        "probe": probe,
+                        "bacnet_timeouts": timeouts,
+                        "status": "read_failed",
+                        "read_error": str(batch.get("message", "")),
+                    }
+                )
+        elif bstatus in {"batch_partial_failure"}:
+            # Sequential path stops early; align rows with returned prefix + error for rest
+            br = batch.get("reads") if isinstance(batch.get("reads"), list) else []
+            for i, (lo, prop, ot, oi) in enumerate(resolved_rows):
+                one = {
+                    "controller_label": args.controller_label,
+                    "profile_object_id": lo,
+                    "property": prop,
+                    "probe": probe,
+                    "bacnet_timeouts": timeouts,
+                    "bacnet_service": batch.get("bacnet_service", "readProperty"),
+                }
+                if i < len(br) and isinstance(br[i], dict):
+                    sub = br[i]
+                    one["read"] = {
+                        "status": sub.get("status"),
+                        "value_str": sub.get("value_str"),
+                        "value": sub.get("value"),
+                    }
+                    one["status"] = str(sub.get("status", "read_failed"))
+                else:
+                    one["status"] = "read_failed"
+                    one["message"] = str(batch.get("message", "batch partial failure"))
+                rows_out.append(one)
+        else:
+            br = batch.get("reads") if isinstance(batch.get("reads"), list) else []
+            sub_by: dict[tuple[int, int, str], dict] = {}
+            for sub in br:
+                if not isinstance(sub, dict):
+                    continue
+                try:
+                    key = (
+                        int(sub.get("object_type", -1)),
+                        int(sub.get("object_instance", -1)),
+                        str(sub.get("property", "")).strip() or "presentValue",
+                    )
+                except (TypeError, ValueError):
+                    continue
+                sub_by[key] = sub
+
+            for lo, prop, ot, oi in resolved_rows:
+                one = {
+                    "controller_label": args.controller_label,
+                    "profile_object_id": lo,
+                    "property": prop,
+                    "probe": probe,
+                    "bacnet_timeouts": timeouts,
+                    "bacnet_service": batch.get(
+                        "bacnet_service",
+                        "readPropertyMultiple" if mode == "multiple" else "readProperty",
+                    ),
+                }
+                sub = sub_by.get((ot, oi, prop))
+                if not isinstance(sub, dict):
+                    one["status"] = "read_missing_in_ack"
+                    rows_out.append(one)
+                    continue
+                inner_status = str(sub.get("status", "read_failed"))
+                one["status"] = inner_status
+                if inner_status == "read_ok":
+                    one["read"] = {
+                        "status": inner_status,
+                        "value_str": sub.get("value_str"),
+                        "value": sub.get("value"),
+                    }
+                elif sub.get("message"):
+                    one["message"] = str(sub["message"])
+                elif inner_status == "read_property_error":
+                    one["message"] = str(sub.get("message", inner_status))
+                rows_out.append(one)
+
+    all_ok = all(r.get("status") == "read_ok" for r in rows_out)
+    result = {
+        "controller_label": args.controller_label,
+        "mode": mode,
+        "reads_requested": [f"{a}:{b}" for a, b in read_specs],
+        "reads": rows_out,
+        "all_read_ok": bool(all_ok),
+        "status": "batch_ok" if all_ok else "batch_failed",
+    }
+    if batch:
+        result["batch"] = batch
+
+    reads_dir = run_dir / "artifacts" / "bacnet_reads"
+    reads_dir.mkdir(parents=True, exist_ok=True)
+    artifact = reads_dir / f"{args.controller_label}-read-batch.json"
+    artifact.write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
+    _append_event(
+        logs_path,
+        "bacnet_read_batch",
+        {
+            "controller_label": args.controller_label,
+            "mode": mode,
+            "status": result.get("status"),
+            "artifact_json": str(artifact.resolve()),
+        },
+    )
+    print(json.dumps(result, sort_keys=True))
+    return 0 if all_ok else 2
 
 
 def cmd_bacnet_subscribe_cov(args: argparse.Namespace) -> int:
@@ -6331,6 +6708,46 @@ def build_parser() -> argparse.ArgumentParser:
         help="BACpypes3 ReadProperty timeout in seconds (default: adapter default, typically 8).",
     )
     bacnet_read.set_defaults(handler=cmd_bacnet_read)
+
+    read_batch = subparsers.add_parser(
+        "bacnet-read-batch",
+        help=(
+            "Read multiple allowlisted objects on one controller after one B/IP probe "
+            "(default: single ReadPropertyMultiple APDU; --mode sequential uses multiple "
+            "ReadProperty; requires bacpypes3)."
+        ),
+    )
+    read_batch.add_argument("--run-dir", required=True, type=Path)
+    read_batch.add_argument("--controller-label", required=True)
+    read_batch.add_argument(
+        "--read",
+        action="append",
+        required=True,
+        metavar="OBJECT_ID[:PROPERTY]",
+        help="Repeatable. Logical object id, optional BACnet property (default presentValue).",
+    )
+    read_batch.add_argument(
+        "--mode",
+        choices=("multiple", "sequential"),
+        default="multiple",
+        help=(
+            "multiple: one ReadPropertyMultiple APDU (device must support it); "
+            "sequential: one ReadProperty per object after a single Who-Is."
+        ),
+    )
+    read_batch.add_argument("--timeout-seconds", type=float, default=0.5)
+    read_batch.add_argument("--retries", type=int, default=1)
+    read_batch.add_argument("--bacnet-bind-port", type=int, default=0)
+    read_batch.add_argument(
+        "--apdu-timeout",
+        type=float,
+        default=None,
+        help=(
+            "BACpypes3 timeout: per ReadProperty when --mode sequential; "
+            "single timeout for the whole ReadPropertyMultiple when --mode multiple."
+        ),
+    )
+    read_batch.set_defaults(handler=cmd_bacnet_read_batch)
 
     cov_sub = subparsers.add_parser(
         "bacnet-subscribe-cov",

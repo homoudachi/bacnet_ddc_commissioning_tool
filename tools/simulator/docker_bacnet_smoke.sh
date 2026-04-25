@@ -80,6 +80,21 @@ for pair in \
   }
 done
 
+# FCU: ReadPropertyMultiple batch (SAT + MSV) in one APDU.
+read_batch="$(python3 "$ROOT/tools/runtime/app.py" bacnet-read-batch \
+  --run-dir "$RUN_DIR" --controller-label FCU-DOCKER $BACNET_READ_FLAGS \
+  --mode multiple \
+  --read ai_sat --read msv_test_mode)"
+echo "$read_batch"
+echo "$read_batch" | grep -q '"bacnet_service": "readPropertyMultiple"' || {
+  echo "error: expected readPropertyMultiple in read-batch JSON"
+  exit 2
+}
+echo "$read_batch" | grep -q '"all_read_ok": true' || {
+  echo "error: bacnet-read-batch failed for FCU-DOCKER"
+  exit 2
+}
+
 # SubscribeCOV (unconfirmed) on FCU supply air temp: first notification from lab sim.
 cov_out="$(python3 "$ROOT/tools/runtime/app.py" bacnet-subscribe-cov \
   --run-dir "$RUN_DIR" \
