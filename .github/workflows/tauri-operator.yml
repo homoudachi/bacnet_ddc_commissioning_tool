@@ -1,0 +1,52 @@
+name: tauri-operator
+
+on:
+  pull_request:
+    paths:
+      - "desktop/tauri-operator/**"
+      - ".github/workflows/tauri-operator.yml"
+      - "rust-toolchain.toml"
+  push:
+    branches:
+      - main
+      - "cursor/**"
+    paths:
+      - "desktop/tauri-operator/**"
+      - ".github/workflows/tauri-operator.yml"
+      - "rust-toolchain.toml"
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev libxdo-dev pkg-config
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/tauri-operator/package-lock.json
+
+      - name: Build Tauri (deb)
+        working-directory: desktop/tauri-operator
+        run: |
+          npm ci
+          npx tauri build
+
+      - name: Upload deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-operator-deb
+          path: desktop/tauri-operator/src-tauri/target/release/bundle/deb/*.deb
+          if-no-files-found: error

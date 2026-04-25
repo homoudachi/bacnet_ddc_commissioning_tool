@@ -28,7 +28,7 @@ These mostly extend **existing** CLI, exports, or profiles without new transport
 | # | Item | Why harder | Suggested approach | Done when |
 |---|------|------------|---------------------|-----------|
 | B1 | **Closed-loop assisted airflow** (tool drives fan toward target L/s using measured feedback) | Needs stable measurement cadence, safety bounds, and profile contract for “stop” conditions | **`commissioning-airflow-closed-loop-iterate`** + profile **`automatic_airflow_adjustment.closed_loop`** (BACnet flow read + iterative fan %). | Shipped **2026-04-28**; ADR 0013 §6; `tests/test_runtime_cli.py` |
-| B2 | **Guided operator UI** (minimal desktop shell) | Packaging, state sync with run-dir, UX scope | **`operator-gui`** CLI + **`tools/operator_gui_server.py`** (stdlib **HTTPServer** on **127.0.0.1**): HTML form POSTs allowlisted **`tools/runtime/app.py`** subcommands. | Shipped **2026-04-28** (no Tauri/Electron yet) |
+| B2 | **Guided operator UI** (minimal desktop shell) | Packaging, state sync with run-dir, UX scope | **`operator-gui`** (stdlib **HTTPServer**) + **`desktop/tauri-operator/`** **Tauri 2** desktop shell (Rust spawns **`python3 tools/runtime/app.py`**; see **`docs/packaging/tauri-operator-desktop.md`**). | Shipped **2026-04-28** |
 | B3 | **RAT / HRV proxy rules** | Product policy + validation warnings | Profile **`rat_temperature_proxy`** (`enabled`, `proxy_controller_label`, `proxy_read_object_id`); **`compile-import`** copies into **`commissioning_meta`** and emits **`rat_temperature_proxy_*`** warnings when misconfigured. | Shipped **2026-04-28**; `tests/test_import_compiler.py` |
 
 ---

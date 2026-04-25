@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BACnet Commissioning Operator</title>
+    <script type="module" src="/main.js" defer></script>
+  </head>
+  <body>
+    <main class="wrap">
+      <header>
+        <h1>BACnet commissioning operator</h1>
+        <p class="sub">
+          Runs <code>python3 tools/runtime/app.py</code> from the repo root. Set
+          <code>BACNET_COMMISSIONING_PYTHON3</code> if needed.
+        </p>
+      </header>
+
+      <section class="panel">
+        <label for="run-dir">Run directory (absolute path)</label>
+        <input id="run-dir" type="text" placeholder="/path/to/your/run" spellcheck="false" />
+
+        <div class="row2">
+          <div>
+            <label for="cmd">Command</label>
+            <select id="cmd">
+              <option value="commissioning-guided-next">commissioning-guided-next</option>
+              <option value="show-flow">show-flow</option>
+              <option value="show-session">show-session</option>
+              <option value="list-flows">list-flows</option>
+              <option value="compile-import">compile-import</option>
+              <option value="print-job-graph">print-job-graph</option>
+              <option value="validate-import">validate-import</option>
+              <option value="export-run-summary">export-run-summary</option>
+            </select>
+          </div>
+          <div>
+            <label for="ctrl">Controller label (when required)</label>
+            <input id="ctrl" type="text" placeholder="FCU-01A" spellcheck="false" />
+          </div>
+        </div>
+
+        <label for="extra">Extra args (space-separated, optional)</label>
+        <input
+          id="extra"
+          type="text"
+          placeholder='e.g. --step-id half_design_airflow_auto  or  --output-json /tmp/s.json'
+          spellcheck="false"
+        />
+
+        <div class="actions">
+          <button type="button" id="run-btn">Run</button>
+          <button type="button" id="paths-btn" class="secondary">Show paths</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Output</h2>
+        <pre id="out" class="out">Ready.</pre>
+      </section>
+    </main>
+  </body>
+</html>
