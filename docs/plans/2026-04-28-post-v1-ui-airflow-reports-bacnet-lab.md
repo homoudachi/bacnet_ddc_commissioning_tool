@@ -19,7 +19,7 @@ These mostly extend **existing** CLI, exports, or profiles without new transport
 | A1 | **Customer PDF polish** (sections, title block, optional multi-sheet XLSX) | fpdf2 + openpyxl already in tree; layout code is local | **`--output-customer-pdf`:** cover page (job_id, schema, generated UTC, logo) + modulation table + optional notes page from modulation entry `note` fields. **`--output-xlsx --xlsx-include-modulation`:** second sheet `modulation`. | Shipped **2026-04-28**; see `docs/packaging/release-checklist.md` |
 | A2 | **Charts in HTML export** (not PDF first) | Browsers handle SVG/Canvas; no new Python chart deps if using simple SVG | **`--output-html`:** after `thermal_modulation_sweep` rows with `ai_sat` read_ok, inline SVG per controller (command % vs SAT polyline). | Shipped **2026-04-28**; `tests/test_commissioning_html_modulation_charts.py` |
 | A3 | **`commissioning-guided-next` → richer JSON** | Already shipped thin slice | Each step includes **`suggested_cli_commands`** (strings) and **`blocked_reasons`** (prereq / `skip_when` gates); compact row already had **`requires_step_ids`** when present. | Shipped **2026-04-28**; `tests/test_runtime_cli.py` |
-| A4 | **Large-sheet compiler targets** | `benchmark_compile.py` exists | **SLO** documented in `docs/project.md` (developer machine, CPython 3.12); CI keeps **`--rows 120`** smoke. Optional `workflow_dispatch` benchmark: backlog unless CI noise is acceptable. | Shipped **2026-04-28** (doc targets); optional workflow still open |
+| A4 | **Large-sheet compiler targets** | `benchmark_compile.py` exists | **SLO** documented in `docs/project.md` (developer machine, CPython 3.12); CI keeps **`--rows 120`** smoke. Optional **`workflow_dispatch`** job **`compile-benchmark-dispatch.yml`** (default **500** rows; override in Actions UI). | Shipped **2026-04-28** (doc targets + manual workflow **2026-04-25**) |
 
 ---
 
@@ -28,7 +28,7 @@ These mostly extend **existing** CLI, exports, or profiles without new transport
 | # | Item | Why harder | Suggested approach | Done when |
 |---|------|------------|---------------------|-----------|
 | B1 | **Closed-loop assisted airflow** (tool drives fan toward target L/s using measured feedback) | Needs stable measurement cadence, safety bounds, and profile contract for “stop” conditions | **`commissioning-airflow-closed-loop-iterate`** + profile **`automatic_airflow_adjustment.closed_loop`** (BACnet flow read + iterative fan %). | Shipped **2026-04-28**; ADR 0013 §6; `tests/test_runtime_cli.py` |
-| B2 | **Guided operator UI** (minimal desktop shell) | Packaging, state sync with run-dir, UX scope | **`operator-gui`** (stdlib **HTTPServer**): **`/guided`** flow UI + **`/`** CLI form; **`desktop/tauri-operator/`** **Tauri 2** shell (Rust spawns **`python3 tools/runtime/app.py`**; see **`docs/packaging/tauri-operator-desktop.md`**). | Shipped **2026-04-28**; guided UI expanded **2026-04-25**; README screenshots + **CI checksum** for PNGs (**`tools/packaging/capture_operator_guided_screenshots.sh`**) |
+| B2 | **Guided operator UI** (minimal desktop shell) | Packaging, state sync with run-dir, UX scope | **`operator-gui`** (stdlib **HTTPServer**): **`/guided`** flow UI + **`/`** CLI form; **`desktop/tauri-operator/`** **Tauri 2** shell (Rust spawns **`python3 tools/runtime/app.py`**; see **`docs/packaging/tauri-operator-desktop.md`**). | Shipped **2026-04-28**; guided UI expanded **2026-04-25**; **Quick read batch** → **`bacnet-read-batch`**; README screenshots + **CI checksum** for PNGs (**`tools/packaging/capture_operator_guided_screenshots.sh`**) |
 | B3 | **RAT / HRV proxy rules** | Product policy + validation warnings | Profile **`rat_temperature_proxy`** (`enabled`, `proxy_controller_label`, `proxy_read_object_id`); **`compile-import`** copies into **`commissioning_meta`** and emits **`rat_temperature_proxy_*`** warnings when misconfigured. | Shipped **2026-04-28**; `tests/test_import_compiler.py` |
 
 ---
@@ -40,14 +40,13 @@ These mostly extend **existing** CLI, exports, or profiles without new transport
 | C1 | **BBMD / foreign device** | Isolated /24 + BBMD + sidecar **ForeignApplication** probe | **`bacnet-bbmd-lab`** profile, **`tools/simulator/docker_bbmd_lab_smoke.sh`**, **ADR 0015** |
 | C2 | **macvlan “lab” profile** | Bench-only overlay | **`docker-compose.macvlan.example.yml`**, **`docs/simulator/macvlan-lab.md`** |
 | C3 | **COV / subscribe, write batching** | Sim SubscribeCOV + **`bacnet-write-batch`** (`sequential` or **`multiple`** = WritePropertyMultiple) | **`bacnet-subscribe-cov`**, **`bacnet-write-batch`**, **`docker_bacnet_smoke.sh`** |
+| C4 | **Read batch + RPM** | **`bacnet-read-batch`** (default ReadPropertyMultiple); **`bacnet-point-checkout`** / **`record-step`** checkout use RPM when ≥2 points (**ADR 0016**); lab sim RPM; **`/guided`** quick read batch | **`bacnet-read-batch`**, **`docker_bacnet_smoke.sh`**, **`operator-gui`**, **ADR 0016** / **ADR 0018** |
 
 ### Tier C — follow-on backlog (not shipped)
 
 | Item | Notes |
 |------|--------|
 | **Multi-BBMD / distributed BDT** | More than one BBMD peer table row, NAT-BBMD, or production FDT policy—needs site-driven ADR. |
-
-**Shipped follow-on:** **ReadPropertyMultiple** — `CommissioningBACnetAdapter.read_present_values_property_multiple`; **`bacnet-point-checkout`** and automatic **`record-step`** checkout batch with one RPM when two or more points resolve (**ADR 0016**); Docker lab sim handles RPM for present-value.
 
 ---
 
@@ -58,7 +57,7 @@ These mostly extend **existing** CLI, exports, or profiles without new transport
 3. **B1** once profile keys and safety caps are agreed (`docs/project.md` + example profile).  
 4. **B2a** then **B2b** (UI after JSON hints are stable).  
 5. **B3** when a site asks for HRV↔FCU RAT linkage.  
-6. **C1–C3** shipped (**ADR 0015**, including **WritePropertyMultiple** on **`bacnet-write-batch --mode multiple`**); use the **Tier C follow-on** table above for the next transport slices.
+6. **C1–C4** shipped (**ADR 0015**–**0018**); use the **Tier C follow-on** table above for the next transport slices (multi-BBMD, …).
 
 ### Tauri packaging (optional extras, deferred)
 
@@ -85,3 +84,4 @@ The **Tauri operator** CI ships **Ubuntu `.deb`** and **Windows NSIS** artifacts
 - **2026-04-25:** **WritePropertyMultiple** path: lab sim + **`bacnet-write-batch --mode multiple`** + CI smoke; ADR 0015 updated.
 - **2026-04-25:** **`operator-gui` `/guided`** — graphical commissioning flow (controllers, steps, blockers, session, record-step, point checkout API).
 - **2026-04-25:** Guided UI **screenshots in README** + **`capture_operator_guided_screenshots.sh check`** in CI; PNG SHA-256 unit test.
+- **2026-04-24:** **`events.jsonl`** size rotation (**ADR 0017**); **`bacnet-read-batch`** + guided **quick read batch**; Tier **C4** + plan cleanup; **`.github/workflows/compile-benchmark-dispatch.yml`** for manual compile bench.

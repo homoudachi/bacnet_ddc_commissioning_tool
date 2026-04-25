@@ -1,0 +1,32 @@
+# Optional large-sheet compile timing (not on every PR — run manually from Actions tab).
+name: compile-benchmark-dispatch
+
+on:
+  workflow_dispatch:
+    inputs:
+      rows:
+        description: Synthetic site-controllers row count for benchmark_compile.py
+        required: false
+        default: "500"
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r requirements.txt
+
+      - name: Run import compile benchmark
+        run: |
+          ROWS="${{ github.event.inputs.rows }}"
+          python3 tools/import/benchmark_compile.py --rows "${ROWS:-500}"

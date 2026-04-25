@@ -257,4 +257,4 @@ These are the main gaps once requirements feel “complete enough” to start co
 - **Half-design reference:** optional hysteresis when comparing **live tachometer value** to the **session-stored** value captured after auto-adjust + operator confirm.
 - **Bluetooth / external sensors:** deferred — pairing, calibration, audit trail (who accepted which reading).
 - **PDF / XLSX stack:** **locked for v1** — **openpyxl** (XLSX), **fpdf2** (PDF table); see **ADR 0010** and `requirements.txt`.
-- **Log format:** binary, JSON lines, CSV, or rotating text; retention on disk.
+- **Log format:** JSON Lines per run (**`logs/events.jsonl`**) with optional **size-based rotation** (**ADR 0017**); binary or other encodings not planned for v1.

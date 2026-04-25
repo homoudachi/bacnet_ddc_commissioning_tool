@@ -18,7 +18,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 _EXPECTED_SHA256 = {
     "operator-guided-ui-wide.png": (
-        "1b549b29892b65aa25174a4690dc0d4bad0e21d7e40e95501f958d64b23a0bff"
+        "8d999fd156a1d8e232ccfb7f28c023cc6aefb223a1078239aa49f358b8e90d29"
     ),
     "operator-guided-ui-mobile.png": (
         "4ac04309eafbb2cbfcfc0c600f53837680a764f7c3133b6d6bff385b078f9c02"
