@@ -22,6 +22,7 @@ Use before tagging a release or handing a **Windows exe** / **Python** drop to t
 | Run dir | `init-run` → `compile-import` → `init-flow` | Standard path |
 | List / graph | `print-job-graph`, `list-flows`, `show-flow`, `commissioning-guided-next` | After `init-flow` |
 | BACnet read | `bacnet-read` on allowlisted point | Against sim or panel |
+| BACnet read batch | `bacnet-read-batch --read ...` | Default **`--mode multiple`** (ReadPropertyMultiple); **`--mode sequential`** if device rejects RPM |
 | BACnet write | `dry-run-bacnet-write --execute` | Allowlist + writable |
 | BACnet COV | `bacnet-subscribe-cov` | After successful allowlisted read |
 | BACnet batch write | `bacnet-write-batch --execute` | Default `--mode sequential`; optional **`--mode multiple`** (WritePropertyMultiple; device-dependent) |

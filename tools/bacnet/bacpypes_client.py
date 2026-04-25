@@ -166,6 +166,228 @@ def read_present_value(
     )
 
 
+def _read_property_tag(property_name: str) -> str:
+    """Map profile-style names to BACpypes3 parseable property tags for RPM."""
+    key = str(property_name or "").strip() or "presentValue"
+    if "-" in key:
+        return key
+    mapping = {
+        "presentValue": "present-value",
+        "relinquishDefault": "relinquish-default",
+        "covIncrement": "cov-increment",
+        "eventState": "event-state",
+        "outOfService": "out-of-service",
+        "units": "units",
+    }
+    return mapping.get(key, key)
+
+
+async def _read_present_values_batch_async(
+    *,
+    bind_port: int,
+    target_address: str,
+    expected_device_instance: int,
+    reads: list[tuple[int, int, str]],
+    who_is_timeout: float,
+    apdu_timeout: float,
+) -> dict[str, Any]:
+    """Sequential ReadProperty on one device after a single Who-Is."""
+    local_device_instance = 999000 + (bind_port % 900000)
+    device = DeviceObject(
+        objectIdentifier=ObjectIdentifier(("device", local_device_instance)),
+        objectName=CharacterString("commissioning-tool-client"),
+    )
+    app = NormalApplication(device, IPv4Address(f"0.0.0.0:{bind_port}"))
+
+    try:
+        await asyncio.sleep(0.05)
+        who_future = app.who_is(
+            low_limit=expected_device_instance,
+            high_limit=expected_device_instance,
+            address=IPv4Address(target_address),
+            timeout=who_is_timeout,
+        )
+        iams = await asyncio.wait_for(who_future, timeout=who_is_timeout + 1.0)
+        if not iams:
+            return {"status": "blocked_probe_failed", "message": "no I-Am from target"}
+
+        dest = IPv4Address(target_address)
+        rows: list[dict[str, Any]] = []
+        for object_type, object_instance, property_name in reads:
+            obj_tag = f"{_object_type_tag(object_type)},{object_instance}"
+            value = await asyncio.wait_for(
+                app.read_property(dest, obj_tag, property_name),
+                timeout=apdu_timeout,
+            )
+            row: dict[str, Any] = {
+                "object_type": object_type,
+                "object_instance": object_instance,
+                "property": property_name,
+            }
+            if isinstance(value, ErrorRejectAbortNack):
+                row["status"] = "read_rejected"
+                row["message"] = str(value)
+                rows.append(row)
+                return {
+                    "status": "batch_partial_failure",
+                    "bacnet_service": "readProperty",
+                    "reads": rows,
+                    "message": f"read failed at {obj_tag}",
+                }
+            row["status"] = "read_ok"
+            row["value"] = value
+            row["value_str"] = str(value)
+            rows.append(row)
+        return {"status": "batch_ok", "bacnet_service": "readProperty", "reads": rows}
+    finally:
+        app.close()
+
+
+def read_present_values_batch(
+    *,
+    bind_port: int,
+    target_address: str,
+    expected_device_instance: int,
+    reads: list[tuple[int, int, str]],
+    who_is_timeout: float = 3.0,
+    apdu_timeout: float = 8.0,
+) -> dict[str, Any]:
+    return asyncio.run(
+        _read_present_values_batch_async(
+            bind_port=bind_port,
+            target_address=target_address,
+            expected_device_instance=expected_device_instance,
+            reads=reads,
+            who_is_timeout=who_is_timeout,
+            apdu_timeout=apdu_timeout,
+        )
+    )
+
+
+async def _read_present_values_property_multiple_async(
+    *,
+    bind_port: int,
+    target_address: str,
+    expected_device_instance: int,
+    reads: list[tuple[int, int, str]],
+    who_is_timeout: float,
+    apdu_timeout: float,
+) -> dict[str, Any]:
+    """Single ReadPropertyMultiple confirmed service (flat parameter list per BACpypes3)."""
+    local_device_instance = 999000 + (bind_port % 900000)
+    device = DeviceObject(
+        objectIdentifier=ObjectIdentifier(("device", local_device_instance)),
+        objectName=CharacterString("commissioning-tool-client"),
+    )
+    app = NormalApplication(device, IPv4Address(f"0.0.0.0:{bind_port}"))
+
+    try:
+        await asyncio.sleep(0.05)
+        who_future = app.who_is(
+            low_limit=expected_device_instance,
+            high_limit=expected_device_instance,
+            address=IPv4Address(target_address),
+            timeout=who_is_timeout,
+        )
+        iams = await asyncio.wait_for(who_future, timeout=who_is_timeout + 1.0)
+        if not iams:
+            return {"status": "blocked_probe_failed", "message": "no I-Am from target"}
+
+        dest = IPv4Address(target_address)
+        parameter_list: list[ObjectIdentifier | list[str]] = []
+        for object_type, object_instance, property_name in reads:
+            parameter_list.append(ObjectIdentifier((object_type, object_instance)))
+            parameter_list.append([_read_property_tag(property_name)])
+
+        raw = await asyncio.wait_for(
+            app.read_property_multiple(dest, parameter_list),
+            timeout=apdu_timeout,
+        )
+        if isinstance(raw, ErrorRejectAbortNack):
+            return {
+                "status": "read_rejected",
+                "message": str(raw),
+                "detail": repr(raw),
+                "bacnet_service": "readPropertyMultiple",
+            }
+        if raw is None:
+            return {
+                "status": "read_unexpected_response",
+                "message": "null ReadPropertyMultiple response",
+                "bacnet_service": "readPropertyMultiple",
+            }
+        if not isinstance(raw, list):
+            return {
+                "status": "read_unexpected_response",
+                "message": repr(raw),
+                "bacnet_service": "readPropertyMultiple",
+            }
+
+        by_key: dict[tuple[int, int, str], Any] = {}
+        for item in raw:
+            if not isinstance(item, tuple) or len(item) < 4:
+                continue
+            oid, prop_id, _array_index, value = item[0], item[1], item[2], item[3]
+            try:
+                ot_i, oi_i = int(oid[0]), int(oid[1])
+            except (TypeError, ValueError):
+                continue
+            ptag = str(prop_id).strip()
+            by_key[(ot_i, oi_i, ptag)] = value
+
+        rows: list[dict[str, Any]] = []
+        for object_type, object_instance, property_name in reads:
+            tag = _read_property_tag(property_name)
+            err_or_val = by_key.get((object_type, object_instance, tag))
+            if err_or_val is None:
+                err_or_val = by_key.get((object_type, object_instance, str(property_name).strip()))
+            row: dict[str, Any] = {
+                "object_type": object_type,
+                "object_instance": object_instance,
+                "property": property_name,
+            }
+            if err_or_val is None:
+                row["status"] = "read_missing_in_ack"
+            elif hasattr(err_or_val, "errorClass"):
+                row["status"] = "read_property_error"
+                row["message"] = str(err_or_val)
+            else:
+                row["status"] = "read_ok"
+                row["value"] = err_or_val
+                row["value_str"] = str(err_or_val)
+            rows.append(row)
+
+        all_ok = all(r.get("status") == "read_ok" for r in rows)
+        return {
+            "status": "batch_ok" if all_ok else "batch_partial",
+            "bacnet_service": "readPropertyMultiple",
+            "reads": rows,
+        }
+    finally:
+        app.close()
+
+
+def read_present_values_property_multiple(
+    *,
+    bind_port: int,
+    target_address: str,
+    expected_device_instance: int,
+    reads: list[tuple[int, int, str]],
+    who_is_timeout: float = 3.0,
+    apdu_timeout: float = 8.0,
+) -> dict[str, Any]:
+    return asyncio.run(
+        _read_present_values_property_multiple_async(
+            bind_port=bind_port,
+            target_address=target_address,
+            expected_device_instance=expected_device_instance,
+            reads=reads,
+            who_is_timeout=who_is_timeout,
+            apdu_timeout=apdu_timeout,
+        )
+    )
+
+
 async def _subscribe_cov_unconfirmed_wait_value_async(
     *,
     bind_port: int,

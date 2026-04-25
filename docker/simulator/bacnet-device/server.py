@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """UDP BACnet/IP lab device for Docker (FCU or HRV profile shapes).
 
-Responds to Who-Is, ReadProperty (present-value), WriteProperty (present-value)
+Responds to Who-Is, ReadProperty / ReadPropertyMultiple (present-value),
+WriteProperty / WritePropertyMultiple (present-value)
 for object sets aligned with docs/examples unit-profile-fcu / unit-profile-hrv.
 """
 
@@ -168,6 +169,8 @@ class BacnetSimState:
             ConfirmedServiceChoice,
             IAmRequest,
             ReadPropertyACK,
+            ReadPropertyMultipleACK,
+            ReadPropertyMultipleRequest,
             ReadPropertyRequest,
             SimpleAckPDU,
             SubscribeCOVRequest,
@@ -176,8 +179,13 @@ class BacnetSimState:
             WritePropertyMultipleRequest,
             WritePropertyRequest,
         )
-        from bacpypes3.basetypes import Segmentation
-        from bacpypes3.constructeddata import Any
+        from bacpypes3.basetypes import (
+            ReadAccessResult,
+            ReadAccessResultElement,
+            ReadAccessResultElementChoice,
+            Segmentation,
+        )
+        from bacpypes3.constructeddata import Any, SequenceOf
         from bacpypes3.primitivedata import Boolean, ObjectIdentifier, Real, Unsigned
         from bacpypes3.pdu import IPv4Address, PDU
 
@@ -248,6 +256,45 @@ class BacnetSimState:
                 objectIdentifier=req.objectIdentifier,
                 propertyIdentifier=req.propertyIdentifier,
                 propertyValue=payload,
+            )
+            inner = ack.encode()
+            inner.apduInvokeID = inc.apduInvokeID
+            inner.apduSeg = 0
+            inner.apduMor = 0
+            inner.set_context(inc)
+            wire = inner.encode().pduData
+            sock.sendto(_bvlc_original_unicast(b"\x01\x00" + wire), addr)
+            return
+
+        if svc == int(ConfirmedServiceChoice.readPropertyMultiple):
+            mreq = ReadPropertyMultipleRequest.decode(inc)
+            access_results: list[ReadAccessResult] = []
+            for spec in mreq.listOfReadAccessSpecs:
+                oid = spec.objectIdentifier
+                ot_r = int(oid[0])
+                oi_r = int(oid[1])
+                elems: list[ReadAccessResultElement] = []
+                for pref in spec.listOfPropertyReferences:
+                    if str(pref.propertyIdentifier) != "present-value":
+                        continue
+                    payload = self._read_payload(ot_r, oi_r)
+                    if payload is None:
+                        continue
+                    elems.append(
+                        ReadAccessResultElement(
+                            propertyIdentifier=pref.propertyIdentifier,
+                            propertyArrayIndex=pref.propertyArrayIndex,
+                            readResult=ReadAccessResultElementChoice(propertyValue=payload),
+                        )
+                    )
+                access_results.append(
+                    ReadAccessResult(
+                        objectIdentifier=oid,
+                        listOfResults=SequenceOf(ReadAccessResultElement)(elems),
+                    )
+                )
+            ack = ReadPropertyMultipleACK(
+                listOfReadAccessResults=SequenceOf(ReadAccessResult)(access_results),
             )
             inner = ack.encode()
             inner.apduInvokeID = inc.apduInvokeID

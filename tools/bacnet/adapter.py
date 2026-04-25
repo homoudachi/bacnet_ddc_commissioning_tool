@@ -158,6 +158,44 @@ class CommissioningBACnetAdapter:
             apdu_timeout=apdu_timeout,
         )
 
+    def read_present_values_batch(
+        self,
+        *,
+        bind_port: int,
+        target_address: str,
+        expected_device_instance: int,
+        reads: list[tuple[int, int, str]],
+        who_is_timeout: float = 3.0,
+        apdu_timeout: float = 8.0,
+    ) -> dict[str, Any]:
+        return self._client().read_present_values_batch(
+            bind_port=bind_port,
+            target_address=target_address,
+            expected_device_instance=expected_device_instance,
+            reads=reads,
+            who_is_timeout=who_is_timeout,
+            apdu_timeout=apdu_timeout,
+        )
+
+    def read_present_values_property_multiple(
+        self,
+        *,
+        bind_port: int,
+        target_address: str,
+        expected_device_instance: int,
+        reads: list[tuple[int, int, str]],
+        who_is_timeout: float = 3.0,
+        apdu_timeout: float = 8.0,
+    ) -> dict[str, Any]:
+        return self._client().read_present_values_property_multiple(
+            bind_port=bind_port,
+            target_address=target_address,
+            expected_device_instance=expected_device_instance,
+            reads=reads,
+            who_is_timeout=who_is_timeout,
+            apdu_timeout=apdu_timeout,
+        )
+
     def write_present_value(
         self,
         *,
