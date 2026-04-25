@@ -24,7 +24,8 @@ Use before tagging a release or handing a **Windows exe** / **Python** drop to t
 | BACnet write | `dry-run-bacnet-write --execute` | Allowlist + writable |
 | Point checkout | `bacnet-point-checkout` | Profile `point_checkout` |
 | Record step | `record-step` pass / skip / CHW stroke confirms | See README |
-| Airflow | `commissioning-airflow-adjust-write`, `commissioning-confirm-tachometer-reference` | Optional profile keys |
+| Airflow | `commissioning-airflow-adjust-write`, `commissioning-airflow-closed-loop-iterate`, `commissioning-confirm-tachometer-reference` | Optional **`closed_loop`** block + MSV arm when profile requires |
+| Operator UI | `operator-gui --run-dir <run> --gui-port 8765` | Localhost only; smoke allowlisted commands |
 | Manual airflow | `commissioning-record-manual-airflow` | Before pass on `manual_airflow_verification_assisted` steps |
 | Modulation | `bacnet-modulation-sweep` | After `init-flow` |
 | Report | `export-commissioning-report` CSV / unified / HTML / XLSX / PDF / customer HTML+PDF | Unified HTML includes **modulation SVG charts** when sweep+SAT data exists; **`--xlsx-include-modulation`** adds **`modulation`** sheet; customer PDF = cover + table + notes |

@@ -22,6 +22,7 @@ ROOT = repo_root()
 IMPORT_COMPILER = ROOT / "tools" / "import" / "compile_job.py"
 SIMULATOR_ORCH = ROOT / "tools" / "simulator" / "orchestrator.py"
 BACNET_ADAPTER = ROOT / "tools" / "bacnet" / "adapter.py"
+OPERATOR_GUI_SERVER = ROOT / "tools" / "operator_gui_server.py"
 
 _bacnet_adapter_singleton = None
 _compile_job_module = None
@@ -1678,6 +1679,291 @@ def cmd_commissioning_airflow_adjust_write(args: argparse.Namespace) -> int:
             sort_keys=True,
         )
     )
+    return 0
+
+
+def _runtime_controller_row(runtime_job: dict, label: str) -> dict | None:
+    for c in runtime_job.get("controllers", []) or []:
+        if isinstance(c, dict) and str(c.get("controller_label", "")).strip() == label:
+            return c
+    return None
+
+
+def cmd_commissioning_airflow_closed_loop_iterate(args: argparse.Namespace) -> int:
+    """Iterative fan % adjustments toward target L/s using BACnet flow feedback (Tier B1).
+
+    Profile ``automatic_airflow_adjustment`` may include optional ``closed_loop``::
+
+        {
+          "enabled": true,
+          "flow_read_object_id": "av_supply_airflow_present",
+          "flow_read_controller_label": "HRV-01",
+          "target_flow_ratio_of_design": 0.5,
+          "tolerance_L_s": 0.05,
+          "max_iterations": 6,
+          "gain": 0.15,
+          "min_command_percent": 15.0,
+          "max_command_percent": 95.0,
+          "initial_command_percent": 50.0
+        }
+
+    ``flow_read_controller_label`` defaults to ``--controller-label`` when omitted.
+    """
+    run_dir = args.run_dir
+    logs_path = run_dir / "logs" / "events.jsonl"
+    runtime_job_path = run_dir / "state" / "runtime-job.json"
+    flow_path = _flow_state_path(run_dir, args.controller_label)
+    if not flow_path.is_file():
+        print(f"error: flow state missing; run init-flow first ({flow_path})")
+        return 2
+    runtime_job = json.loads(runtime_job_path.read_text(encoding="utf-8"))
+    target = _runtime_controller_row(runtime_job, args.controller_label)
+    if target is None:
+        print(f"error: controller not found in runtime job: {args.controller_label}")
+        return 2
+
+    flow_state = json.loads(flow_path.read_text(encoding="utf-8"))
+    actions = _find_flow_step_actions(flow_state, args.step_id)
+    if actions is None:
+        print(f"error: step_id not found in flow state: {args.step_id}")
+        return 2
+    act = _find_action_by_type(actions, "automatic_airflow_adjustment")
+    if act is None:
+        print("error: step has no automatic_airflow_adjustment action")
+        return 2
+    cl = act.get("closed_loop")
+    if not isinstance(cl, dict) or not bool(cl.get("enabled")):
+        print("error: profile automatic_airflow_adjustment.closed_loop.enabled is not true")
+        return 2
+
+    flow_oid = str(cl.get("flow_read_object_id", "")).strip()
+    if not flow_oid:
+        print("error: closed_loop.flow_read_object_id is required")
+        return 2
+    read_label = str(cl.get("flow_read_controller_label", "") or "").strip() or args.controller_label
+    read_target = _runtime_controller_row(runtime_job, read_label)
+    if read_target is None:
+        print(f"error: flow_read_controller_label not in job: {read_label!r}")
+        return 2
+
+    try:
+        ratio = float(act.get("target_flow_ratio_of_design", cl.get("target_flow_ratio_of_design", 0.5)))
+    except (TypeError, ValueError):
+        ratio = 0.5
+    meta = target.get("commissioning_meta") if isinstance(target.get("commissioning_meta"), dict) else {}
+    unit_specs = meta.get("unit_specs") if isinstance(meta.get("unit_specs"), dict) else {}
+    design_flow = unit_specs.get("design_supply_airflow_L_s")
+    try:
+        design_f = float(design_flow)
+    except (TypeError, ValueError):
+        print("error: commissioning_meta.unit_specs.design_supply_airflow_L_s required as number for closed loop")
+        return 2
+    target_L = design_f * ratio
+
+    try:
+        tol = float(cl.get("tolerance_L_s", 0.08))
+    except (TypeError, ValueError):
+        tol = 0.08
+    try:
+        max_iter = int(cl.get("max_iterations", 8))
+    except (TypeError, ValueError):
+        max_iter = 8
+    try:
+        gain = float(cl.get("gain", 0.12))
+    except (TypeError, ValueError):
+        gain = 0.12
+    try:
+        min_pct = float(cl.get("min_command_percent", 10.0))
+    except (TypeError, ValueError):
+        min_pct = 10.0
+    try:
+        max_pct = float(cl.get("max_command_percent", 100.0))
+    except (TypeError, ValueError):
+        max_pct = 100.0
+    if getattr(args, "initial_fan_command_percent", None) is not None:
+        pct = float(args.initial_fan_command_percent)
+    else:
+        try:
+            pct = float(cl.get("initial_command_percent", 50.0))
+        except (TypeError, ValueError):
+            pct = 50.0
+    pct = max(min_pct, min(max_pct, pct))
+
+    actuator_oid = str(act.get("actuator_object_id", "")).strip()
+    if not actuator_oid:
+        print("error: automatic_airflow_adjustment missing actuator_object_id")
+        return 2
+
+    step_row = _lookup_step_by_id(flow_state.get("steps", []), args.step_id)
+    arms = str(step_row.get("arms_test_mode_state_key", "")).strip() if step_row else ""
+    if arms == "airflow_verify":
+        one = _bacnet_read_one(
+            controller_label=args.controller_label,
+            target=target,
+            object_id="msv_test_mode",
+            property_name="presentValue",
+            timeout_seconds=float(args.bacnet_timeout_seconds),
+            retries=int(args.bacnet_retries),
+            bacnet_bind_port=int(getattr(args, "bacnet_bind_port", 0) or 0),
+            apdu_timeout_override=args.apdu_timeout,
+        )
+        if one.get("status") != "read_ok":
+            print("error: BACnet read of msv_test_mode failed (airflow_verify)")
+            print(json.dumps(one, indent=2, sort_keys=True))
+            return 2
+        try:
+            msv_state = int(float(str(one.get("read", {}).get("value_str", ""))))
+        except (TypeError, ValueError):
+            print("error: could not parse msv_test_mode presentValue")
+            return 2
+        if msv_state != 3:
+            print(f"error: msv_test_mode must be state 3; got {msv_state}")
+            return 2
+
+    cmd_res = _resolve_profile_object_bacnet(target, actuator_oid)
+    if cmd_res is None:
+        print(f"error: {actuator_oid!r} not in profile objects_by_id")
+        return 2
+    cmd_ot, cmd_oi = cmd_res
+    objects_by_id = target.get("objects_by_id", {})
+    if not isinstance(objects_by_id, dict) or actuator_oid not in objects_by_id:
+        print(f"error: {actuator_oid!r} missing from objects_by_id")
+        return 2
+    if not bool(objects_by_id[actuator_oid].get("writable")):
+        print(f"error: {actuator_oid!r} is not writable")
+        return 2
+    w_allow = target.get("commissioning_write_allowlist", [])
+    if not isinstance(w_allow, list) or actuator_oid not in {
+        str(x).strip() for x in w_allow if str(x).strip()
+    }:
+        print(f"error: {actuator_oid!r} not in commissioning_write_allowlist")
+        return 2
+
+    r_allow = read_target.get("commissioning_read_allowlist", [])
+    if not isinstance(r_allow, list) or flow_oid not in {str(x).strip() for x in r_allow if str(x).strip()}:
+        print(
+            f"error: flow_read_object_id {flow_oid!r} not on read allowlist of controller {read_label!r}"
+        )
+        return 2
+    if flow_oid not in (read_target.get("objects_by_id") or {}):
+        print(f"error: {flow_oid!r} not in objects_by_id for {read_label!r}")
+        return 2
+
+    addr = target.get("bacnet", {})
+    host = str(addr.get("host", "")).strip()
+    port = int(addr.get("port", 0))
+    expected_instance = int(addr.get("device_instance", 0))
+    bacnet_ad = _bacnet_adapter()
+    target_addr = bacnet_ad.format_ipv4_target(host, port)
+    try:
+        bind_port = int(getattr(args, "bacnet_bind_port", 0) or 0)
+    except ValueError:
+        bind_port = 0
+    try:
+        apdu_t = bacnet_ad.commissioning_apdu_timeout_seconds(args.apdu_timeout)
+    except (TypeError, ValueError) as err:
+        print(f"error: invalid --apdu-timeout: {err}")
+        return 2
+    who_t = bacnet_ad.effective_who_is_timeout(
+        float(args.bacnet_timeout_seconds), int(args.bacnet_retries)
+    )
+
+    iterations: list[dict[str, Any]] = []
+    ok = False
+    last_flow: float | None = None
+    for i in range(max(1, max_iter)):
+        write_res = bacnet_ad.write_present_value(
+            bind_port=bind_port,
+            target_address=target_addr,
+            expected_device_instance=expected_instance,
+            object_type=cmd_ot,
+            object_instance=cmd_oi,
+            value=float(pct),
+            who_is_timeout=who_t,
+            apdu_timeout=apdu_t,
+        )
+        if write_res.get("status") != "write_ok":
+            iterations.append(
+                {"iteration": i + 1, "command_percent": pct, "write": write_res, "flow_read": None}
+            )
+            print(json.dumps({"ok": False, "reason": "write_failed", "iterations": iterations}, indent=2))
+            return 2
+
+        fr = _bacnet_read_one(
+            controller_label=read_label,
+            target=read_target,
+            object_id=flow_oid,
+            property_name="presentValue",
+            timeout_seconds=float(args.bacnet_timeout_seconds),
+            retries=int(args.bacnet_retries),
+            bacnet_bind_port=bind_port,
+            apdu_timeout_override=args.apdu_timeout,
+        )
+        flow_val: float | None = None
+        if fr.get("status") == "read_ok":
+            try:
+                flow_val = float(str(fr.get("read", {}).get("value_str", "")))
+            except (TypeError, ValueError):
+                flow_val = None
+        last_flow = flow_val
+        iterations.append(
+            {
+                "iteration": i + 1,
+                "command_percent": pct,
+                "measured_flow_L_s": flow_val,
+                "target_flow_L_s": target_L,
+                "read_controller": read_label,
+                "read_object_id": flow_oid,
+            }
+        )
+        if flow_val is None:
+            print(json.dumps({"ok": False, "reason": "flow_read_failed", "iterations": iterations}, indent=2))
+            return 2
+        if abs(flow_val - target_L) <= tol:
+            ok = True
+            break
+        adj = gain * (target_L - flow_val)
+        pct = max(min_pct, min(max_pct, pct + adj))
+
+    _append_event(
+        logs_path,
+        "airflow_closed_loop_iterate",
+        {
+            "controller_label": args.controller_label,
+            "step_id": args.step_id,
+            "iterations": len(iterations),
+            "converged": ok,
+        },
+    )
+    out = {
+        "ok": ok,
+        "controller_label": args.controller_label,
+        "step_id": args.step_id,
+        "target_flow_L_s": target_L,
+        "tolerance_L_s": tol,
+        "last_measured_flow_L_s": last_flow,
+        "final_command_percent": pct,
+        "iterations": iterations,
+    }
+    print(json.dumps(out, indent=2, sort_keys=True))
+    return 0 if ok else 2
+
+
+def cmd_operator_gui(args: argparse.Namespace) -> int:
+    """Local browser UI for common commissioning CLI actions (Tier B2)."""
+    spec = importlib.util.spec_from_file_location(
+        "operator_gui_server_mod", OPERATOR_GUI_SERVER
+    )
+    if spec is None or spec.loader is None:
+        print(f"error: cannot load {OPERATOR_GUI_SERVER}")
+        return 2
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    run_dir: Path = args.run_dir
+    host = str(getattr(args, "gui_host", "127.0.0.1") or "127.0.0.1")
+    port = int(getattr(args, "gui_port", 8765) or 8765)
+    mod.run_operator_gui_server(run_dir=run_dir, host=host, port=port)
     return 0
 
 
@@ -5107,6 +5393,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validate_import.set_defaults(handler=cmd_validate_import)
 
+    op_gui = subparsers.add_parser(
+        "operator-gui",
+        help=(
+            "Local browser UI (127.0.0.1) for common commissioning commands; "
+            "runs tools/runtime/app.py subprocesses from tools/operator_gui_server.py."
+        ),
+    )
+    op_gui.add_argument("--run-dir", required=True, type=Path)
+    op_gui.add_argument(
+        "--gui-host",
+        default="127.0.0.1",
+        help="Bind address (default 127.0.0.1; do not expose to untrusted networks).",
+    )
+    op_gui.add_argument("--gui-port", type=int, default=8765, help="HTTP port (default 8765).")
+    op_gui.set_defaults(handler=cmd_operator_gui)
+
     print_graph = subparsers.add_parser(
         "print-job-graph",
         help="Print human-readable summary of controllers and commissioning flow sizes.",
@@ -5654,6 +5956,50 @@ def build_parser() -> argparse.ArgumentParser:
         help="BACpypes3 APDU timeout override (default: adapter default).",
     )
     airflow_adj.set_defaults(handler=cmd_commissioning_airflow_adjust_write)
+
+    airflow_cl = subparsers.add_parser(
+        "commissioning-airflow-closed-loop-iterate",
+        help=(
+            "Iteratively adjust automatic_airflow_adjustment actuator toward target L/s using "
+            "BACnet flow_read_object_id feedback (profile closed_loop block; see docs)."
+        ),
+    )
+    airflow_cl.add_argument("--run-dir", required=True, type=Path)
+    airflow_cl.add_argument("--controller-label", required=True)
+    airflow_cl.add_argument("--step-id", required=True)
+    airflow_cl.add_argument(
+        "--initial-fan-command-percent",
+        type=float,
+        default=None,
+        help="Override profile closed_loop.initial_command_percent for this run.",
+    )
+    airflow_cl.add_argument("--technician-name", default="operator")
+    airflow_cl.add_argument("--note", default="closed-loop iterate")
+    airflow_cl.add_argument(
+        "--bacnet-timeout-seconds",
+        type=float,
+        default=0.5,
+        help="Who-Is timeout base for BACnet read/write.",
+    )
+    airflow_cl.add_argument(
+        "--bacnet-retries",
+        type=int,
+        default=1,
+        help="Who-Is retries for BACnet I/O.",
+    )
+    airflow_cl.add_argument(
+        "--bacnet-bind-port",
+        type=int,
+        default=0,
+        help="Local UDP bind port (0 = OS-assigned).",
+    )
+    airflow_cl.add_argument(
+        "--apdu-timeout",
+        type=float,
+        default=None,
+        help="BACpypes3 APDU timeout override (default: adapter default).",
+    )
+    airflow_cl.set_defaults(handler=cmd_commissioning_airflow_closed_loop_iterate)
 
     manual_air = subparsers.add_parser(
         "commissioning-record-manual-airflow",

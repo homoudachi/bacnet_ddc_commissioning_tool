@@ -59,6 +59,7 @@ class _FakeBipUdpServer:
         self._msv_present = int(msv_present)
         self._av_tacho_present = float(av_tacho_present)
         self._av_supply_fan_present = float(av_supply_fan_present)
+        self._av_supply_airflow_L_s = 0.01 * float(av_supply_fan_present)
         self._av_heat_present = float(av_heat_present)
         self._ao_valve_present = float(ao_valve_present)
         self._lock = threading.Lock()
@@ -129,6 +130,7 @@ class _FakeBipUdpServer:
                 msv_val = self._msv_present
                 av_tacho = self._av_tacho_present
                 av_fan = self._av_supply_fan_present
+                av_air = self._av_supply_airflow_L_s
                 av_heat = self._av_heat_present
                 ao_valve = self._ao_valve_present
             if ot == 0 and oi == 2:
@@ -139,6 +141,8 @@ class _FakeBipUdpServer:
                 payload = Any(Real(av_tacho))
             elif ot == 2 and oi == 3:
                 payload = Any(Real(av_fan))
+            elif ot == 2 and oi == 7:
+                payload = Any(Real(av_air))
             elif ot == 2 and oi == 4:
                 payload = Any(Real(av_heat))
             elif ot == 1 and oi == 5:
@@ -173,6 +177,7 @@ class _FakeBipUdpServer:
                 new_val = float(wreq.propertyValue.cast_out(Real))
                 with self._lock:
                     self._av_supply_fan_present = new_val
+                    self._av_supply_airflow_L_s = 0.01 * new_val
             elif ot_w == 2 and oi_w == 4:
                 new_val = float(wreq.propertyValue.cast_out(Real))
                 with self._lock:
@@ -3468,6 +3473,135 @@ class RuntimeCliTests(unittest.TestCase):
             csv_text = csv_out.read_text(encoding="utf-8")
             self.assertIn("thermal_modulation_sweep", csv_text)
             self.assertIn("av_electric_heat_command", csv_text)
+        finally:
+            server.stop()
+
+    def test_airflow_closed_loop_iterate_converges(self) -> None:
+        server = _FakeBipUdpServer(
+            device_instance=21001,
+            analog_input_present=21.0,
+            msv_present=3,
+            av_supply_fan_present=50.0,
+        )
+        server.start()
+        try:
+            time.sleep(0.05)
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            profiles_dir = self.run_dir / "profiles-closed-loop"
+            profiles_dir.mkdir(parents=True, exist_ok=True)
+            (profiles_dir / "unit-profile-fcu-closed-loop-test.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "0.1-test",
+                        "profile_id": "fcu_closed_loop_test_v1",
+                        "display_name": "FCU closed-loop test (fake BACnet)",
+                        "commissioning_write_allowlist": [
+                            "msv_test_mode",
+                            "av_supply_fan_command",
+                        ],
+                        "commissioning_read_allowlist": [
+                            "msv_test_mode",
+                            "av_supply_fan_command",
+                            "av_measured_supply_airflow",
+                        ],
+                        "unit_specs": {"design_supply_airflow_L_s": 1.0},
+                        "objects": [
+                            {
+                                "id": "msv_test_mode",
+                                "writable": True,
+                                "bacnet": {"object_type": "multiStateValue", "instance": 50},
+                            },
+                            {
+                                "id": "av_supply_fan_command",
+                                "writable": True,
+                                "bacnet": {"object_type": "analogValue", "instance": 3},
+                            },
+                            {
+                                "id": "av_measured_supply_airflow",
+                                "writable": False,
+                                "bacnet": {"object_type": "analogValue", "instance": 7},
+                            },
+                        ],
+                        "commissioning_flow": [
+                            {
+                                "step_id": "half_design_airflow_auto",
+                                "label": "Half design airflow (closed loop test)",
+                                "arms_test_mode_state_key": "airflow_verify",
+                                "actions": [
+                                    {
+                                        "type": "automatic_airflow_adjustment",
+                                        "actuator_object_id": "av_supply_fan_command",
+                                        "target_flow_ratio_of_design": 0.5,
+                                        "closed_loop": {
+                                            "enabled": True,
+                                            "flow_read_object_id": "av_measured_supply_airflow",
+                                            "tolerance_L_s": 0.02,
+                                            "max_iterations": 10,
+                                            "gain": 0.8,
+                                            "min_command_percent": 5.0,
+                                            "max_command_percent": 95.0,
+                                            "initial_command_percent": 50.0,
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            csv_path = self.run_dir / "controllers-cl.csv"
+            csv_path.write_text(
+                "controller_label,profile_id,bacnet_device_instance,bacnet_ip,bacnet_port,building_floor,notes\n"
+                "FCU-CL,fcu_closed_loop_test_v1,21001,127.0.0.1,"
+                f"{server.port},L01,test\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                0,
+                _run_runtime(
+                    "init-run",
+                    "--run-dir",
+                    str(self.run_dir),
+                    "--job-id",
+                    "job-cl",
+                    "--controllers-csv",
+                    str(csv_path),
+                    "--profiles-dir",
+                    str(profiles_dir),
+                    "--scenarios-dir",
+                    str(ROOT / "docs" / "examples" / "simulator-scenarios"),
+                ).returncode,
+            )
+            self.assertEqual(0, _run_runtime("compile-import", "--run-dir", str(self.run_dir)).returncode)
+            self.assertEqual(
+                0,
+                _run_runtime(
+                    "init-flow",
+                    "--run-dir",
+                    str(self.run_dir),
+                    "--controller-label",
+                    "FCU-CL",
+                ).returncode,
+            )
+            cl = _run_runtime(
+                "commissioning-airflow-closed-loop-iterate",
+                "--run-dir",
+                str(self.run_dir),
+                "--controller-label",
+                "FCU-CL",
+                "--step-id",
+                "half_design_airflow_auto",
+                "--bacnet-timeout-seconds",
+                "0.5",
+                "--bacnet-retries",
+                "1",
+            )
+            self.assertEqual(0, cl.returncode, msg=cl.stdout + cl.stderr)
+            out = json.loads(cl.stdout)
+            self.assertTrue(out.get("ok"))
+            self.assertLessEqual(abs(float(out["last_measured_flow_L_s"]) - 0.5), 0.02)
         finally:
             server.stop()
 

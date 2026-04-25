@@ -355,6 +355,9 @@ def compile_model(
                 commissioning_meta["unit_specs"] = unit_specs
             if isinstance(airflow_verification, dict):
                 commissioning_meta["airflow_verification"] = airflow_verification
+            rat_proxy = profile.get("rat_temperature_proxy")
+            if isinstance(rat_proxy, dict) and rat_proxy:
+                commissioning_meta["rat_temperature_proxy"] = rat_proxy
 
             objects_by_id = _extract_objects_by_id(profile)
             ov_errors, instance_overrides = _parse_per_row_object_instance_overrides(
@@ -425,6 +428,56 @@ def compile_model(
                 message=(
                     f"multiple controller rows target the same BACnet/IP endpoint {ep_key} "
                     f"and device_instance {next(iter(instances))}: {', '.join(labels)}"
+                ),
+            )
+
+    labels_in_job = {str(c.get("controller_label", "")).strip() for c in controllers}
+    for ctrl in controllers:
+        meta = ctrl.get("commissioning_meta")
+        if not isinstance(meta, dict):
+            continue
+        proxy = meta.get("rat_temperature_proxy")
+        if not isinstance(proxy, dict):
+            continue
+        if not bool(proxy.get("enabled")):
+            continue
+        tgt = str(proxy.get("proxy_controller_label", "")).strip()
+        oid = str(proxy.get("proxy_read_object_id", "")).strip()
+        if not tgt or not oid:
+            _warning(
+                warnings,
+                code="rat_temperature_proxy_incomplete",
+                message=(
+                    f"controller {ctrl.get('controller_label')!r}: rat_temperature_proxy.enabled "
+                    f"requires proxy_controller_label and proxy_read_object_id"
+                ),
+            )
+            continue
+        if tgt not in labels_in_job:
+            _warning(
+                warnings,
+                code="rat_temperature_proxy_unknown_controller",
+                message=(
+                    f"controller {ctrl.get('controller_label')!r}: "
+                    f"rat_temperature_proxy proxy_controller_label {tgt!r} not found in this job"
+                ),
+            )
+            continue
+        proxy_row = next(
+            (c for c in controllers if str(c.get("controller_label", "")).strip() == tgt),
+            None,
+        )
+        if proxy_row is None:
+            continue
+        r_allow = proxy_row.get("commissioning_read_allowlist", [])
+        allowed = {str(x).strip() for x in r_allow if isinstance(r_allow, list) and str(x).strip()}
+        if oid not in allowed:
+            _warning(
+                warnings,
+                code="rat_temperature_proxy_object_not_readable",
+                message=(
+                    f"controller {ctrl.get('controller_label')!r}: "
+                    f"proxy_read_object_id {oid!r} is not on proxy controller {tgt!r} read allowlist"
                 ),
             )
 

@@ -42,6 +42,7 @@ def _write_profile(
     objects: list[dict] | None = None,
     unit_specs: dict | None = None,
     airflow_verification: dict | None = None,
+    rat_temperature_proxy: dict | None = None,
 ) -> None:
     data: dict = {
                 "schema_version": "0.1-example",
@@ -82,6 +83,8 @@ def _write_profile(
         data["unit_specs"] = unit_specs
     if airflow_verification is not None:
         data["airflow_verification"] = airflow_verification
+    if rat_temperature_proxy is not None:
+        data["rat_temperature_proxy"] = rat_temperature_proxy
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
@@ -762,4 +765,114 @@ class ImportCompilerTests(unittest.TestCase):
         report = json.loads(report_json.read_text(encoding="utf-8"))
         codes = [w["code"] for w in report["warnings"]]
         self.assertIn("duplicate_bacnet_ip_port_different_device", codes)
+
+    def test_rat_temperature_proxy_warnings_and_meta(self) -> None:
+        controllers = FIXTURES / "controllers-rat-proxy.csv"
+        output_json = FIXTURES / "runtime-job-rat-proxy.json"
+        report_json = FIXTURES / "runtime-job-rat-proxy-report.json"
+        _write_csv(
+            controllers,
+            [
+                {
+                    "controller_label": "FCU-RAT",
+                    "profile_id": "profile_rat_proxy",
+                    "bacnet_device_instance": "21001",
+                    "bacnet_ip": "192.168.1.50",
+                    "bacnet_port": "47808",
+                    "building_floor": "",
+                    "notes": "",
+                },
+                {
+                    "controller_label": "HRV-RAT",
+                    "profile_id": "profile_hrv_rat",
+                    "bacnet_device_instance": "22001",
+                    "bacnet_ip": "192.168.1.60",
+                    "bacnet_port": "47808",
+                    "building_floor": "",
+                    "notes": "",
+                },
+            ],
+        )
+        _write_profile(
+            self.profiles_dir / "profile_rat_proxy.json",
+            profile_id="profile_rat_proxy",
+            display_name="FCU with RAT proxy",
+            read_allowlist=["ai_sat"],
+            rat_temperature_proxy={
+                "enabled": True,
+                "proxy_controller_label": "HRV-MISSING",
+                "proxy_read_object_id": "ai_return_air_temperature",
+            },
+        )
+        _write_profile(
+            self.profiles_dir / "profile_hrv_rat.json",
+            profile_id="profile_hrv_rat",
+            display_name="HRV for RAT",
+            read_allowlist=["msv_test_mode"],
+            objects=[
+                {
+                    "id": "msv_test_mode",
+                    "writable": True,
+                    "bacnet": {"object_type": "multiStateValue", "instance": 50},
+                },
+                {
+                    "id": "ai_return_air_temperature",
+                    "writable": False,
+                    "bacnet": {"object_type": "analogInput", "instance": 99},
+                },
+            ],
+        )
+        result = _run_compiler(controllers, self.profiles_dir, output_json, report_json)
+        self.assertEqual(0, result.returncode, msg=result.stdout + result.stderr)
+        report = json.loads(report_json.read_text(encoding="utf-8"))
+        codes = [w["code"] for w in report["warnings"]]
+        self.assertIn("rat_temperature_proxy_unknown_controller", codes)
+
+        _write_profile(
+            self.profiles_dir / "profile_rat_proxy.json",
+            profile_id="profile_rat_proxy",
+            display_name="FCU with RAT proxy",
+            read_allowlist=["ai_sat"],
+            rat_temperature_proxy={
+                "enabled": True,
+                "proxy_controller_label": "HRV-RAT",
+                "proxy_read_object_id": "ai_return_air_temperature",
+            },
+            write_allowlist=["msv_test_mode"],
+        )
+        result2 = _run_compiler(controllers, self.profiles_dir, output_json, report_json)
+        self.assertEqual(0, result2.returncode)
+        report2 = json.loads(report_json.read_text(encoding="utf-8"))
+        codes2 = [w["code"] for w in report2["warnings"]]
+        self.assertIn("rat_temperature_proxy_object_not_readable", codes2)
+
+        _write_profile(
+            self.profiles_dir / "profile_hrv_rat.json",
+            profile_id="profile_hrv_rat",
+            display_name="HRV for RAT",
+            read_allowlist=["msv_test_mode", "ai_return_air_temperature"],
+            objects=[
+                {
+                    "id": "msv_test_mode",
+                    "writable": True,
+                    "bacnet": {"object_type": "multiStateValue", "instance": 50},
+                },
+                {
+                    "id": "ai_return_air_temperature",
+                    "writable": False,
+                    "bacnet": {"object_type": "analogInput", "instance": 99},
+                },
+            ],
+        )
+        result3 = _run_compiler(controllers, self.profiles_dir, output_json, report_json)
+        self.assertEqual(0, result3.returncode)
+        report3 = json.loads(report_json.read_text(encoding="utf-8"))
+        self.assertFalse(
+            any(w["code"].startswith("rat_temperature_proxy") for w in report3["warnings"])
+        )
+        runtime = json.loads(output_json.read_text(encoding="utf-8"))
+        fcu = next(c for c in runtime["controllers"] if c["controller_label"] == "FCU-RAT")
+        meta = fcu["commissioning_meta"]["rat_temperature_proxy"]
+        self.assertEqual("HRV-RAT", meta["proxy_controller_label"])
+        self.assertEqual("ai_return_air_temperature", meta["proxy_read_object_id"])
 
