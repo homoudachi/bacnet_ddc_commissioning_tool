@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Browser UI for commissioning run-dir (stdlib HTTPServer).
 
-Two modes:
+Modes:
 
 * **/** — Advanced form: POST to ``/cli`` with allowlisted subcommands + free-form extra args.
 * **/guided** — Graphical guided flow: pick controller, view steps / next / blockers, **forms** for
   modulation sweep, airflow adjust, closed-loop iterate, manual airflow, valve prompts, tachometer
   confirm, plus session + record-step (all via the same ``tools/runtime/app.py`` CLI).
+* **/dashboard** — All controllers from ``runtime-job.json`` on one screen: BACnet **read**,
+  **read batch**, **write**, and **B/IP probe** per card (same allowlists as CLI).
 
 Bind to **127.0.0.1** by default (local operator machine only).
 
@@ -43,6 +45,7 @@ ALLOWED_PREFIXES = (
     "commissioning-guided-next",
     "set-session-value",
     "record-step",
+    "probe-bip",
     "bacnet-read",
     "bacnet-read-batch",
     "dry-run-bacnet-write",
@@ -65,6 +68,7 @@ _GUIDED_API_COMMANDS = frozenset(
         "show-session",
         "set-session-value",
         "record-step",
+        "probe-bip",
         "bacnet-point-checkout",
         "bacnet-read",
         "bacnet-read-batch",
@@ -89,6 +93,49 @@ def _session_state_path(run_dir: Path, controller_label: str) -> Path:
 
 def _runtime_job_path(run_dir: Path) -> Path:
     return run_dir / "state" / "runtime-job.json"
+
+
+def _dashboard_controller_summaries(job: dict[str, Any]) -> list[dict[str, Any]]:
+    """Lightweight rows for dashboard cards (no full objects_by_id)."""
+    out: list[dict[str, Any]] = []
+    for c in job.get("controllers", []) or []:
+        if not isinstance(c, dict):
+            continue
+        lab = str(c.get("controller_label", "")).strip()
+        if not lab:
+            continue
+        prof = str(c.get("profile_id", "")).strip()
+        b = c.get("bacnet") if isinstance(c.get("bacnet"), dict) else {}
+        host = str(b.get("host", "")).strip()
+        port_raw = b.get("port", "")
+        try:
+            port = int(port_raw)
+        except (TypeError, ValueError):
+            port = 0
+        try:
+            dev_inst = int(b.get("device_instance", 0))
+        except (TypeError, ValueError):
+            dev_inst = 0
+        allow_r = c.get("commissioning_read_allowlist") or []
+        allow_w = c.get("commissioning_write_allowlist") or []
+        if not isinstance(allow_r, list):
+            allow_r = []
+        if not isinstance(allow_w, list):
+            allow_w = []
+        rc = sum(1 for x in allow_r if str(x).strip())
+        wc = sum(1 for x in allow_w if str(x).strip())
+        out.append(
+            {
+                "controller_label": lab,
+                "profile_id": prof,
+                "bacnet_host": host,
+                "bacnet_port": port,
+                "bacnet_device_instance": dev_inst,
+                "read_allowlist_count": rc,
+                "write_allowlist_count": wc,
+            }
+        )
+    return out
 
 
 def _load_json(path: Path) -> dict[str, Any] | None:
@@ -300,7 +347,7 @@ button:hover {{ filter: brightness(1.06); }}
 <div class="wrap">
 <h1>Commissioning operator (local)</h1>
 <p class="meta">Run dir: <code>{rd}</code></p>
-<p class="meta"><a href="/guided">Open guided commissioning flow UI</a></p>
+<p class="meta"><a href="/guided">Guided flow UI</a> · <a href="/dashboard">Dashboard</a> (all controllers)</p>
 <p class="meta">Commands run as subprocess to <code>tools/runtime/app.py</code>. Bind defaults to loopback only.</p>
 <div class="card">
 <form method="post" action="/cli">
@@ -460,7 +507,7 @@ details summary:hover {{ color: var(--text); }}
 <header>
   <h1>Guided commissioning</h1>
   <span class="meta">Run dir: <code id="runDirDisp"></code></span>
-  <span class="meta"><a href="/">Advanced CLI form</a></span>
+  <span class="meta"><a href="/dashboard">Dashboard</a> · <a href="/">Advanced CLI</a></span>
 </header>
 <div class="layout">
   <div class="panel">
@@ -1200,6 +1247,333 @@ loadControllers().catch(e => showFlash(document.getElementById("ctlFlash"), Stri
     return body.encode("utf-8")
 
 
+def _dashboard_page(run_dir: Path) -> bytes:
+    rd = json.dumps(str(run_dir.resolve()))
+    body = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"/><title>Commissioning dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<style>
+:root {{
+  --bg: #0f1419; --panel: #151c27; --surface: #0d1218; --text: #e8eef5; --muted: #8b9cb3;
+  --accent: #3d8bfd; --accent-dim: #2a6bc4; --ok: #2fb573; --err: #f47174; --border: #2d3a4d;
+  --radius: 8px; --radius-sm: 6px; --shadow: 0 2px 12px rgba(0,0,0,0.25);
+}}
+* {{ box-sizing: border-box; }}
+body {{ font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; margin: 0;
+  background: var(--bg); color: var(--text); line-height: 1.45; min-height: 100vh; }}
+header {{
+  padding: 1rem 1.25rem; border-bottom: 1px solid var(--border);
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem;
+  background: linear-gradient(180deg, #151c27 0%, var(--bg) 100%);
+}}
+header h1 {{ font-size: 1.1rem; margin: 0; font-weight: 650; }}
+header .meta {{ color: var(--muted); font-size: 0.85rem; }}
+header a {{ color: var(--accent); text-decoration: none; }}
+header a:hover {{ text-decoration: underline; }}
+.toolbar {{
+  padding: 0.85rem 1.25rem; border-bottom: 1px solid var(--border);
+  background: var(--panel); display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-end;
+}}
+.toolbar label {{ font-size: 0.78rem; color: var(--muted); display: block; margin-bottom: 0.2rem; }}
+.toolbar input {{ padding: 0.45rem 0.55rem; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: var(--surface); color: var(--text); min-width: 12rem; }}
+.toolbar button {{ margin: 0; padding: 0.45rem 0.9rem; border-radius: var(--radius-sm); border: none;
+  background: var(--accent); color: #fff; font-weight: 600; cursor: pointer; }}
+.toolbar button:hover {{ background: var(--accent-dim); }}
+#globalFlash {{ margin: 0.75rem 1.25rem; padding: 0.6rem 0.85rem; border-radius: var(--radius-sm); display: none;
+  font-size: 0.88rem; border-left: 3px solid transparent; }}
+#globalFlash.err {{ background: #3a1a1c; color: #ffb4b6; border-left-color: var(--err); }}
+#globalFlash.ok {{ background: #1a2e24; color: #9ee5c0; border-left-color: var(--ok); }}
+.dash-wrap {{ padding: 1rem 1.25rem 2rem; }}
+.dash-grid {{
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 0.85rem;
+}}
+.dash-card {{
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 0.85rem 1rem;
+  background: var(--surface); box-shadow: var(--shadow);
+}}
+.dash-card h2 {{ margin: 0 0 0.25rem; font-size: 1rem; font-weight: 650; }}
+.dash-card .sub {{ font-size: 0.78rem; color: var(--muted); margin-bottom: 0.5rem; line-height: 1.35; }}
+.dash-card label {{ display: block; font-size: 0.72rem; color: var(--muted); margin-top: 0.5rem; font-weight: 500; }}
+.dash-card input, .dash-card textarea, .dash-card select {{
+  width: 100%; margin-top: 0.2rem; padding: 0.4rem 0.5rem; font-size: 0.85rem;
+  border-radius: var(--radius-sm); border: 1px solid var(--border); background: #0a0e14; color: var(--text);
+}}
+.dash-card textarea {{ min-height: 3.2rem; font-family: ui-monospace, monospace; font-size: 0.78rem; }}
+.dash-card .row {{ display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.45rem; }}
+.dash-card button {{
+  margin-top: 0.45rem; padding: 0.4rem 0.75rem; border: none; border-radius: var(--radius-sm);
+  font-size: 0.82rem; font-weight: 600; cursor: pointer; background: #3a4a5e; color: var(--text);
+}}
+.dash-card button.primary {{ background: var(--accent); color: #fff; }}
+.dash-card button:hover {{ filter: brightness(1.08); }}
+.dash-card .probe-out {{ font-size: 0.74rem; color: var(--muted); margin-top: 0.35rem; font-family: ui-monospace, monospace; }}
+.dash-card .flash {{ margin-top: 0.45rem; padding: 0.45rem 0.55rem; border-radius: var(--radius-sm); font-size: 0.78rem; display: none;
+  border-left: 3px solid transparent; word-break: break-word; }}
+.dash-card .flash.err {{ background: #3a1a1c; color: #ffb4b6; border-left-color: var(--err); }}
+.dash-card .flash.ok {{ background: #1a2e24; color: #9ee5c0; border-left-color: var(--ok); }}
+.chk {{ display: flex; align-items: center; gap: 0.35rem; margin-top: 0.35rem; font-size: 0.78rem; color: var(--muted); }}
+.chk input {{ width: auto; accent-color: var(--accent); }}
+.empty {{ color: var(--muted); padding: 1rem 0; }}
+</style></head>
+<body>
+<header>
+  <h1>Commissioning dashboard</h1>
+  <span class="meta">Run dir: <code id="runDirDisp"></code></span>
+  <span class="meta"><a href="/guided">Guided</a> · <a href="/">Advanced CLI</a></span>
+</header>
+<div class="toolbar">
+  <div>
+    <label for="dashTech">Technician (writes)</label>
+    <input id="dashTech" placeholder="Required for BACnet writes" autocomplete="name"/>
+  </div>
+  <div>
+    <button type="button" id="btnDashReload">Reload controllers</button>
+  </div>
+</div>
+<div id="globalFlash"></div>
+<div class="dash-wrap">
+  <p class="sub" style="color:var(--muted);font-size:0.82rem;margin:0 0 0.75rem">
+    One card per controller from <code>runtime-job.json</code>. Reads and writes use the same profile allowlists as the CLI.
+    Use <strong>Sequential</strong> batch mode if the device rejects ReadPropertyMultiple.
+  </p>
+  <div class="dash-grid" id="dashGrid"></div>
+</div>
+<script>
+const RUN_DIR = {rd};
+document.getElementById("runDirDisp").textContent = RUN_DIR;
+
+function showGlobal(msg, isErr) {{
+  const el = document.getElementById("globalFlash");
+  el.style.display = "block";
+  el.className = isErr ? "err" : "ok";
+  el.textContent = msg;
+}}
+
+function cardFlash(card, msg, isErr) {{
+  const el = card.querySelector(".dash-local-flash");
+  if (!el) return;
+  el.style.display = "block";
+  el.className = "flash dash-local-flash " + (isErr ? "err" : "ok");
+  el.textContent = msg;
+}}
+
+async function apiJson(path, opts) {{
+  const r = await fetch(path, Object.assign({{ headers: {{ "Accept": "application/json" }} }}, opts || {{}}));
+  const text = await r.text();
+  let data = null;
+  try {{ data = JSON.parse(text); }} catch (e) {{}}
+  if (!r.ok) {{
+    const msg = (data && data.error) ? data.error : text.slice(0, 400);
+    throw new Error(msg || "request failed");
+  }}
+  return data;
+}}
+
+function formatReadSummary(j) {{
+  const st = j.status || "";
+  const vs = (j.read && j.read.value_str != null) ? j.read.value_str : (j.value_str || "");
+  return "Read " + st + (vs ? ": " + vs : "");
+}}
+
+function formatBatchSummary(j) {{
+  const rows = j.reads || [];
+  const ok = rows.filter(r => (r.status || "") === "read_ok").length;
+  const parts = [];
+  for (const r of rows.slice(0, 4)) {{
+    const oid = (r.profile_object_id || "").trim();
+    const vs = (r.read && r.read.value_str != null) ? r.read.value_str : (r.value_str || "");
+    if (oid) parts.push(vs ? (oid + "=" + vs) : oid);
+  }}
+  const more = rows.length > 4 ? " (+" + (rows.length - 4) + ")" : "";
+  return ok + "/" + rows.length + " OK" + (parts.length ? ": " + parts.join(", ") : "") + more;
+}}
+
+function buildCard(row) {{
+  const lab = row.controller_label;
+  const card = document.createElement("div");
+  card.className = "dash-card";
+  card.dataset.controller = lab;
+  const host = row.bacnet_host || "";
+  const port = row.bacnet_port || "";
+  const inst = row.bacnet_device_instance;
+  const sub = document.createElement("div");
+  sub.className = "sub";
+  sub.textContent = (row.profile_id || "") + " · " + host + ":" + port + " · device " + inst +
+    " · " + (row.read_allowlist_count || 0) + " reads / " + (row.write_allowlist_count || 0) + " writes allowlisted";
+  const h = document.createElement("h2");
+  h.textContent = lab;
+  card.appendChild(h);
+  card.appendChild(sub);
+
+  const bProbe = document.createElement("button");
+  bProbe.type = "button";
+  bProbe.textContent = "Probe B/IP";
+  const probeOut = document.createElement("div");
+  probeOut.className = "probe-out";
+  bProbe.addEventListener("click", async () => {{
+    try {{
+      const j = await apiJson("/api/v1/dashboard-probe", {{
+        method: "POST",
+        headers: {{ "Content-Type": "application/json" }},
+        body: JSON.stringify({{ controller: lab }}),
+      }});
+      const st = (j.probe && j.probe.status) || j.status || "?";
+      probeOut.textContent = "probe: " + st;
+      cardFlash(card, "Probe " + st, st !== "reachable_verified");
+    }} catch (e) {{
+      probeOut.textContent = "";
+      cardFlash(card, String(e.message), true);
+    }}
+  }});
+  card.appendChild(bProbe);
+  card.appendChild(probeOut);
+
+  const lr1 = document.createElement("label");
+  lr1.textContent = "Read — object id";
+  const inRoid = document.createElement("input");
+  inRoid.placeholder = "e.g. ai_sat";
+  inRoid.autocomplete = "off";
+  const lr2 = document.createElement("label");
+  lr2.textContent = "Property";
+  const inRprop = document.createElement("input");
+  inRprop.value = "presentValue";
+  const bRead = document.createElement("button");
+  bRead.className = "primary";
+  bRead.type = "button";
+  bRead.textContent = "Read";
+  bRead.addEventListener("click", async () => {{
+    const oid = inRoid.value.trim();
+    const prop = (inRprop.value || "presentValue").trim();
+    if (!oid) {{ cardFlash(card, "Object id required.", true); return; }}
+    try {{
+      const j = await apiJson("/api/v1/bacnet-quick-read", {{
+        method: "POST",
+        headers: {{ "Content-Type": "application/json" }},
+        body: JSON.stringify({{ controller: lab, object_id: oid, property: prop }}),
+      }});
+      cardFlash(card, formatReadSummary(j), (j.status || "") !== "read_ok");
+    }} catch (e) {{ cardFlash(card, String(e.message), true); }}
+  }});
+  card.appendChild(lr1);
+  card.appendChild(inRoid);
+  card.appendChild(lr2);
+  card.appendChild(inRprop);
+  card.appendChild(bRead);
+
+  const lb = document.createElement("label");
+  lb.textContent = "Read batch — one id per line";
+  const ta = document.createElement("textarea");
+  ta.placeholder = "ai_sat\\nmsv_test_mode";
+  ta.spellcheck = false;
+  const lm = document.createElement("label");
+  lm.textContent = "Transport";
+  const sel = document.createElement("select");
+  sel.innerHTML = '<option value="multiple">Multiple (one APDU)</option><option value="sequential">Sequential</option>';
+  const bBatch = document.createElement("button");
+  bBatch.type = "button";
+  bBatch.textContent = "Read batch";
+  bBatch.addEventListener("click", async () => {{
+    const reads = (ta.value || "").split(/\\r?\\n/).map(s => s.trim()).filter(Boolean);
+    if (!reads.length) {{ cardFlash(card, "Enter at least one line.", true); return; }}
+    try {{
+      const j = await apiJson("/api/v1/bacnet-quick-read-batch", {{
+        method: "POST",
+        headers: {{ "Content-Type": "application/json" }},
+        body: JSON.stringify({{ controller: lab, reads, mode: sel.value }}),
+      }});
+      const msg = (j.all_read_ok ? "" : "Some failed. ") + formatBatchSummary(j);
+      cardFlash(card, msg, !j.all_read_ok);
+    }} catch (e) {{ cardFlash(card, String(e.message), true); }}
+  }});
+  card.appendChild(lb);
+  card.appendChild(ta);
+  card.appendChild(lm);
+  card.appendChild(sel);
+  card.appendChild(bBatch);
+
+  const lw1 = document.createElement("label");
+  lw1.textContent = "Write — object id";
+  const inWoid = document.createElement("input");
+  inWoid.autocomplete = "off";
+  const lw2 = document.createElement("label");
+  lw2.textContent = "Value";
+  const inWval = document.createElement("input");
+  inWval.inputMode = "decimal";
+  const ex = document.createElement("label");
+  ex.className = "chk";
+  const cb = document.createElement("input");
+  cb.type = "checkbox";
+  const sp = document.createElement("span");
+  sp.textContent = "Execute on wire";
+  ex.appendChild(cb);
+  ex.appendChild(sp);
+  const bWr = document.createElement("button");
+  bWr.className = "primary";
+  bWr.type = "button";
+  bWr.textContent = "Write";
+  bWr.addEventListener("click", async () => {{
+    const oid = inWoid.value.trim();
+    const raw = inWval.value.trim();
+    const tech = document.getElementById("dashTech").value.trim();
+    if (!oid || !raw) {{ cardFlash(card, "Object id and value required.", true); return; }}
+    if (!tech) {{ cardFlash(card, "Set technician (toolbar) for writes.", true); return; }}
+    try {{
+      const j = await apiJson("/api/v1/bacnet-quick-write", {{
+        method: "POST",
+        headers: {{ "Content-Type": "application/json" }},
+        body: JSON.stringify({{
+          controller: lab, object_id: oid, value: raw, technician_name: tech,
+          note: "dashboard manual", execute: cb.checked,
+        }}),
+      }});
+      const st = j.status || "";
+      const line = cb.checked ? ("Write " + st + ": " + oid + "=" + raw) : ("Dry-run " + st + ": " + oid + "=" + raw);
+      cardFlash(card, line, cb.checked && st !== "write_ok");
+    }} catch (e) {{ cardFlash(card, String(e.message), true); }}
+  }});
+  card.appendChild(lw1);
+  card.appendChild(inWoid);
+  card.appendChild(lw2);
+  card.appendChild(inWval);
+  card.appendChild(ex);
+  card.appendChild(bWr);
+
+  const fl = document.createElement("div");
+  fl.className = "flash dash-local-flash";
+  card.appendChild(fl);
+  return card;
+}}
+
+async function loadDashboard() {{
+  const grid = document.getElementById("dashGrid");
+  grid.innerHTML = "";
+  document.getElementById("globalFlash").style.display = "none";
+  try {{
+    const j = await apiJson("/api/v1/dashboard-controllers");
+    const rows = j.controllers || [];
+    if (!rows.length) {{
+      const p = document.createElement("p");
+      p.className = "empty";
+      p.textContent = "No controllers in runtime job. Run compile-import.";
+      grid.appendChild(p);
+      return;
+    }}
+    for (const row of rows) {{
+      grid.appendChild(buildCard(row));
+    }}
+  }} catch (e) {{
+    showGlobal(String(e.message), true);
+  }}
+}}
+
+document.getElementById("btnDashReload").addEventListener("click", loadDashboard);
+loadDashboard();
+</script>
+</body></html>"""
+    return body.encode("utf-8")
+
+
 class _Handler(BaseHTTPRequestHandler):
     run_dir: Path = ROOT
 
@@ -1278,6 +1652,27 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
+            return
+        if path == "/dashboard":
+            data = _dashboard_page(self.run_dir)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        if path == "/api/v1/dashboard-controllers":
+            job = _load_json(_runtime_job_path(self.run_dir))
+            if job is None:
+                self._send_json(
+                    400,
+                    {"error": "runtime-job.json missing; run compile-import for this run-dir"},
+                )
+                return
+            self._send_json(
+                200,
+                {"controllers": _dashboard_controller_summaries(job)},
+            )
             return
         if path == "/api/v1/list-flows":
             code, out, err = self._run_app_argv(["list-flows"])
@@ -1362,6 +1757,41 @@ class _Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if path == "/cli":
             self._post_cli()
+            return
+        if path == "/api/v1/dashboard-probe":
+            body = self._read_json_body()
+            if body is None:
+                self._send_json(400, {"error": "invalid JSON body"})
+                return
+            ctl = str(body.get("controller", "")).strip()
+            if not ctl or len(ctl) > 128:
+                self._send_json(400, {"error": "controller required"})
+                return
+            argv = ["probe-bip", "--controller-label", ctl]
+            ts = body.get("timeout_seconds")
+            if ts is not None and str(ts).strip() != "":
+                argv.extend(["--timeout-seconds", str(ts)])
+            rt = body.get("retries")
+            if rt is not None and str(rt).strip() != "":
+                try:
+                    argv.extend(["--retries", str(int(rt))])
+                except (TypeError, ValueError):
+                    self._send_json(400, {"error": "invalid retries"})
+                    return
+            code, out, err = self._run_app_argv(argv, timeout=120)
+            data = self._parse_stdout_json(out)
+            if code != 0 or not isinstance(data, dict):
+                self._send_json(
+                    400,
+                    {
+                        "error": "probe-bip failed",
+                        "stderr": err[-4000:],
+                        "stdout": out[-4000:],
+                        "parsed": data,
+                    },
+                )
+                return
+            self._send_json(200, {"controller_label": ctl, "probe": data})
             return
         if path == "/api/v1/set-session":
             body = self._read_json_body()
@@ -2028,7 +2458,7 @@ class _Handler(BaseHTTPRequestHandler):
 </head><body>
 <p>exit_code: {proc.returncode}</p>
 <pre>{esc}</pre>
-<p><a href="/">Back</a> · <a href="/guided">Guided UI</a></p>
+<p><a href="/">Back</a> · <a href="/guided">Guided UI</a> · <a href="/dashboard">Dashboard</a></p>
 </body></html>""".encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -2052,7 +2482,8 @@ def run_operator_gui_server(*, run_dir: Path, host: str, port: int) -> None:
     httpd = HTTPServer((host, port), _Handler)
     print(
         f"operator_gui_listening=true url=http://{host}:{port}/ "
-        f"guided_url=http://{host}:{port}/guided run_dir={run_dir}"
+        f"guided_url=http://{host}:{port}/guided "
+        f"dashboard_url=http://{host}:{port}/dashboard run_dir={run_dir}"
     )
     try:
         httpd.serve_forever()

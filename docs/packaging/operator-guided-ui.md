@@ -8,6 +8,8 @@ python3 tools/runtime/app.py operator-gui --run-dir <run-dir> --gui-port 8765
 
 The **Quick BACnet** strip uses three cards: **Read one point**, **Read batch** (lines → **`bacnet-read-batch`**; transport **Multiple** vs **Sequential**), and **Write present value**. Success toasts summarize values (batch shows first few `object=value` pairs). The advanced **`/`** page uses a light card layout aligned with the guided header link.
 
+**`/dashboard`** lists every controller from **`runtime-job.json`** in a responsive grid. Each card has **Probe B/IP** (`probe-bip`), the same **read / read batch / write** controls as guided (toolbar **Technician** is required for writes), and per-card result toasts.
+
 ## Screenshots in this repo
 
 Static captures (example run with `docs/examples/site-controllers.template.csv` + **`init-flow`** for **FCU-01A**) live under **`docs/assets/`**:
@@ -16,6 +18,7 @@ Static captures (example run with `docs/examples/site-controllers.template.csv` 
 |------|-------------|
 | [`operator-guided-ui-wide.png`](../assets/operator-guided-ui-wide.png) | Desktop-width guided view (two columns) |
 | [`operator-guided-ui-mobile.png`](../assets/operator-guided-ui-mobile.png) | Narrow viewport (stacked layout) |
+| [`operator-dashboard-wide.png`](../assets/operator-dashboard-wide.png) | Dashboard: all controllers + manual BACnet |
 | [`operator-advanced-cli-form.png`](../assets/operator-advanced-cli-form.png) | Advanced **`/`** allowlisted CLI form |
 
 ## Regenerating locally
@@ -28,7 +31,7 @@ tools/packaging/capture_operator_guided_screenshots.sh update
 
 Optional: `RUN_DIR`, `OPERATOR_GUI_SCREENSHOT_PORT`, `CHROME_BIN`.
 
-After changing **`/guided`** or **`/`** HTML/CSS, re-run **`update`**, commit the three PNGs, and update **`tests/test_operator_guided_screenshots_checksums.py`** (the script prints the new SHA-256 lines).
+After changing **`/guided`**, **`/dashboard`**, or **`/`** HTML/CSS, re-run **`update`**, commit the PNGs, and update **`tests/test_operator_guided_screenshots_checksums.py`** (the script prints the new SHA-256 lines).
 
 ## CI
 

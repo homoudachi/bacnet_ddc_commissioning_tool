@@ -37,6 +37,49 @@ class OperatorGuiTests(unittest.TestCase):
         self.assertIn("record-step", body)
         self.assertIn("commissioning-airflow-closed-loop-iterate", body)
         self.assertIn("/guided", body)
+        self.assertIn("/dashboard", body)
+
+    def test_dashboard_page_contains_api_paths(self) -> None:
+        import importlib.util
+
+        p = ROOT / "tools" / "operator_gui_server.py"
+        spec = importlib.util.spec_from_file_location("ogs_dash", p)
+        assert spec and spec.loader
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        body = mod._dashboard_page(ROOT).decode("utf-8")
+        self.assertIn("/api/v1/dashboard-controllers", body)
+        self.assertIn("/api/v1/dashboard-probe", body)
+        self.assertIn("dash-grid", body)
+
+    def test_dashboard_controller_summaries(self) -> None:
+        import importlib.util
+
+        p = ROOT / "tools" / "operator_gui_server.py"
+        spec = importlib.util.spec_from_file_location("ogs_sum", p)
+        assert spec and spec.loader
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        job = {
+            "controllers": [
+                {
+                    "controller_label": "FCU-A",
+                    "profile_id": "p1",
+                    "bacnet": {"host": "10.0.0.1", "port": 47808, "device_instance": 21001},
+                    "commissioning_read_allowlist": ["a", "b"],
+                    "commissioning_write_allowlist": ["c"],
+                }
+            ]
+        }
+        rows = mod._dashboard_controller_summaries(job)
+        self.assertEqual(1, len(rows))
+        self.assertEqual("FCU-A", rows[0]["controller_label"])
+        self.assertEqual("p1", rows[0]["profile_id"])
+        self.assertEqual("10.0.0.1", rows[0]["bacnet_host"])
+        self.assertEqual(47808, rows[0]["bacnet_port"])
+        self.assertEqual(21001, rows[0]["bacnet_device_instance"])
+        self.assertEqual(2, rows[0]["read_allowlist_count"])
+        self.assertEqual(1, rows[0]["write_allowlist_count"])
 
     def test_guided_page_contains_flow_ui_and_api_paths(self) -> None:
         import importlib.util
@@ -54,6 +97,7 @@ class OperatorGuiTests(unittest.TestCase):
         self.assertIn("bacnet-quick-read", body)
         self.assertIn("bacnet-quick-read-batch", body)
         self.assertIn("Guided commissioning", body)
+        self.assertIn("/dashboard", body)
 
     def test_guided_api_command_allowlist_includes_point_checkout(self) -> None:
         import importlib.util
@@ -65,8 +109,10 @@ class OperatorGuiTests(unittest.TestCase):
         spec.loader.exec_module(mod)
         self.assertIn("bacnet-point-checkout", mod._GUIDED_API_COMMANDS)
         self.assertIn("bacnet-read-batch", mod._GUIDED_API_COMMANDS)
+        self.assertIn("probe-bip", mod._GUIDED_API_COMMANDS)
         self.assertIn("dry-run-bacnet-write", mod._GUIDED_API_COMMANDS)
         self.assertIn("bacnet-read-batch", mod.ALLOWED_PREFIXES)
+        self.assertIn("probe-bip", mod.ALLOWED_PREFIXES)
 
     def test_build_step_hints_valve_and_modulation(self) -> None:
         import importlib.util

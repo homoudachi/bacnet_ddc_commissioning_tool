@@ -67,8 +67,9 @@ if [ "$MODE" = "check" ]; then
   trap 'rm -rf "$WORK"; cleanup' EXIT
   shot "http://127.0.0.1:${PORT}/guided" "$WORK/operator-guided-ui-wide.png" 1400 900
   shot "http://127.0.0.1:${PORT}/guided" "$WORK/operator-guided-ui-mobile.png" 420 900
+  shot "http://127.0.0.1:${PORT}/dashboard" "$WORK/operator-dashboard-wide.png" 1400 900
   shot "http://127.0.0.1:${PORT}/" "$WORK/operator-advanced-cli-form.png" 900 820
-  for name in operator-guided-ui-wide.png operator-guided-ui-mobile.png operator-advanced-cli-form.png; do
+  for name in operator-guided-ui-wide.png operator-guided-ui-mobile.png operator-dashboard-wide.png operator-advanced-cli-form.png; do
     a="$ASSETS/$name"
     b="$WORK/$name"
     ha="$(sha_file "$a")"
@@ -88,10 +89,11 @@ fi
 
 shot "http://127.0.0.1:${PORT}/guided" "$ASSETS/operator-guided-ui-wide.png" 1400 900
 shot "http://127.0.0.1:${PORT}/guided" "$ASSETS/operator-guided-ui-mobile.png" 420 900
+shot "http://127.0.0.1:${PORT}/dashboard" "$ASSETS/operator-dashboard-wide.png" 1400 900
 shot "http://127.0.0.1:${PORT}/" "$ASSETS/operator-advanced-cli-form.png" 900 820
 
 echo "screenshots_ok=true paths=$ASSETS/operator-guided-ui-wide.png ..."
 echo "sha256 (update tests/test_operator_guided_screenshots_checksums.py if UI changed):"
-for f in "$ASSETS/operator-guided-ui-wide.png" "$ASSETS/operator-guided-ui-mobile.png" "$ASSETS/operator-advanced-cli-form.png"; do
+for f in "$ASSETS/operator-guided-ui-wide.png" "$ASSETS/operator-guided-ui-mobile.png" "$ASSETS/operator-dashboard-wide.png" "$ASSETS/operator-advanced-cli-form.png"; do
   echo "  $(basename "$f") $(sha_file "$f")"
 done

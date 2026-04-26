@@ -75,14 +75,19 @@ python3 tools/runtime/app.py commissioning-guided-next \
 # 3a3) Local browser UI (127.0.0.1) — open printed URL; use /guided for graphical flow
 python3 tools/runtime/app.py operator-gui --run-dir artifacts/runtime-run --gui-port 8765
 # Then open http://127.0.0.1:8765/guided (step list, quick BACnet read / read batch / write, action forms, record-step, session).
+# Or http://127.0.0.1:8765/dashboard — all controllers on one screen (probe, read, read batch, write per card).
 
-### Guided UI screenshots (static examples)
+### Operator UI screenshots (static examples)
 
 Captured with headless Chrome against a small demo run (see **`tools/packaging/capture_operator_guided_screenshots.sh`** to regenerate):
 
-| Guided (wide) | Guided (narrow) | Advanced `/` form |
-|---------------|-----------------|-------------------|
-| ![Guided commissioning UI wide](docs/assets/operator-guided-ui-wide.png) | ![Guided commissioning UI mobile](docs/assets/operator-guided-ui-mobile.png) | ![Advanced operator CLI form](docs/assets/operator-advanced-cli-form.png) |
+| Guided (wide) | Guided (narrow) |
+|---------------|-----------------|
+| ![Guided commissioning UI wide](docs/assets/operator-guided-ui-wide.png) | ![Guided commissioning UI mobile](docs/assets/operator-guided-ui-mobile.png) |
+
+| Dashboard (all controllers) | Advanced `/` form |
+|-----------------------------|-------------------|
+| ![Operator dashboard wide](docs/assets/operator-dashboard-wide.png) | ![Advanced operator CLI form](docs/assets/operator-advanced-cli-form.png) |
 
 More detail: **[`docs/packaging/operator-guided-ui.md`](docs/packaging/operator-guided-ui.md)**.
 

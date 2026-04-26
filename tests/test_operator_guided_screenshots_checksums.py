@@ -1,6 +1,6 @@
 """Golden SHA-256 for operator GUI screenshots (see capture_operator_guided_screenshots.sh).
 
-When /guided or / HTML/CSS changes, run:
+When `/guided`, `/dashboard`, or `/` HTML/CSS changes, run:
 
   tools/packaging/capture_operator_guided_screenshots.sh update
 
@@ -18,13 +18,16 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 _EXPECTED_SHA256 = {
     "operator-guided-ui-wide.png": (
-        "232ee913bf88b528ad9c549e5f0b4101c6763beb2004c5b7688dd4d16496360a"
+        "27b652c71879222e8ec15a6d5552a47403585addf9a7640b4c2a5383180890db"
     ),
     "operator-guided-ui-mobile.png": (
-        "4b303f211d522ac0c51a42f49117575b66732cf670dcbe3d381d8f8cccb50e0d"
+        "ae606ffc2222671306016d7b123d2ef11fec8f9b254d571c4fb5a0b641c2805b"
+    ),
+    "operator-dashboard-wide.png": (
+        "cb00f60b6d2b5e0000f554a644a683e2f70f9aada31005efee453a59bf5beb83"
     ),
     "operator-advanced-cli-form.png": (
-        "f4c5f22a9e8f11c85eedb172b2fe4f1e2dee19a13716d062ba171bcf1f61d2b8"
+        "16269a84af08331ff581521fb957d33dd4d705c6e2c8272299207cc740d9104c"
     ),
 }
 
