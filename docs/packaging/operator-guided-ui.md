@@ -6,7 +6,7 @@ The **guided** view is at **`http://127.0.0.1:<port>/guided`** after starting:
 python3 tools/runtime/app.py operator-gui --run-dir <run-dir> --gui-port 8765
 ```
 
-The guided strip includes **Quick read** (single allowlisted point), **Quick read batch** (multiple **`--read`** lines → **`bacnet-read-batch`**, default ReadPropertyMultiple), and **Quick write**.
+The **Quick BACnet** strip uses three cards: **Read one point**, **Read batch** (lines → **`bacnet-read-batch`**; transport **Multiple** vs **Sequential**), and **Write present value**. Success toasts summarize values (batch shows first few `object=value` pairs). The advanced **`/`** page uses a light card layout aligned with the guided header link.
 
 ## Screenshots in this repo
 

@@ -50,7 +50,7 @@ class OperatorGuiTests(unittest.TestCase):
         self.assertIn("/api/v1/list-flows", body)
         self.assertIn("/api/v1/guidance", body)
         self.assertIn("/api/v1/record-step", body)
-        self.assertIn("Quick read", body)
+        self.assertIn("Quick BACnet", body)
         self.assertIn("bacnet-quick-read", body)
         self.assertIn("bacnet-quick-read-batch", body)
         self.assertIn("Guided commissioning", body)

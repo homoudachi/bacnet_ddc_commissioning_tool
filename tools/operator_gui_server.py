@@ -272,29 +272,48 @@ def _page(run_dir: Path) -> bytes:
     opts = "".join(f"<option>{html.escape(p)}</option>" for p in ALLOWED_PREFIXES)
     body = f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"/><title>Commissioning operator</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
 <style>
-body {{ font-family: system-ui, sans-serif; margin: 1.5rem; max-width: 52rem; }}
-label {{ display: block; margin-top: 0.75rem; font-weight: 600; }}
-input, textarea, select {{ width: 100%; box-sizing: border-box; margin-top: 0.25rem; }}
-textarea {{ font-family: ui-monospace, monospace; min-height: 6rem; }}
-pre {{ background: #f4f4f4; padding: 0.75rem; overflow: auto; }}
-button {{ margin-top: 1rem; padding: 0.4rem 1rem; }}
-.meta {{ color: #555; font-size: 0.9rem; }}
+:root {{ --bg: #f6f7f9; --card: #fff; --text: #1a1d21; --muted: #5c6570; --accent: #0b5fff; --border: #d8dee6; }}
+* {{ box-sizing: border-box; }}
+body {{ font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; margin: 0; background: var(--bg); color: var(--text); line-height: 1.5; }}
+.wrap {{ max-width: 44rem; margin: 0 auto; padding: 1.5rem 1.25rem 2.5rem; }}
+h1 {{ font-size: 1.35rem; font-weight: 650; margin: 0 0 0.35rem; letter-spacing: -0.02em; }}
+label {{ display: block; margin-top: 1rem; font-weight: 600; font-size: 0.82rem; color: var(--muted); }}
+input, textarea, select {{
+  width: 100%; margin-top: 0.35rem; padding: 0.55rem 0.65rem; border: 1px solid var(--border);
+  border-radius: 8px; font-size: 0.95rem; background: #fff;
+}}
+textarea {{ font-family: ui-monospace, monospace; min-height: 7rem; }}
+textarea:focus, select:focus {{ outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(11,95,255,0.15); }}
+pre {{ background: #eef1f5; padding: 0.75rem; overflow: auto; border-radius: 8px; border: 1px solid var(--border); font-size: 0.85rem; }}
+button {{
+  margin-top: 1.1rem; padding: 0.55rem 1.15rem; border: none; border-radius: 8px;
+  background: var(--accent); color: #fff; font-weight: 600; font-size: 0.95rem; cursor: pointer;
+}}
+button:hover {{ filter: brightness(1.06); }}
+.meta {{ color: var(--muted); font-size: 0.9rem; margin: 0.35rem 0; }}
+.meta a {{ color: var(--accent); font-weight: 500; }}
+.card {{ background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1.15rem 1.25rem; margin-top: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }}
 </style></head>
 <body>
+<div class="wrap">
 <h1>Commissioning operator (local)</h1>
 <p class="meta">Run dir: <code>{rd}</code></p>
 <p class="meta"><a href="/guided">Open guided commissioning flow UI</a></p>
 <p class="meta">Commands run as subprocess to <code>tools/runtime/app.py</code>. Bind defaults to loopback only.</p>
+<div class="card">
 <form method="post" action="/cli">
-<label>Command</label>
-<select name="command">{opts}</select>
-<label>Extra arguments (one per line, e.g. <code>--controller-label FCU-01A</code>)</label>
-<textarea name="extra" placeholder="--controller-label FCU-01A&#10;--step-id some_step"></textarea>
+<label for="cmdSel">Command</label>
+<select id="cmdSel" name="command">{opts}</select>
+<label for="extraArgs">Extra arguments (one per line)</label>
+<textarea id="extraArgs" name="extra" placeholder="--controller-label FCU-01A&#10;--step-id some_step"></textarea>
 <button type="submit">Run</button>
 </form>
+</div>
 <p class="meta">Examples: <code>set-session-value</code> needs <code>--key rat_degC --value 22 --technician-name Me --note ...</code>;
 <code>record-step</code> needs <code>--step-id ... --status passed --technician-name ...</code>.</p>
+</div>
 </body></html>"""
     return body.encode("utf-8")
 
@@ -308,28 +327,36 @@ def _guided_page(run_dir: Path) -> bytes:
 :root {{
   --bg: #0f1419;
   --panel: #1a2332;
+  --surface: #0d1218;
   --text: #e8eef5;
   --muted: #8b9cb3;
   --accent: #3d8bfd;
+  --accent-dim: #2a6bc4;
   --ok: #2fb573;
   --warn: #e9a23b;
   --err: #f47174;
   --border: #2d3a4d;
+  --radius: 8px;
+  --radius-sm: 6px;
+  --shadow: 0 2px 12px rgba(0,0,0,0.25);
 }}
 * {{ box-sizing: border-box; }}
 body {{
-  font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   margin: 0; background: var(--bg); color: var(--text); min-height: 100vh;
+  line-height: 1.45;
 }}
 header {{
   padding: 1rem 1.25rem; border-bottom: 1px solid var(--border);
   display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem;
+  background: linear-gradient(180deg, #151c27 0%, var(--bg) 100%);
 }}
-header h1 {{ font-size: 1.1rem; margin: 0; font-weight: 600; }}
+header h1 {{ font-size: 1.15rem; margin: 0; font-weight: 650; letter-spacing: -0.02em; }}
 header .meta {{ color: var(--muted); font-size: 0.85rem; }}
-header a {{ color: var(--accent); }}
+header a {{ color: var(--accent); text-decoration: none; }}
+header a:hover {{ text-decoration: underline; }}
 .layout {{
-  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.12fr);
   gap: 0; min-height: calc(100vh - 56px);
 }}
 @media (max-width: 900px) {{
@@ -337,66 +364,97 @@ header a {{ color: var(--accent); }}
 }}
 .panel {{
   background: var(--panel); border-right: 1px solid var(--border);
-  padding: 1rem 1.1rem; overflow: auto; max-height: calc(100vh - 56px);
+  padding: 1rem 1.15rem; overflow: auto; max-height: calc(100vh - 56px);
 }}
 .panel:last-child {{ border-right: none; }}
-label {{ display: block; font-size: 0.8rem; color: var(--muted); margin-top: 0.75rem; }}
+label {{ display: block; font-size: 0.78rem; font-weight: 500; color: var(--muted); margin-top: 0.65rem; }}
 select, input, textarea {{
-  width: 100%; margin-top: 0.25rem; padding: 0.45rem 0.55rem;
-  border-radius: 6px; border: 1px solid var(--border);
-  background: #0d1218; color: var(--text); font-size: 0.95rem;
+  width: 100%; margin-top: 0.28rem; padding: 0.5rem 0.6rem;
+  border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: var(--surface); color: var(--text); font-size: 0.92rem;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }}
-textarea {{ min-height: 4.5rem; font-family: ui-monospace, monospace; font-size: 0.82rem; }}
+select:hover, input:hover, textarea:hover {{ border-color: #3d4d66; }}
+select:focus, input:focus, textarea:focus {{
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(61, 139, 253, 0.25);
+}}
+textarea {{ min-height: 4.5rem; font-family: ui-monospace, "Cascadia Code", monospace; font-size: 0.8rem; }}
 button {{
-  margin-top: 0.85rem; padding: 0.5rem 1rem; border-radius: 6px; border: none;
-  cursor: pointer; font-weight: 600; background: var(--accent); color: #fff;
+  margin-top: 0.85rem; padding: 0.52rem 1rem; border-radius: var(--radius-sm); border: none;
+  cursor: pointer; font-weight: 600; font-size: 0.9rem; background: var(--accent); color: #fff;
+  transition: background 0.12s ease, transform 0.08s ease;
 }}
+button:hover {{ background: var(--accent-dim); }}
+button:active {{ transform: scale(0.98); }}
+button:focus-visible {{ outline: 2px solid var(--accent); outline-offset: 2px; }}
 button.secondary {{ background: #3a4a5e; color: var(--text); }}
+button.secondary:hover {{ background: #4a5d78; }}
 button.danger {{ background: #a33; }}
-.row {{ display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; }}
+.row {{ display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; align-items: center; }}
 .badge {{
-  display: inline-block; padding: 0.15rem 0.45rem; border-radius: 4px;
-  font-size: 0.75rem; font-weight: 600;
+  display: inline-block; padding: 0.12rem 0.42rem; border-radius: 4px;
+  font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;
 }}
-.badge.pending {{ background: #3a4a5e; }}
-.badge.passed, .badge.manual_passed {{ background: #1e5c3d; }}
-.badge.failed {{ background: #6b2224; }}
-.badge.skipped {{ background: #5c4a1e; }}
-.step-list {{ list-style: none; padding: 0; margin: 0.5rem 0 0; max-height: 42vh; overflow: auto; }}
+.badge.pending {{ background: #3a4a5e; color: #c5d4e8; }}
+.badge.passed, .badge.manual_passed {{ background: #1e5c3d; color: #c8f0dc; }}
+.badge.failed {{ background: #6b2224; color: #ffd4d5; }}
+.badge.skipped {{ background: #5c4a1e; color: #f5e6b8; }}
+.step-list {{ list-style: none; padding: 0; margin: 0.5rem 0 0; max-height: 44vh; overflow: auto; border-radius: var(--radius-sm); }}
 .step-list li {{
-  padding: 0.5rem 0.55rem; border-radius: 6px; margin-bottom: 0.35rem;
+  padding: 0.55rem 0.65rem; border-radius: var(--radius-sm); margin-bottom: 0.3rem;
   border: 1px solid transparent; cursor: pointer;
 }}
-.step-list li:hover {{ border-color: var(--border); }}
-.step-list li.active {{ border-color: var(--accent); background: #0d1218; }}
-.step-list li .sid {{ font-family: ui-monospace, monospace; font-size: 0.8rem; color: var(--accent); }}
+.step-list li:hover {{ border-color: var(--border); background: rgba(13,18,24,0.5); }}
+.step-list li.active {{ border-color: var(--accent); background: var(--surface); box-shadow: var(--shadow); }}
+.step-list li .sid {{ font-family: ui-monospace, monospace; font-size: 0.78rem; color: var(--accent); }}
 .flash {{
-  margin-top: 0.75rem; padding: 0.6rem 0.75rem; border-radius: 6px; font-size: 0.88rem;
+  margin-top: 0.75rem; padding: 0.65rem 0.85rem; border-radius: var(--radius-sm); font-size: 0.86rem;
+  border-left: 3px solid transparent; max-width: 100%; word-break: break-word;
 }}
-.flash.err {{ background: #3a1a1c; color: #ffb4b6; }}
-.flash.ok {{ background: #1a2e24; color: #9ee5c0; }}
+.flash.err {{ background: #3a1a1c; color: #ffb4b6; border-left-color: var(--err); }}
+.flash.ok {{ background: #1a2e24; color: #9ee5c0; border-left-color: var(--ok); }}
+#blockers {{
+  margin-top: 0.85rem; padding: 0.65rem 0.85rem; border-radius: var(--radius-sm);
+  border: 1px solid #5c3d1e; background: rgba(92, 74, 30, 0.15);
+}}
+#blockers h3 {{ margin-top: 0; color: var(--warn); }}
+#blockerList {{ margin: 0.35rem 0 0; padding-left: 1.15rem; color: #e8d4b8; font-size: 0.86rem; }}
 .cmds {{ margin: 0.5rem 0 0; padding-left: 1.1rem; font-size: 0.82rem; color: var(--muted); }}
-.cmds code {{ color: #b8d4ff; font-size: 0.78rem; }}
-h2 {{ font-size: 1rem; margin: 0 0 0.5rem; }}
-h3 {{ font-size: 0.9rem; margin: 1rem 0 0.35rem; color: var(--muted); font-weight: 600; }}
+.cmds code {{ color: #b8d4ff; font-size: 0.76rem; }}
+h2 {{ font-size: 1.02rem; margin: 0 0 0.35rem; font-weight: 650; letter-spacing: -0.015em; }}
+h3 {{ font-size: 0.82rem; margin: 1.1rem 0 0.4rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }}
+.section-lead {{ font-size: 0.82rem; color: var(--muted); margin: 0 0 0.5rem; max-width: 42rem; }}
 details {{ margin-top: 0.5rem; color: var(--muted); font-size: 0.85rem; }}
+details summary {{ cursor: pointer; }}
+details summary:hover {{ color: var(--text); }}
 .action-box {{
-  border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; margin-top: 0.65rem;
-  background: #0d1218;
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 0.8rem; margin-top: 0.65rem;
+  background: var(--surface);
 }}
 .action-box h4 {{ margin: 0 0 0.35rem; font-size: 0.88rem; color: var(--text); }}
 .small {{ font-size: 0.78rem; color: var(--muted); margin-top: 0.25rem; }}
+.quick-section {{ margin-top: 0.5rem; }}
 .quick-strip {{
-  display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem;
-  margin-top: 0.75rem; padding: 0.65rem; border-radius: 8px; border: 1px solid var(--border);
-  background: #0d1218;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.5rem;
 }}
-@media (max-width: 700px) {{
-  .quick-strip {{ grid-template-columns: 1fr; }}
+.quick-card {{
+  padding: 0.75rem 0.85rem; border-radius: var(--radius); border: 1px solid var(--border);
+  background: var(--surface); box-shadow: var(--shadow);
 }}
-.quick-strip h4 {{ margin: 0 0 0.35rem; font-size: 0.85rem; color: var(--text); }}
-.chk {{ display: flex; align-items: center; gap: 0.4rem; margin-top: 0.5rem; font-size: 0.85rem; }}
-.chk input {{ width: auto; }}
+.quick-card h4 {{ margin: 0 0 0.25rem; font-size: 0.82rem; color: var(--text); font-weight: 650; }}
+.quick-card .hint {{ font-size: 0.74rem; color: var(--muted); margin: 0 0 0.4rem; line-height: 1.35; }}
+.quick-card label:first-of-type {{ margin-top: 0; }}
+.chk {{ display: flex; align-items: center; gap: 0.45rem; margin-top: 0.5rem; font-size: 0.82rem; color: var(--muted); }}
+.chk input {{ width: auto; accent-color: var(--accent); }}
+.sess-pre {{
+  max-height: 10rem; overflow: auto; background: var(--surface); padding: 0.55rem 0.65rem;
+  border-radius: var(--radius-sm); font-size: 0.76rem; border: 1px solid var(--border);
+  font-family: ui-monospace, monospace; color: #c5d4e8;
+}}
 </style></head>
 <body>
 <header>
@@ -417,35 +475,41 @@ details {{ margin-top: 0.5rem; color: var(--muted); font-size: 0.85rem; }}
   <div class="panel">
     <h2 id="focusTitle">Select a controller</h2>
     <p id="nextHint" class="meta"></p>
-    <div class="quick-strip">
-      <div>
-        <h4>Quick read (allowlisted)</h4>
-        <label>Object id</label>
-        <input id="qrOid" placeholder="e.g. ai_sat or msv_test_mode"/>
-        <label>Property (optional)</label>
-        <input id="qrProp" placeholder="presentValue" value="presentValue"/>
-        <button type="button" class="secondary" id="btnQrRead">BACnet read</button>
-      </div>
-      <div>
-        <h4>Quick read batch (allowlisted)</h4>
-        <p class="meta">One object per line (optional <code>object:property</code>); default ReadPropertyMultiple.</p>
-        <label>Object ids (one per line)</label>
-        <textarea id="qrbReads" rows="4" placeholder="ai_sat&#10;msv_test_mode"></textarea>
-        <label>Mode</label>
-        <select id="qrbMode">
-          <option value="multiple" selected>multiple (ReadPropertyMultiple)</option>
-          <option value="sequential">sequential (ReadProperty each)</option>
-        </select>
-        <button type="button" class="secondary" id="btnQrBatch">BACnet read batch</button>
-      </div>
-      <div>
-        <h4>Quick write (allowlisted)</h4>
-        <label>Object id</label>
-        <input id="qwOid" placeholder="e.g. msv_test_mode"/>
-        <label>Value (number; MSV = integer state)</label>
-        <input id="qwVal" placeholder="e.g. 3"/>
-        <div class="chk"><input type="checkbox" id="qwExec"/><label for="qwExec" style="margin:0">Execute write on wire (not dry-run)</label></div>
-        <button type="button" class="secondary" id="btnQwWrite">BACnet write</button>
+    <div class="quick-section">
+      <h3>Quick BACnet</h3>
+      <p class="section-lead">Reads and writes use the profile allowlists from <code>compile-import</code>. Batch read defaults to one ReadPropertyMultiple APDU (use sequential if the device rejects RPM).</p>
+      <div class="quick-strip">
+        <div class="quick-card">
+          <h4>Read one point</h4>
+          <p class="hint">Single ReadProperty — fastest for one object.</p>
+          <label for="qrOid">Object id</label>
+          <input id="qrOid" placeholder="e.g. ai_sat or msv_test_mode" autocomplete="off"/>
+          <label for="qrProp">Property (optional)</label>
+          <input id="qrProp" placeholder="presentValue" value="presentValue" autocomplete="off"/>
+          <button type="button" class="secondary" id="btnQrRead">Read</button>
+        </div>
+        <div class="quick-card">
+          <h4>Read batch</h4>
+          <p class="hint">One id per line. Optional <code>object:property</code> per line. Max 32 lines.</p>
+          <label for="qrbReads">Object ids</label>
+          <textarea id="qrbReads" rows="4" placeholder="ai_sat&#10;msv_test_mode" spellcheck="false"></textarea>
+          <label for="qrbMode">Transport</label>
+          <select id="qrbMode" title="multiple = ReadPropertyMultiple; sequential = one ReadProperty per line">
+            <option value="multiple" selected>Multiple (one APDU)</option>
+            <option value="sequential">Sequential (compat)</option>
+          </select>
+          <button type="button" class="secondary" id="btnQrBatch">Read batch</button>
+        </div>
+        <div class="quick-card">
+          <h4>Write present value</h4>
+          <p class="hint">MSV values are whole state numbers. Check &quot;Execute&quot; to send on the wire.</p>
+          <label for="qwOid">Object id</label>
+          <input id="qwOid" placeholder="e.g. msv_test_mode" autocomplete="off"/>
+          <label for="qwVal">Value</label>
+          <input id="qwVal" placeholder="e.g. 3" inputmode="decimal" autocomplete="off"/>
+          <div class="chk"><input type="checkbox" id="qwExec"/><label for="qwExec">Execute write (not dry-run)</label></div>
+          <button type="button" class="secondary" id="btnQwWrite">Write</button>
+        </div>
       </div>
     </div>
     <div id="detailFlash" class="flash" style="display:none"></div>
@@ -496,7 +560,7 @@ details {{ margin-top: 0.5rem; color: var(--muted); font-size: 0.85rem; }}
       <button type="button" class="secondary" id="btnCheckout">Run point checkout</button>
     </div>
     <h3>Session keys (current)</h3>
-    <pre id="sessKeys" style="max-height:10rem;overflow:auto;background:#0d1218;padding:0.5rem;border-radius:6px;font-size:0.78rem"></pre>
+    <pre id="sessKeys" class="sess-pre"></pre>
   </div>
 </div>
 <script>
@@ -519,6 +583,25 @@ function showFlash(el, msg, isErr) {{
   el.style.display = "block";
   el.className = "flash " + (isErr ? "err" : "ok");
   el.textContent = msg;
+}}
+
+function formatReadSummary(j) {{
+  const st = j.status || "";
+  const vs = (j.read && j.read.value_str != null) ? j.read.value_str : (j.value_str || "");
+  return "Read " + st + (vs ? ": " + vs : "");
+}}
+
+function formatBatchSummary(j) {{
+  const rows = j.reads || [];
+  const ok = rows.filter(r => (r.status || "") === "read_ok").length;
+  const parts = [];
+  for (const r of rows.slice(0, 5)) {{
+    const oid = (r.profile_object_id || "").trim();
+    const vs = (r.read && r.read.value_str != null) ? r.read.value_str : (r.value_str || "");
+    if (oid) parts.push(vs ? (oid + "=" + vs) : oid);
+  }}
+  const more = rows.length > 5 ? " (+" + (rows.length - 5) + " more)" : "";
+  return "Batch " + ok + "/" + rows.length + " OK" + (parts.length ? ": " + parts.join(", ") : "") + more;
 }}
 
 let controllers = [];
@@ -1030,9 +1113,7 @@ document.getElementById("btnQrRead").addEventListener("click", async () => {{
       headers: {{ "Content-Type": "application/json" }},
       body: JSON.stringify({{ controller: c, object_id, property }}),
     }});
-    const st = j.status || "";
-    const vs = j.read && j.read.value_str != null ? j.read.value_str : (j.value_str || "");
-    showFlash(document.getElementById("detailFlash"), "Read " + st + (vs ? ": " + vs : ""), st !== "read_ok");
+    showFlash(document.getElementById("detailFlash"), formatReadSummary(j), (j.status || "") !== "read_ok");
   }} catch (e) {{
     showFlash(document.getElementById("detailFlash"), String(e.message), true);
   }}
@@ -1053,8 +1134,8 @@ document.getElementById("btnQrBatch").addEventListener("click", async () => {{
       headers: {{ "Content-Type": "application/json" }},
       body: JSON.stringify({{ controller: c, reads, mode }}),
     }});
-    const ok = j.all_read_ok ? "Read batch OK." : "Read batch had failures (see JSON).";
-    showFlash(document.getElementById("detailFlash"), ok, !j.all_read_ok);
+    const msg = (j.all_read_ok ? "" : "Some reads failed. ") + formatBatchSummary(j);
+    showFlash(document.getElementById("detailFlash"), msg, !j.all_read_ok);
   }} catch (e) {{
     showFlash(document.getElementById("detailFlash"), String(e.message), true);
   }}
@@ -1081,7 +1162,10 @@ document.getElementById("btnQwWrite").addEventListener("click", async () => {{
       body: JSON.stringify({{ controller: c, object_id, value: raw, technician_name, note: "guided quick write", execute }}),
     }});
     const st = j.status || "";
-    showFlash(document.getElementById("detailFlash"), "Write result: " + st, st !== "write_ok" && execute);
+    const line = execute
+      ? ("Write " + st + ": " + object_id + "=" + raw)
+      : ("Dry-run " + st + ": " + object_id + "=" + raw);
+    showFlash(document.getElementById("detailFlash"), line, execute && st !== "write_ok");
   }} catch (e) {{
     showFlash(document.getElementById("detailFlash"), String(e.message), true);
   }}
