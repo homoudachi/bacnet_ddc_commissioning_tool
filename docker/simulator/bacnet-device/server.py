@@ -4,6 +4,7 @@
 Responds to Who-Is, ReadProperty / ReadPropertyMultiple (present-value),
 WriteProperty / WritePropertyMultiple (present-value)
 for object sets aligned with docs/examples unit-profile-fcu / unit-profile-hrv.
+FCU profile: analogValue instance **3** is supply fan command, **4** is electric heat (matches docker sim JSON).
 """
 
 from __future__ import annotations
@@ -72,6 +73,8 @@ class BacnetSimState:
         else:
             self.ai_present = _env_float("SIM_AI_SAT", 21.5)
             self.msv_present = _env_int("SIM_MSV_TEST_MODE", 1)
+            # AV instance 3 = av_supply_fan_command, instance 4 = av_electric_heat_command (see docker sim profile).
+            self.av_supply_fan = _env_float("SIM_AV_SUPPLY_FAN", 50.0)
             self.av_heat = _env_float("SIM_AV_HEAT", 0.0)
             self.ao_valve = _env_float("SIM_AO_CHW_VALVE", 0.0)
 
@@ -394,6 +397,7 @@ class BacnetSimState:
         with self._lock:
             ai_val = self.ai_present
             msv_val = self.msv_present
+            av_fan = self.av_supply_fan
             av_heat = self.av_heat
             ao_valve = self.ao_valve
         if ot == 0 and oi == 2:
@@ -401,7 +405,7 @@ class BacnetSimState:
         if ot == 19 and oi == 50:
             return Any(Unsigned(msv_val))
         if ot == 2 and oi == 3:
-            return Any(Real(av_heat))
+            return Any(Real(av_fan))
         if ot == 2 and oi == 4:
             return Any(Real(av_heat))
         if ot == 1 and oi == 5:
@@ -438,7 +442,7 @@ class BacnetSimState:
         if ot_w == 2 and oi_w == 3:
             new_val = float(prop_value.cast_out(Real))
             with self._lock:
-                self.av_heat = new_val
+                self.av_supply_fan = new_val
             return True
         if ot_w == 2 and oi_w == 4:
             new_val = float(prop_value.cast_out(Real))
