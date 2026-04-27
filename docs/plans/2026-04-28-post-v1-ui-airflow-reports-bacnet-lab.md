@@ -78,6 +78,7 @@ The **Tauri operator** CI ships **Ubuntu `.deb`** and **Windows NSIS** artifacts
 ## Revision
 
 - **2026-04-28:** Initial plan (tiered sequencing; BBMD deferred).
+- **2026-04-24:** Follow-on UX plan for **`operator-gui`** (guided / dashboard): [`2026-04-24-operator-ui-refinement.md`](2026-04-24-operator-ui-refinement.md).
 - **2026-04-28:** Tier A items A1–A4 marked shipped in-repo (see foundation plan current status); Tier B marked shipped; Tier C later shipped **2026-04-25**.
 - **2026-04-24:** Documented intentional deferral of **macOS `.dmg`** and **signed NSIS** for the Tauri operator (CI stays Linux + Windows only).
 - **2026-04-25:** Tier **C1–C3** shipped (BBMD lab profile, macvlan example + runbook, COV + write batch CLI); see **ADR 0015**.

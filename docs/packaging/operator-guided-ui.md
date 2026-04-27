@@ -8,7 +8,13 @@ python3 tools/runtime/app.py operator-gui --run-dir <run-dir> --gui-port 8765
 
 The **Quick BACnet** strip uses three cards: **Read one point**, **Read batch** (lines → **`bacnet-read-batch`**; transport **Multiple** vs **Sequential**), and **Write present value**. Success toasts summarize values (batch shows first few `object=value` pairs). The advanced **`/`** page uses a light card layout aligned with the guided header link.
 
-**`/dashboard`** lists every controller from **`runtime-job.json`** in a responsive grid. Each card has **Probe B/IP** (`probe-bip`), the same **read / read batch / write** controls as guided (toolbar **Technician** is required for writes), and per-card result toasts.
+**Shared technician:** On **`/guided`**, enter your name in **Shared technician name** before Quick BACnet writes (and as the default for modulation, session, record-step, etc.). The browser stores it in **`sessionStorage`** under **`bacnet_op_technician_name`** so it survives reloads; **`/dashboard`** toolbar uses the same key so guided and dashboard stay in sync.
+
+**Deep links:** **`/guided?controller=FCU-01A&step=half_design_airflow_auto`** selects that controller and step when they exist (otherwise falls back to **next open**). Choosing a step updates the URL with **`history.replaceState`** for bookmarking.
+
+**Jump to next:** **Jump to next open step** selects **`next_open_step`** from **`commissioning-guided-next`** and scrolls it into view in the step list.
+
+**`/dashboard`** lists every controller from **`runtime-job.json`** in a responsive grid. Each card has **Probe B/IP** (`probe-bip`), the same **read / read batch / write** controls as guided (toolbar **Technician** is required for writes), per-card result toasts, and **Open in guided →** (`/guided?controller=…`).
 
 ## Screenshots in this repo
 

@@ -51,6 +51,9 @@ class OperatorGuiTests(unittest.TestCase):
         self.assertIn("/api/v1/dashboard-controllers", body)
         self.assertIn("/api/v1/dashboard-probe", body)
         self.assertIn("dash-grid", body)
+        self.assertIn("/guided?controller=", body)
+        self.assertIn("Open in guided", body)
+        self.assertIn("bacnet_op_technician_name", body)
 
     def test_dashboard_controller_summaries(self) -> None:
         import importlib.util
@@ -98,6 +101,10 @@ class OperatorGuiTests(unittest.TestCase):
         self.assertIn("bacnet-quick-read-batch", body)
         self.assertIn("Guided commissioning", body)
         self.assertIn("/dashboard", body)
+        self.assertIn("btnJumpNext", body)
+        self.assertIn("Jump to next open step", body)
+        self.assertIn("bacnet_op_technician_name", body)
+        self.assertIn("Shared technician name", body)
 
     def test_guided_api_command_allowlist_includes_point_checkout(self) -> None:
         import importlib.util

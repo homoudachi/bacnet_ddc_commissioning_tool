@@ -502,6 +502,15 @@ details summary:hover {{ color: var(--text); }}
   border-radius: var(--radius-sm); font-size: 0.76rem; border: 1px solid var(--border);
   font-family: ui-monospace, monospace; color: #c5d4e8;
 }}
+.tech-banner {{
+  margin-top: 0.5rem; padding: 0.75rem 0.85rem; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--surface);
+}}
+.tech-banner label {{ margin-top: 0; font-size: 0.8rem; color: var(--text); font-weight: 600; }}
+.tech-banner input {{ margin-top: 0.35rem; }}
+.tech-banner .small {{ margin: 0.35rem 0 0; font-size: 0.74rem; color: var(--muted); }}
+.row-actions {{ display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-top: 0.45rem; }}
+.row-actions button {{ margin-top: 0; }}
 </style></head>
 <body>
 <header>
@@ -522,6 +531,14 @@ details summary:hover {{ color: var(--text); }}
   <div class="panel">
     <h2 id="focusTitle">Select a controller</h2>
     <p id="nextHint" class="meta"></p>
+    <div class="row-actions">
+      <button type="button" class="secondary" id="btnJumpNext">Jump to next open step</button>
+    </div>
+    <div class="tech-banner">
+      <label for="commonTech">Shared technician name</label>
+      <p class="small">Required for <strong>Quick BACnet writes</strong> and used as the default in the forms below. Saved in this browser until you clear it.</p>
+      <input id="commonTech" placeholder="Your name (prefills other fields)" autocomplete="name"/>
+    </div>
     <div class="quick-section">
       <h3>Quick BACnet</h3>
       <p class="section-lead">Reads and writes use the profile allowlists from <code>compile-import</code>. Batch read defaults to one ReadPropertyMultiple APDU (use sequential if the device rejects RPM).</p>
@@ -568,9 +585,6 @@ details summary:hover {{ color: var(--text); }}
     <ul class="cmds" id="cmdList"></ul>
     <details id="cmdDetails"><summary>Raw CLI hints</summary><pre id="cmdRaw" style="white-space:pre-wrap;font-size:0.75rem;margin:0.5rem 0 0"></pre></details>
     <div id="actionForms"></div>
-    <h3>Shared technician name</h3>
-    <label>Used as default in forms below</label>
-    <input id="commonTech" placeholder="Your name (prefills other fields)"/>
     <h3>Tachometer confirm (focused step)</h3>
     <label>Technician</label>
     <input id="tachoTech" placeholder="defaults to shared name"/>
@@ -612,7 +626,35 @@ details summary:hover {{ color: var(--text); }}
 </div>
 <script>
 const RUN_DIR = {rd};
+const TECH_KEY = "bacnet_op_technician_name";
 document.getElementById("runDirDisp").textContent = RUN_DIR;
+
+function guidedQueryParams() {{
+  try {{ return new URLSearchParams(window.location.search); }}
+  catch (e) {{ return new URLSearchParams(); }}
+}}
+
+function loadSavedTechnician() {{
+  try {{
+    const v = sessionStorage.getItem(TECH_KEY);
+    if (v) {{
+      const el = document.getElementById("commonTech");
+      if (el && !el.value.trim()) el.value = v;
+    }}
+  }} catch (e) {{}}
+}}
+
+function persistTechnician() {{
+  try {{
+    const v = document.getElementById("commonTech").value.trim();
+    if (v) sessionStorage.setItem(TECH_KEY, v);
+    else sessionStorage.removeItem(TECH_KEY);
+  }} catch (e) {{}}
+}}
+
+document.getElementById("commonTech").addEventListener("input", persistTechnician);
+document.getElementById("commonTech").addEventListener("change", persistTechnician);
+loadSavedTechnician();
 
 async function apiJson(path, opts) {{
   const r = await fetch(path, Object.assign({{ headers: {{ "Accept": "application/json" }} }}, opts || {{}}));
@@ -669,7 +711,13 @@ async function loadControllers() {{
     showFlash(document.getElementById("ctlFlash"), "No flow state found. Run compile-import then init-flow for a controller.", true);
   }} else {{
     document.getElementById("ctlFlash").style.display = "none";
-    await loadGuidance();
+    const qp = guidedQueryParams();
+    const wantCtl = (qp.get("controller") || "").trim();
+    const wantStep = (qp.get("step") || "").trim();
+    if (wantCtl && controllers.includes(wantCtl)) {{
+      document.getElementById("selCtl").value = wantCtl;
+    }}
+    await loadGuidance({{ preferStep: wantStep || null }});
   }}
 }}
 
@@ -679,7 +727,9 @@ function badgeClass(st) {{
   return "badge pending";
 }}
 
-async function loadGuidance() {{
+async function loadGuidance(opts) {{
+  opts = opts || {{}};
+  const preferStep = (opts.preferStep || "").trim();
   const c = document.getElementById("selCtl").value;
   if (!c) return;
   selectedStepId = null;
@@ -701,7 +751,12 @@ async function loadGuidance() {{
     ? `Next open: ${{next.step_id}} — ${{next.label || ""}} (${{next.status}})`
     : "All steps complete for this controller.";
   await loadSession();
-  if (next && next.step_id) selectStep(next.step_id);
+  const stepIds = new Set((steps || []).map(s => s.step_id));
+  if (preferStep && stepIds.has(preferStep)) {{
+    selectStep(preferStep);
+  }} else if (next && next.step_id) {{
+    selectStep(next.step_id);
+  }}
 }}
 
 async function loadSession() {{
@@ -1078,10 +1133,40 @@ function selectStep(sid) {{
   document.getElementById("cmdRaw").textContent = list.length ? list.join("\\n") : "";
   const c = document.getElementById("selCtl").value;
   renderActionForms(c, sid);
+  updateGuidedUrl();
 }}
 
+function updateGuidedUrl() {{
+  const c = document.getElementById("selCtl").value;
+  const sid = selectedStepId || document.getElementById("recSid").value.trim();
+  try {{
+    const u = new URL(window.location.href);
+    if (c) u.searchParams.set("controller", c);
+    else u.searchParams.delete("controller");
+    if (sid) u.searchParams.set("step", sid);
+    else u.searchParams.delete("step");
+    history.replaceState(null, "", u.pathname + u.search);
+  }} catch (e) {{}}
+}}
+
+document.getElementById("btnJumpNext").addEventListener("click", () => {{
+  const g = guidance && guidance.guidance;
+  const next = g && g.next_open_step;
+  if (next && next.step_id) {{
+    selectStep(next.step_id);
+    for (const li of document.querySelectorAll("#stepList li")) {{
+      if (li.dataset.sid === next.step_id) {{
+        li.scrollIntoView({{ block: "nearest", behavior: "smooth" }});
+        break;
+      }}
+    }}
+  }} else {{
+    showFlash(document.getElementById("detailFlash"), "No open step for this controller.", true);
+  }}
+}});
+
 document.getElementById("btnReload").addEventListener("click", loadControllers);
-document.getElementById("selCtl").addEventListener("change", loadGuidance);
+document.getElementById("selCtl").addEventListener("change", () => {{ loadGuidance(); }});
 
 document.getElementById("btnSess").addEventListener("click", async () => {{
   const c = document.getElementById("selCtl").value;
@@ -1296,17 +1381,27 @@ header a:hover {{ text-decoration: underline; }}
 .dash-card .sub {{ font-size: 0.78rem; color: var(--muted); margin-bottom: 0.5rem; line-height: 1.35; }}
 .dash-card label {{ display: block; font-size: 0.72rem; color: var(--muted); margin-top: 0.5rem; font-weight: 500; }}
 .dash-card input, .dash-card textarea, .dash-card select {{
-  width: 100%; margin-top: 0.2rem; padding: 0.4rem 0.5rem; font-size: 0.85rem;
-  border-radius: var(--radius-sm); border: 1px solid var(--border); background: #0a0e14; color: var(--text);
+  width: 100%; margin-top: 0.2rem; padding: 0.45rem 0.55rem; font-size: 0.88rem;
+  border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}}
+.dash-card input:focus, .dash-card textarea:focus, .dash-card select:focus {{
+  outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(61, 139, 253, 0.22);
 }}
 .dash-card textarea {{ min-height: 3.2rem; font-family: ui-monospace, monospace; font-size: 0.78rem; }}
 .dash-card .row {{ display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.45rem; }}
 .dash-card button {{
-  margin-top: 0.45rem; padding: 0.4rem 0.75rem; border: none; border-radius: var(--radius-sm);
-  font-size: 0.82rem; font-weight: 600; cursor: pointer; background: #3a4a5e; color: var(--text);
+  margin-top: 0.45rem; padding: 0.45rem 0.85rem; border: none; border-radius: var(--radius-sm);
+  font-size: 0.85rem; font-weight: 600; cursor: pointer; background: #3a4a5e; color: var(--text);
+  min-height: 2.35rem;
 }}
 .dash-card button.primary {{ background: var(--accent); color: #fff; }}
 .dash-card button:hover {{ filter: brightness(1.08); }}
+.dash-guided-link {{
+  display: inline-block; margin-top: 0.45rem; font-size: 0.82rem; font-weight: 600;
+  color: var(--accent); text-decoration: none;
+}}
+.dash-guided-link:hover {{ text-decoration: underline; }}
 .dash-card .probe-out {{ font-size: 0.74rem; color: var(--muted); margin-top: 0.35rem; font-family: ui-monospace, monospace; }}
 .dash-card .flash {{ margin-top: 0.45rem; padding: 0.45rem 0.55rem; border-radius: var(--radius-sm); font-size: 0.78rem; display: none;
   border-left: 3px solid transparent; word-break: break-word; }}
@@ -1341,7 +1436,26 @@ header a:hover {{ text-decoration: underline; }}
 </div>
 <script>
 const RUN_DIR = {rd};
+const TECH_KEY = "bacnet_op_technician_name";
 document.getElementById("runDirDisp").textContent = RUN_DIR;
+
+function loadDashTech() {{
+  try {{
+    const v = sessionStorage.getItem(TECH_KEY);
+    const el = document.getElementById("dashTech");
+    if (v && el && !el.value.trim()) el.value = v;
+  }} catch (e) {{}}
+}}
+function persistDashTech() {{
+  try {{
+    const v = document.getElementById("dashTech").value.trim();
+    if (v) sessionStorage.setItem(TECH_KEY, v);
+    else sessionStorage.removeItem(TECH_KEY);
+  }} catch (e) {{}}
+}}
+document.getElementById("dashTech").addEventListener("input", persistDashTech);
+document.getElementById("dashTech").addEventListener("change", persistDashTech);
+loadDashTech();
 
 function showGlobal(msg, isErr) {{
   const el = document.getElementById("globalFlash");
@@ -1405,6 +1519,11 @@ function buildCard(row) {{
   h.textContent = lab;
   card.appendChild(h);
   card.appendChild(sub);
+  const lg = document.createElement("a");
+  lg.className = "dash-guided-link";
+  lg.href = "/guided?controller=" + encodeURIComponent(lab);
+  lg.textContent = "Open in guided →";
+  card.appendChild(lg);
 
   const bProbe = document.createElement("button");
   bProbe.type = "button";
