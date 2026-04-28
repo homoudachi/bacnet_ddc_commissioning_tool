@@ -27,13 +27,22 @@ class DockerBacnetSmokeContractTests(unittest.TestCase):
         self.assertEqual(data["profile_id"], "fcu_2pipe_chw_electric_heat_docker_sim_v1")
         w = data["commissioning_write_allowlist"]
         self.assertIn("msv_test_mode", w)
+        self.assertIn("av_supply_fan_command", w)
         self.assertIn("av_electric_heat_command", w)
         self.assertIn("ao_chw_valve", w)
         r = data["commissioning_read_allowlist"]
-        for oid in ("ai_sat", "msv_test_mode", "av_electric_heat_command", "ao_chw_valve"):
+        for oid in (
+            "ai_sat",
+            "msv_test_mode",
+            "av_supply_fan_command",
+            "av_electric_heat_command",
+            "ao_chw_valve",
+        ):
             self.assertIn(oid, r)
         ids = {e["object_id"] for e in data["point_checkout"]}
-        self.assertTrue({"av_electric_heat_command", "ao_chw_valve"}.issubset(ids))
+        self.assertTrue(
+            {"av_supply_fan_command", "av_electric_heat_command", "ao_chw_valve"}.issubset(ids)
+        )
 
     def test_hrv_example_profile_allows_fan_commands_for_docker_smoke(self) -> None:
         path = ROOT / "docs" / "examples" / "unit-profile-hrv.example.json"
@@ -52,6 +61,7 @@ class DockerBacnetSmokeContractTests(unittest.TestCase):
         script = ROOT / "tools" / "simulator" / "docker_bacnet_smoke.sh"
         body = script.read_text(encoding="utf-8")
         for needle in (
+            "av_supply_fan_command",
             "av_electric_heat_command",
             "ao_chw_valve",
             "FCU-DOCKER-C:ai_sat",

@@ -60,8 +60,11 @@ BACNET_READ_FLAGS="--timeout-seconds 2.0 --retries 3"
 
 for pair in \
   "FCU-DOCKER:ai_sat" \
+  "FCU-DOCKER:av_supply_fan_command" \
   "FCU-DOCKER-B:ai_sat" \
+  "FCU-DOCKER-B:av_supply_fan_command" \
   "FCU-DOCKER-C:ai_sat" \
+  "FCU-DOCKER-C:av_supply_fan_command" \
   "HRV-DOCKER:msv_test_mode" \
   "HRV-DOCKER:ai_supply_air_temperature" \
   "HRV-DOCKER:av_supply_fan_command" \
@@ -184,6 +187,17 @@ rheat="$(python3 "$ROOT/tools/runtime/app.py" bacnet-read --run-dir "$RUN_DIR" \
   --controller-label FCU-DOCKER --object-id av_electric_heat_command $BACNET_READ_FLAGS)"
 echo "$rheat"
 echo "$rheat" | grep -q '"value_str": "37.5"' || { echo "error: FCU-DOCKER heat AV not 37.5 after write"; exit 2; }
+
+# FCU: analog WriteProperty (supply fan AV instance 3) + read-back (distinct from heat AV instance 4).
+wfan="$(python3 "$ROOT/tools/runtime/app.py" dry-run-bacnet-write \
+  --run-dir "$RUN_DIR" --controller-label FCU-DOCKER \
+  --object-id av_supply_fan_command --value 44 --execute $WRITE_FLAGS)"
+echo "$wfan"
+echo "$wfan" | grep -q '"status": "write_ok"' || { echo "error: FCU-DOCKER supply fan AV write failed"; exit 2; }
+rfan="$(python3 "$ROOT/tools/runtime/app.py" bacnet-read --run-dir "$RUN_DIR" \
+  --controller-label FCU-DOCKER --object-id av_supply_fan_command $BACNET_READ_FLAGS)"
+echo "$rfan"
+echo "$rfan" | grep -q '"value_str": "44"' || { echo "error: FCU-DOCKER supply fan AV not 44 after write"; exit 2; }
 
 # FCU: analog WriteProperty (CHW valve AO) + read-back.
 wvalve="$(python3 "$ROOT/tools/runtime/app.py" dry-run-bacnet-write \

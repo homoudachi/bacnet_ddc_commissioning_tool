@@ -23,6 +23,8 @@ services:
       # Optional initial presentValue overrides (float/int):
       # SIM_AI_SAT: "21.5"
       # SIM_MSV_TEST_MODE: "1"
+      # SIM_AV_SUPPLY_FAN: "50"   # av_supply_fan_command (analogValue instance 3)
+      # SIM_AV_HEAT: "0"         # av_electric_heat_command (instance 4)
       # SIM_AO_CHW_VALVE: "0"
     networks:
       - bacnet_lab

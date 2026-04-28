@@ -41,7 +41,7 @@ python3 tools/runtime/app.py verify-bip-list \
 
 Expected: `"strict_pass": true`, `"total": 4`, all controllers **`reachable_verified`**.
 
-After probes, CI also runs **`bacnet-read`** (FCU **`ai_sat`** on all three FCU rows, HRV **`msv_test_mode`**, **`ai_supply_air_temperature`**, **`av_supply_fan_command`**, **`av_exhaust_fan_command`**), **`bacnet-subscribe-cov`** on FCU **`ai_sat`**, **`bacnet-write-batch`** (FCU MSV + heat AV, sequential then **`--mode multiple`** WritePropertyMultiple), **`dry-run-bacnet-write --execute`** on **`msv_test_mode`** (FCU + HRV) plus **analog** writes on FCU **`av_electric_heat_command`** / **`ao_chw_valve`** and HRV fan commands (each with read-back), and **`bacnet-point-checkout`** for both profiles.
+After probes, CI also runs **`bacnet-read`** (FCU **`ai_sat`** and **`av_supply_fan_command`** on all three FCU rows, HRV **`msv_test_mode`**, **`ai_supply_air_temperature`**, **`av_supply_fan_command`**, **`av_exhaust_fan_command`**), **`bacnet-subscribe-cov`** on FCU **`ai_sat`**, **`bacnet-write-batch`** (FCU MSV + heat AV, sequential then **`--mode multiple`** WritePropertyMultiple), **`dry-run-bacnet-write --execute`** on **`msv_test_mode`** (FCU + HRV) plus **analog** writes on FCU **`av_supply_fan_command`** / **`av_electric_heat_command`** / **`ao_chw_valve`** and HRV fan commands (each with read-back), and **`bacnet-point-checkout`** for both profiles.
 
 ## BBMD + foreign-device lab (profile `bacnet-bbmd-lab`)
 
@@ -66,4 +66,4 @@ docker compose -f docker/simulator/docker-compose.yml --profile bacnet-dev down
 ## Implementation notes
 
 - Image: `docker/simulator/bacnet-device/` — Python 3.12 + **bacpypes3**, same object instances as the in-process test fake (`analogInput` 2, `multiStateValue` 50, `analogValue` 3/4, `analogOutput` 5).
-- Environment: `DEVICE_INSTANCE`, `BACNET_UDP_PORT`, `SIM_PROFILE` (`fcu` default or `hrv` for HRV example objects), optional `SIM_*` initial values (see `server.py`).
+- Environment: `DEVICE_INSTANCE`, `BACNET_UDP_PORT`, `SIM_PROFILE` (`fcu` default or `hrv` for HRV example objects), optional `SIM_*` initial values (see `server.py`). FCU profile: **`SIM_AV_SUPPLY_FAN`** (analogValue **3**, supply fan command) is separate from **`SIM_AV_HEAT`** (instance **4**, electric heat).

@@ -13,12 +13,14 @@
   },
   "commissioning_write_allowlist": [
     "msv_test_mode",
+    "av_supply_fan_command",
     "av_electric_heat_command",
     "ao_chw_valve"
   ],
   "commissioning_read_allowlist": [
     "ai_sat",
     "msv_test_mode",
+    "av_supply_fan_command",
     "av_electric_heat_command",
     "ao_chw_valve"
   ],
@@ -29,6 +31,10 @@
     },
     {
       "object_id": "msv_test_mode",
+      "property": "presentValue"
+    },
+    {
+      "object_id": "av_supply_fan_command",
       "property": "presentValue"
     },
     {

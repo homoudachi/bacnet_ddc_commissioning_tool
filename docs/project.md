@@ -162,7 +162,7 @@ Exact file format (JSON, YAML, SQLite job DB, etc.) is TBD; the above is the **i
 ### BACnet simulation and CI
 
 - **Goal:** heavy **automated simulation and regression** before relying on field panels alone.
-- **Shipped slice:** `docker/simulator/` **bacnet-dev** profile — **buildable** BACnet/IP UDP sim (`docker/simulator/bacnet-device/`) with **`SIM_PROFILE`** (`fcu` / `hrv`), **four** published ports on loopback, CI smoke via `tools/simulator/docker_bacnet_smoke.sh` + `docs/examples/site-controllers.docker-bacnet-sim.csv`.
+- **Shipped slice:** `docker/simulator/` **bacnet-dev** profile — **buildable** BACnet/IP UDP sim (`docker/simulator/bacnet-device/`) with **`SIM_PROFILE`** (`fcu` / `hrv`), **four** published ports on loopback, CI smoke via `tools/simulator/docker_bacnet_smoke.sh` + `docs/examples/site-controllers.docker-bacnet-sim.csv`. The **FCU** lab device maps **analogValue instance 3** to **`av_supply_fan_command`** and **instance 4** to **`av_electric_heat_command`** (same as `unit-profile-fcu.docker-bacnet-sim.example.json`); optional env **`SIM_AV_SUPPLY_FAN`** / **`SIM_AV_HEAT`** seed those present values (**ADR 0008**, `docker/simulator/README.md`).
 - **Longer-term baseline (spec):** Docker lab with multiple profiles (`ci` / `lab` / `multisubnet`) — see [docs/simulator/README.md](simulator/README.md) “planned” sections.
 - **Discovery and verification mode:** list-first, verify-all. The system attempts every imported controller row and emits a terminal status for each row (no silent skip).
 - **Strict CI gate:** fail CI when required rows are unresolved, identity mismatched, or missing required points.
