@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import pathlib
 import subprocess
 import sys
@@ -54,6 +55,9 @@ class OperatorGuiTests(unittest.TestCase):
         self.assertIn("/guided?controller=", body)
         self.assertIn("Open in guided", body)
         self.assertIn("bacnet_op_technician_name", body)
+        self.assertIn("dash-flow-block", body)
+        self.assertIn("Read mode / MSV", body)
+        self.assertIn("Refresh I/O snapshot", body)
 
     def test_dashboard_controller_summaries(self) -> None:
         import importlib.util
@@ -71,6 +75,16 @@ class OperatorGuiTests(unittest.TestCase):
                     "bacnet": {"host": "10.0.0.1", "port": 47808, "device_instance": 21001},
                     "commissioning_read_allowlist": ["a", "b"],
                     "commissioning_write_allowlist": ["c"],
+                    "point_checkout": [
+                        {"object_id": "ai_sat", "property": "presentValue"},
+                        {"object_id": "msv_test_mode", "property": "presentValue"},
+                    ],
+                    "objects_by_id": {
+                        "msv_test_mode": {
+                            "bacnet": {"object_type": "multiStateValue", "instance": 50},
+                            "writable": True,
+                        }
+                    },
                 }
             ]
         }
@@ -83,6 +97,29 @@ class OperatorGuiTests(unittest.TestCase):
         self.assertEqual(21001, rows[0]["bacnet_device_instance"])
         self.assertEqual(2, rows[0]["read_allowlist_count"])
         self.assertEqual(1, rows[0]["write_allowlist_count"])
+        self.assertEqual(["ai_sat", "msv_test_mode"], rows[0]["dashboard_io_reads"])
+        self.assertEqual("msv_test_mode", rows[0]["dashboard_test_mode_object_id"])
+        self.assertFalse(rows[0]["flow_initialized"])
+
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            run_dir = pathlib.Path(td)
+            flows = run_dir / "state" / "flows"
+            flows.mkdir(parents=True)
+            flow_payload = {
+                "controller_label": "FCU-A",
+                "steps": [
+                    {"step_id": "s1", "label": "One", "status": "passed"},
+                    {"step_id": "s2", "label": "Two", "status": "pending"},
+                ],
+            }
+            (flows / "FCU-A.json").write_text(json.dumps(flow_payload), encoding="utf-8")
+            rows2 = mod._dashboard_controller_summaries(job, run_dir=run_dir)
+            self.assertTrue(rows2[0]["flow_initialized"])
+            self.assertEqual(2, rows2[0]["flow_step_count"])
+            self.assertEqual("s2", rows2[0]["flow_next_step_id"])
+            self.assertFalse(rows2[0]["flow_complete"])
 
     def test_guided_page_contains_flow_ui_and_api_paths(self) -> None:
         import importlib.util
@@ -101,6 +138,7 @@ class OperatorGuiTests(unittest.TestCase):
         self.assertIn("bacnet-quick-read-batch", body)
         self.assertIn("Guided commissioning", body)
         self.assertIn("/dashboard", body)
+        self.assertIn("stepFilter", body)
         self.assertIn("btnJumpNext", body)
         self.assertIn("Jump to next open step", body)
         self.assertIn("bacnet_op_technician_name", body)

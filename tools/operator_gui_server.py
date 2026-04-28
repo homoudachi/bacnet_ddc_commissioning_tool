@@ -95,8 +95,114 @@ def _runtime_job_path(run_dir: Path) -> Path:
     return run_dir / "state" / "runtime-job.json"
 
 
-def _dashboard_controller_summaries(job: dict[str, Any]) -> list[dict[str, Any]]:
-    """Lightweight rows for dashboard cards (no full objects_by_id)."""
+def _sequencing_complete_statuses() -> frozenset[str]:
+    return frozenset({"passed", "manual_passed", "skipped"})
+
+
+def _next_open_step_from_flow(flow: dict[str, Any]) -> dict[str, Any] | None:
+    complete = _sequencing_complete_statuses()
+    for item in flow.get("steps", []) or []:
+        if not isinstance(item, dict):
+            continue
+        status = str(item.get("status", "pending"))
+        if status not in complete:
+            sid = str(item.get("step_id", "")).strip()
+            if not sid:
+                continue
+            return {
+                "step_id": sid,
+                "label": str(item.get("label", "")).strip(),
+                "status": status,
+            }
+    return None
+
+
+def _step_status_counts(steps: list[Any]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in steps:
+        if not isinstance(item, dict):
+            continue
+        status = str(item.get("status", "pending"))
+        counts[status] = counts.get(status, 0) + 1
+    return counts
+
+
+def _flow_dashboard_fields(run_dir: Path, controller_label: str) -> dict[str, Any]:
+    path = _flow_state_path(run_dir, controller_label)
+    flow = _load_json(path)
+    if flow is None:
+        return {
+            "flow_initialized": False,
+            "flow_state_path": str(path),
+            "flow_step_count": 0,
+            "flow_status_counts": {},
+            "flow_next_step_id": None,
+            "flow_next_step_label": None,
+            "flow_next_step_status": None,
+            "flow_complete": False,
+        }
+    steps = flow.get("steps", [])
+    if not isinstance(steps, list):
+        steps = []
+    nxt = _next_open_step_from_flow(flow)
+    complete = _sequencing_complete_statuses()
+    all_done = bool(steps) and all(
+        isinstance(s, dict) and str(s.get("status", "pending")) in complete for s in steps
+    )
+    return {
+        "flow_initialized": True,
+        "flow_state_path": str(path.resolve()),
+        "flow_step_count": len(steps),
+        "flow_status_counts": _step_status_counts(steps),
+        "flow_next_step_id": (nxt or {}).get("step_id"),
+        "flow_next_step_label": (nxt or {}).get("label"),
+        "flow_next_step_status": (nxt or {}).get("status"),
+        "flow_complete": all_done,
+    }
+
+
+def _dashboard_test_mode_object_id(ctrl: dict[str, Any]) -> str | None:
+    """Logical object id for commissioning test mode MSV (typ. msv_test_mode), if resolvable."""
+    objs = ctrl.get("objects_by_id")
+    if isinstance(objs, dict) and "msv_test_mode" in objs:
+        return "msv_test_mode"
+    for oid, meta in (objs or {}).items():
+        if not isinstance(meta, dict):
+            continue
+        o = str(oid).strip()
+        if not o:
+            continue
+        bac = meta.get("bacnet") if isinstance(meta.get("bacnet"), dict) else {}
+        ot = str(bac.get("object_type", "")).strip().lower()
+        if ot == "multistatevalue":
+            return o
+    return None
+
+
+def _dashboard_io_read_specs(ctrl: dict[str, Any], *, limit: int = 6) -> list[str]:
+    """Object ids (presentValue) from point_checkout for a quick I/O snapshot."""
+    out: list[str] = []
+    pc = ctrl.get("point_checkout")
+    if not isinstance(pc, list):
+        return out
+    for row in pc:
+        if not isinstance(row, dict) or len(out) >= limit:
+            break
+        oid = str(row.get("object_id", "")).strip()
+        if not oid:
+            continue
+        prop = str(row.get("property", "presentValue") or "presentValue").strip()
+        if prop.lower() in {"", "presentvalue"}:
+            out.append(oid)
+        else:
+            out.append(f"{oid}:{prop}")
+    return out
+
+
+def _dashboard_controller_summaries(
+    job: dict[str, Any], *, run_dir: Path | None = None
+) -> list[dict[str, Any]]:
+    """Lightweight rows for dashboard cards (no full objects_by_id in JSON)."""
     out: list[dict[str, Any]] = []
     for c in job.get("controllers", []) or []:
         if not isinstance(c, dict):
@@ -124,17 +230,33 @@ def _dashboard_controller_summaries(job: dict[str, Any]) -> list[dict[str, Any]]
             allow_w = []
         rc = sum(1 for x in allow_r if str(x).strip())
         wc = sum(1 for x in allow_w if str(x).strip())
-        out.append(
-            {
-                "controller_label": lab,
-                "profile_id": prof,
-                "bacnet_host": host,
-                "bacnet_port": port,
-                "bacnet_device_instance": dev_inst,
-                "read_allowlist_count": rc,
-                "write_allowlist_count": wc,
-            }
-        )
+        row: dict[str, Any] = {
+            "controller_label": lab,
+            "profile_id": prof,
+            "bacnet_host": host,
+            "bacnet_port": port,
+            "bacnet_device_instance": dev_inst,
+            "read_allowlist_count": rc,
+            "write_allowlist_count": wc,
+            "dashboard_io_reads": _dashboard_io_read_specs(c),
+            "dashboard_test_mode_object_id": _dashboard_test_mode_object_id(c),
+        }
+        if run_dir is not None:
+            row.update(_flow_dashboard_fields(run_dir, lab))
+        else:
+            row.update(
+                {
+                    "flow_initialized": False,
+                    "flow_state_path": None,
+                    "flow_step_count": 0,
+                    "flow_status_counts": {},
+                    "flow_next_step_id": None,
+                    "flow_next_step_label": None,
+                    "flow_next_step_status": None,
+                    "flow_complete": False,
+                }
+            )
+        out.append(row)
     return out
 
 
@@ -511,6 +633,13 @@ details summary:hover {{ color: var(--text); }}
 .tech-banner .small {{ margin: 0.35rem 0 0; font-size: 0.74rem; color: var(--muted); }}
 .row-actions {{ display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-top: 0.45rem; }}
 .row-actions button {{ margin-top: 0; }}
+kbd {{
+  font-family: ui-monospace, monospace; font-size: 0.72rem; padding: 0.08rem 0.32rem;
+  border-radius: 4px; border: 1px solid var(--border); background: var(--surface); color: var(--muted);
+}}
+button:disabled {{ opacity: 0.62; cursor: not-allowed; }}
+#stepFilter {{ margin-top: 0.3rem; }}
+.filter-hint {{ font-size: 0.72rem; color: var(--muted); margin: 0.25rem 0 0.4rem; line-height: 1.35; }}
 </style></head>
 <body>
 <header>
@@ -526,6 +655,9 @@ details summary:hover {{ color: var(--text); }}
     <button type="button" class="secondary" id="btnReload">Reload controllers</button>
     <div id="ctlFlash" class="flash" style="display:none"></div>
     <h3>All steps</h3>
+    <label for="stepFilter">Filter steps</label>
+    <input id="stepFilter" type="search" placeholder="Match step id or label…" autocomplete="off"/>
+    <p class="filter-hint">Keys <kbd>j</kbd> / <kbd>k</kbd>: next / previous visible step (when focus is not in a field).</p>
     <ul class="step-list" id="stepList"></ul>
   </div>
   <div class="panel">
@@ -674,6 +806,40 @@ function showFlash(el, msg, isErr) {{
   el.textContent = msg;
 }}
 
+function isTypingContext(el) {{
+  if (!el) return false;
+  const tag = (el.tagName || "").toLowerCase();
+  if (tag === "input" || tag === "textarea" || tag === "select" || tag === "button") return true;
+  return !!el.isContentEditable;
+}}
+
+async function withBusy(btn, label, fn) {{
+  const prev = btn ? btn.textContent : "";
+  try {{
+    if (btn) {{
+      btn.disabled = true;
+      btn.setAttribute("aria-busy", "true");
+      btn.textContent = label || "Working…";
+    }}
+    return await fn();
+  }} finally {{
+    if (btn) {{
+      btn.disabled = false;
+      btn.removeAttribute("aria-busy");
+      btn.textContent = prev;
+    }}
+  }}
+}}
+
+function setGuidanceChromeDisabled(on) {{
+  for (const id of ["selCtl", "btnReload", "btnJumpNext", "stepFilter"]) {{
+    const el = document.getElementById(id);
+    if (el) el.disabled = !!on;
+  }}
+  const ul = document.getElementById("stepList");
+  if (ul) ul.style.pointerEvents = on ? "none" : "";
+}}
+
 function formatReadSummary(j) {{
   const st = j.status || "";
   const vs = (j.read && j.read.value_str != null) ? j.read.value_str : (j.value_str || "");
@@ -698,27 +864,30 @@ let guidance = null;
 let selectedStepId = null;
 
 async function loadControllers() {{
-  const j = await apiJson("/api/v1/list-flows");
-  controllers = (j.flows || []).map(f => f.controller_label).filter(Boolean);
-  const sel = document.getElementById("selCtl");
-  sel.innerHTML = "";
-  for (const c of controllers) {{
-    const o = document.createElement("option");
-    o.value = c; o.textContent = c;
-    sel.appendChild(o);
-  }}
-  if (controllers.length === 0) {{
-    showFlash(document.getElementById("ctlFlash"), "No flow state found. Run compile-import then init-flow for a controller.", true);
-  }} else {{
-    document.getElementById("ctlFlash").style.display = "none";
-    const qp = guidedQueryParams();
-    const wantCtl = (qp.get("controller") || "").trim();
-    const wantStep = (qp.get("step") || "").trim();
-    if (wantCtl && controllers.includes(wantCtl)) {{
-      document.getElementById("selCtl").value = wantCtl;
+  const btn = document.getElementById("btnReload");
+  await withBusy(btn, "Loading…", async () => {{
+    const j = await apiJson("/api/v1/list-flows");
+    controllers = (j.flows || []).map(f => f.controller_label).filter(Boolean);
+    const sel = document.getElementById("selCtl");
+    sel.innerHTML = "";
+    for (const c of controllers) {{
+      const o = document.createElement("option");
+      o.value = c; o.textContent = c;
+      sel.appendChild(o);
     }}
-    await loadGuidance({{ preferStep: wantStep || null }});
-  }}
+    if (controllers.length === 0) {{
+      showFlash(document.getElementById("ctlFlash"), "No flow state found. Run compile-import then init-flow for a controller.", true);
+    }} else {{
+      document.getElementById("ctlFlash").style.display = "none";
+      const qp = guidedQueryParams();
+      const wantCtl = (qp.get("controller") || "").trim();
+      const wantStep = (qp.get("step") || "").trim();
+      if (wantCtl && controllers.includes(wantCtl)) {{
+        document.getElementById("selCtl").value = wantCtl;
+      }}
+      await loadGuidance({{ preferStep: wantStep || null }});
+    }}
+  }});
 }}
 
 function badgeClass(st) {{
@@ -733,30 +902,68 @@ async function loadGuidance(opts) {{
   const c = document.getElementById("selCtl").value;
   if (!c) return;
   selectedStepId = null;
-  guidance = await apiJson("/api/v1/guidance?controller=" + encodeURIComponent(c));
-  const g = guidance.guidance || {{}};
-  const steps = g.steps || [];
-  const ul = document.getElementById("stepList");
-  ul.innerHTML = "";
-  for (const row of steps) {{
-    const li = document.createElement("li");
-    li.dataset.sid = row.step_id;
-    li.innerHTML = `<span class="sid">${{row.step_id}}</span> — ${{row.label || ""}} ` +
-      `<span class="${{badgeClass(row.status)}}">${{row.status}}</span>`;
-    li.addEventListener("click", () => selectStep(row.step_id));
-    ul.appendChild(li);
+  setGuidanceChromeDisabled(true);
+  try {{
+    guidance = await apiJson("/api/v1/guidance?controller=" + encodeURIComponent(c));
+    const g = guidance.guidance || {{}};
+    const steps = g.steps || [];
+    const ul = document.getElementById("stepList");
+    ul.innerHTML = "";
+    for (const row of steps) {{
+      const li = document.createElement("li");
+      li.dataset.sid = row.step_id;
+      const sid = String(row.step_id || "");
+      const lab = String(row.label || "");
+      li.dataset.search = (sid + " " + lab).toLowerCase();
+      li.innerHTML = `<span class="sid">${{row.step_id}}</span> — ${{row.label || ""}} ` +
+        `<span class="${{badgeClass(row.status)}}">${{row.status}}</span>`;
+      li.addEventListener("click", () => {{ void selectStep(row.step_id); }});
+      ul.appendChild(li);
+    }}
+    applyStepFilter();
+    const next = g.next_open_step;
+    document.getElementById("nextHint").textContent = next
+      ? `Next open: ${{next.step_id}} — ${{next.label || ""}} (${{next.status}})`
+      : "All steps complete for this controller.";
+    await loadSession();
+    const stepIds = new Set((steps || []).map(s => s.step_id));
+    if (preferStep && stepIds.has(preferStep)) {{
+      await selectStep(preferStep);
+    }} else if (next && next.step_id) {{
+      await selectStep(next.step_id);
+    }}
+  }} finally {{
+    setGuidanceChromeDisabled(false);
   }}
-  const next = g.next_open_step;
-  document.getElementById("nextHint").textContent = next
-    ? `Next open: ${{next.step_id}} — ${{next.label || ""}} (${{next.status}})`
-    : "All steps complete for this controller.";
-  await loadSession();
-  const stepIds = new Set((steps || []).map(s => s.step_id));
-  if (preferStep && stepIds.has(preferStep)) {{
-    selectStep(preferStep);
-  }} else if (next && next.step_id) {{
-    selectStep(next.step_id);
+}}
+
+function visibleStepItems() {{
+  return Array.from(document.querySelectorAll("#stepList li")).filter(li => li.style.display !== "none");
+}}
+
+function applyStepFilter() {{
+  const q = (document.getElementById("stepFilter").value || "").trim().toLowerCase();
+  for (const li of document.querySelectorAll("#stepList li")) {{
+    const hay = (li.dataset.search || li.textContent || "").toLowerCase();
+    li.style.display = !q || hay.includes(q) ? "" : "none";
   }}
+}}
+
+function stepIndexInVisible(sid) {{
+  const vis = visibleStepItems();
+  return vis.findIndex(li => li.dataset.sid === sid);
+}}
+
+async function navigateVisibleStep(delta) {{
+  const vis = visibleStepItems();
+  if (!vis.length) return;
+  let idx = stepIndexInVisible(selectedStepId || "");
+  if (idx < 0) idx = delta > 0 ? -1 : 0;
+  let next = idx + delta;
+  if (next < 0) next = 0;
+  if (next >= vis.length) next = vis.length - 1;
+  const tgt = vis[next].dataset.sid;
+  if (tgt) await selectStep(tgt);
 }}
 
 async function loadSession() {{
@@ -775,16 +982,25 @@ async function renderActionForms(c, sid) {{
   const host = document.getElementById("actionForms");
   host.innerHTML = "";
   if (!c || !sid) return;
+  const loading = document.createElement("p");
+  loading.className = "small";
+  loading.textContent = "Loading step actions…";
+  host.appendChild(loading);
+  setGuidanceChromeDisabled(true);
   let hints;
   try {{
     hints = await apiJson("/api/v1/step-hints?controller=" + encodeURIComponent(c) + "&step_id=" + encodeURIComponent(sid));
   }} catch (e) {{
+    host.innerHTML = "";
     const p = document.createElement("p");
     p.className = "small";
     p.textContent = "Could not load step hints: " + e.message;
     host.appendChild(p);
     return;
+  }} finally {{
+    setGuidanceChromeDisabled(false);
   }}
+  host.innerHTML = "";
   if (hints.error) {{
     const p = document.createElement("p");
     p.className = "small";
@@ -856,16 +1072,18 @@ async function renderActionForms(c, sid) {{
           return;
         }}
         try {{
-          await apiJson("/api/v1/modulation-sweep", {{
-            method: "POST",
-            headers: {{ "Content-Type": "application/json" }},
-            body: JSON.stringify({{
-              controller: c, step_id: sid,
-              command_percents: perc,
-              dwell_seconds: parseFloat(inp2.value || "0.2"),
-              technician_name: tech,
-              note: inpN.value.trim(),
-            }}),
+          await withBusy(btn, "Running…", async () => {{
+            await apiJson("/api/v1/modulation-sweep", {{
+              method: "POST",
+              headers: {{ "Content-Type": "application/json" }},
+              body: JSON.stringify({{
+                controller: c, step_id: sid,
+                command_percents: perc,
+                dwell_seconds: parseFloat(inp2.value || "0.2"),
+                technician_name: tech,
+                note: inpN.value.trim(),
+              }}),
+            }});
           }});
           showFlash(document.getElementById("detailFlash"), "Modulation sweep completed.", false);
           await loadSession();
@@ -906,15 +1124,17 @@ async function renderActionForms(c, sid) {{
           return;
         }}
         try {{
-          await apiJson("/api/v1/airflow-adjust", {{
-            method: "POST",
-            headers: {{ "Content-Type": "application/json" }},
-            body: JSON.stringify({{
-              controller: c, step_id: sid,
-              fan_command_percent: pct,
-              technician_name: tech,
-              note: inpN.value.trim(),
-            }}),
+          await withBusy(btn, "Writing…", async () => {{
+            await apiJson("/api/v1/airflow-adjust", {{
+              method: "POST",
+              headers: {{ "Content-Type": "application/json" }},
+              body: JSON.stringify({{
+                controller: c, step_id: sid,
+                fan_command_percent: pct,
+                technician_name: tech,
+                note: inpN.value.trim(),
+              }}),
+            }});
           }});
           showFlash(document.getElementById("detailFlash"), "Airflow adjust written.", false);
           await loadSession();
@@ -946,10 +1166,12 @@ async function renderActionForms(c, sid) {{
         const body = {{ controller: c, step_id: sid, technician_name: tech, note: "guided UI" }};
         if (raw) body.initial_fan_command_percent = parseFloat(raw);
         try {{
-          await apiJson("/api/v1/airflow-closed-loop", {{
-            method: "POST",
-            headers: {{ "Content-Type": "application/json" }},
-            body: JSON.stringify(body),
+          await withBusy(btn, "Iterating…", async () => {{
+            await apiJson("/api/v1/airflow-closed-loop", {{
+              method: "POST",
+              headers: {{ "Content-Type": "application/json" }},
+              body: JSON.stringify(body),
+            }});
           }});
           showFlash(document.getElementById("detailFlash"), "Closed-loop iteration completed.", false);
           await loadSession();
@@ -1013,17 +1235,19 @@ async function renderActionForms(c, sid) {{
           return;
         }}
         try {{
-          await apiJson("/api/v1/manual-airflow", {{
-            method: "POST",
-            headers: {{ "Content-Type": "application/json" }},
-            body: JSON.stringify({{
-              controller: c, step_id: sid,
-              branch_id: bid,
-              measured_flow_L_s: flow,
-              measurement_tool: tool,
-              technician_name: tech,
-              note: inpN.value.trim(),
-            }}),
+          await withBusy(btn, "Saving…", async () => {{
+            await apiJson("/api/v1/manual-airflow", {{
+              method: "POST",
+              headers: {{ "Content-Type": "application/json" }},
+              body: JSON.stringify({{
+                controller: c, step_id: sid,
+                branch_id: bid,
+                measured_flow_L_s: flow,
+                measurement_tool: tool,
+                technician_name: tech,
+                note: inpN.value.trim(),
+              }}),
+            }});
           }});
           showFlash(document.getElementById("detailFlash"), "Manual airflow recorded.", false);
           await loadSession();
@@ -1065,15 +1289,17 @@ async function renderActionForms(c, sid) {{
           return;
         }}
         try {{
-          await apiJson("/api/v1/confirm-prompt", {{
-            method: "POST",
-            headers: {{ "Content-Type": "application/json" }},
-            body: JSON.stringify({{
-              controller: c, step_id: sid,
-              prompt_id: pid,
-              technician_name: tech,
-              note: inpN.value.trim(),
-            }}),
+          await withBusy(btn, "Confirming…", async () => {{
+            await apiJson("/api/v1/confirm-prompt", {{
+              method: "POST",
+              headers: {{ "Content-Type": "application/json" }},
+              body: JSON.stringify({{
+                controller: c, step_id: sid,
+                prompt_id: pid,
+                technician_name: tech,
+                note: inpN.value.trim(),
+              }}),
+            }});
           }});
           showFlash(document.getElementById("detailFlash"), "Prompt confirmation recorded.", false);
           await loadSession();
@@ -1087,7 +1313,7 @@ async function renderActionForms(c, sid) {{
   }}
 }}
 
-function selectStep(sid) {{
+async function selectStep(sid) {{
   selectedStepId = sid;
   for (const li of document.querySelectorAll("#stepList li")) {{
     li.classList.toggle("active", li.dataset.sid === sid);
@@ -1132,7 +1358,7 @@ function selectStep(sid) {{
   }}
   document.getElementById("cmdRaw").textContent = list.length ? list.join("\\n") : "";
   const c = document.getElementById("selCtl").value;
-  renderActionForms(c, sid);
+  await renderActionForms(c, sid);
   updateGuidedUrl();
 }}
 
@@ -1149,13 +1375,13 @@ function updateGuidedUrl() {{
   }} catch (e) {{}}
 }}
 
-document.getElementById("btnJumpNext").addEventListener("click", () => {{
+document.getElementById("btnJumpNext").addEventListener("click", async () => {{
   const g = guidance && guidance.guidance;
   const next = g && g.next_open_step;
   if (next && next.step_id) {{
-    selectStep(next.step_id);
+    await selectStep(next.step_id);
     for (const li of document.querySelectorAll("#stepList li")) {{
-      if (li.dataset.sid === next.step_id) {{
+      if (li.dataset.sid === next.step_id && li.style.display !== "none") {{
         li.scrollIntoView({{ block: "nearest", behavior: "smooth" }});
         break;
       }}
@@ -1167,6 +1393,16 @@ document.getElementById("btnJumpNext").addEventListener("click", () => {{
 
 document.getElementById("btnReload").addEventListener("click", loadControllers);
 document.getElementById("selCtl").addEventListener("change", () => {{ loadGuidance(); }});
+document.getElementById("stepFilter").addEventListener("input", applyStepFilter);
+
+document.addEventListener("keydown", (ev) => {{
+  if (ev.key !== "j" && ev.key !== "k") return;
+  if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  if (isTypingContext(document.activeElement)) return;
+  ev.preventDefault();
+  if (ev.key === "j") void navigateVisibleStep(1);
+  else void navigateVisibleStep(-1);
+}});
 
 document.getElementById("btnSess").addEventListener("click", async () => {{
   const c = document.getElementById("selCtl").value;
@@ -1179,11 +1415,14 @@ document.getElementById("btnSess").addEventListener("click", async () => {{
     showFlash(document.getElementById("detailFlash"), "Session key and technician (or shared name) are required.", true);
     return;
   }}
+  const btn = document.getElementById("btnSess");
   try {{
-    await apiJson("/api/v1/set-session", {{
-      method: "POST",
-      headers: {{ "Content-Type": "application/json" }},
-      body: JSON.stringify({{ controller: c, key, value: val, technician_name: techUse, note }}),
+    await withBusy(btn, "Saving…", async () => {{
+      await apiJson("/api/v1/set-session", {{
+        method: "POST",
+        headers: {{ "Content-Type": "application/json" }},
+        body: JSON.stringify({{ controller: c, key, value: val, technician_name: techUse, note }}),
+      }});
     }});
     showFlash(document.getElementById("detailFlash"), "Session value saved.", false);
     await loadSession();
@@ -1204,11 +1443,14 @@ document.getElementById("btnRecord").addEventListener("click", async () => {{
     showFlash(document.getElementById("detailFlash"), "Step ID and technician (or shared name) are required.", true);
     return;
   }}
+  const btn = document.getElementById("btnRecord");
   try {{
-    await apiJson("/api/v1/record-step", {{
-      method: "POST",
-      headers: {{ "Content-Type": "application/json" }},
-      body: JSON.stringify({{ controller: c, step_id, status, technician_name: techRec, note }}),
+    await withBusy(btn, "Recording…", async () => {{
+      await apiJson("/api/v1/record-step", {{
+        method: "POST",
+        headers: {{ "Content-Type": "application/json" }},
+        body: JSON.stringify({{ controller: c, step_id, status, technician_name: techRec, note }}),
+      }});
     }});
     showFlash(document.getElementById("detailFlash"), "Step recorded.", false);
     await loadGuidance();
@@ -1219,9 +1461,12 @@ document.getElementById("btnRecord").addEventListener("click", async () => {{
 
 document.getElementById("btnCheckout").addEventListener("click", async () => {{
   const c = document.getElementById("selCtl").value;
+  const btn = document.getElementById("btnCheckout");
   try {{
-    const j = await apiJson("/api/v1/bacnet-point-checkout?controller=" + encodeURIComponent(c), {{
-      method: "POST",
+    const j = await withBusy(btn, "Reading…", async () => {{
+      return await apiJson("/api/v1/bacnet-point-checkout?controller=" + encodeURIComponent(c), {{
+        method: "POST",
+      }});
     }});
     const ok = j.all_read_ok ? "Point checkout OK." : "Point checkout had failures (see CLI output).";
     showFlash(document.getElementById("detailFlash"), ok, !j.all_read_ok);
@@ -1234,16 +1479,18 @@ document.getElementById("btnQrRead").addEventListener("click", async () => {{
   const c = document.getElementById("selCtl").value;
   const object_id = document.getElementById("qrOid").value.trim();
   const property = (document.getElementById("qrProp").value.trim() || "presentValue");
-  const technician_name = document.getElementById("commonTech").value.trim();
   if (!c || !object_id) {{
     showFlash(document.getElementById("detailFlash"), "Controller and object id required.", true);
     return;
   }}
+  const btn = document.getElementById("btnQrRead");
   try {{
-    const j = await apiJson("/api/v1/bacnet-quick-read", {{
-      method: "POST",
-      headers: {{ "Content-Type": "application/json" }},
-      body: JSON.stringify({{ controller: c, object_id, property }}),
+    const j = await withBusy(btn, "Reading…", async () => {{
+      return await apiJson("/api/v1/bacnet-quick-read", {{
+        method: "POST",
+        headers: {{ "Content-Type": "application/json" }},
+        body: JSON.stringify({{ controller: c, object_id, property }}),
+      }});
     }});
     showFlash(document.getElementById("detailFlash"), formatReadSummary(j), (j.status || "") !== "read_ok");
   }} catch (e) {{
@@ -1260,11 +1507,14 @@ document.getElementById("btnQrBatch").addEventListener("click", async () => {{
     showFlash(document.getElementById("detailFlash"), "Controller and at least one read line required.", true);
     return;
   }}
+  const btn = document.getElementById("btnQrBatch");
   try {{
-    const j = await apiJson("/api/v1/bacnet-quick-read-batch", {{
-      method: "POST",
-      headers: {{ "Content-Type": "application/json" }},
-      body: JSON.stringify({{ controller: c, reads, mode }}),
+    const j = await withBusy(btn, "Batch…", async () => {{
+      return await apiJson("/api/v1/bacnet-quick-read-batch", {{
+        method: "POST",
+        headers: {{ "Content-Type": "application/json" }},
+        body: JSON.stringify({{ controller: c, reads, mode }}),
+      }});
     }});
     const msg = (j.all_read_ok ? "" : "Some reads failed. ") + formatBatchSummary(j);
     showFlash(document.getElementById("detailFlash"), msg, !j.all_read_ok);
@@ -1287,11 +1537,14 @@ document.getElementById("btnQwWrite").addEventListener("click", async () => {{
     showFlash(document.getElementById("detailFlash"), "Set shared technician name first.", true);
     return;
   }}
+  const btn = document.getElementById("btnQwWrite");
   try {{
-    const j = await apiJson("/api/v1/bacnet-quick-write", {{
-      method: "POST",
-      headers: {{ "Content-Type": "application/json" }},
-      body: JSON.stringify({{ controller: c, object_id, value: raw, technician_name, note: "guided quick write", execute }}),
+    const j = await withBusy(btn, execute ? "Writing…" : "Dry-run…", async () => {{
+      return await apiJson("/api/v1/bacnet-quick-write", {{
+        method: "POST",
+        headers: {{ "Content-Type": "application/json" }},
+        body: JSON.stringify({{ controller: c, object_id, value: raw, technician_name, note: "guided quick write", execute }}),
+      }});
     }});
     const st = j.status || "";
     const line = execute
@@ -1312,11 +1565,14 @@ document.getElementById("btnTacho").addEventListener("click", async () => {{
     showFlash(document.getElementById("detailFlash"), "Select a step and enter technician (or shared name).", true);
     return;
   }}
+  const btn = document.getElementById("btnTacho");
   try {{
-    await apiJson("/api/v1/tachometer-confirm", {{
-      method: "POST",
-      headers: {{ "Content-Type": "application/json" }},
-      body: JSON.stringify({{ controller: c, step_id, technician_name, note }}),
+    await withBusy(btn, "Reading…", async () => {{
+      await apiJson("/api/v1/tachometer-confirm", {{
+        method: "POST",
+        headers: {{ "Content-Type": "application/json" }},
+        body: JSON.stringify({{ controller: c, step_id, technician_name, note }}),
+      }});
     }});
     showFlash(document.getElementById("detailFlash"), "Tachometer reference confirmed.", false);
     await loadSession();
@@ -1410,6 +1666,19 @@ header a:hover {{ text-decoration: underline; }}
 .chk {{ display: flex; align-items: center; gap: 0.35rem; margin-top: 0.35rem; font-size: 0.78rem; color: var(--muted); }}
 .chk input {{ width: auto; accent-color: var(--accent); }}
 .empty {{ color: var(--muted); padding: 1rem 0; }}
+.dash-flow-block {{
+  font-size: 0.78rem; color: #c5d4e8; margin: 0.5rem 0 0.35rem; padding: 0.5rem 0.55rem;
+  border-radius: var(--radius-sm); border: 1px solid var(--border); background: rgba(13,18,24,0.65);
+  line-height: 1.4;
+}}
+.dash-mode-line {{ font-size: 0.76rem; color: var(--muted); margin: 0.25rem 0 0.15rem; line-height: 1.35; }}
+.dash-io-snap {{
+  font-size: 0.72rem; color: #b8c9dc; margin: 0.35rem 0 0.25rem; padding: 0.45rem 0.5rem;
+  border-radius: var(--radius-sm); border: 1px dashed #3d4d66; font-family: ui-monospace, monospace;
+  white-space: pre-wrap; max-height: 5.5rem; overflow: auto; line-height: 1.35;
+}}
+button:disabled {{ opacity: 0.62; cursor: not-allowed; }}
+.toolbar button:disabled {{ filter: none; }}
 </style></head>
 <body>
 <header>
@@ -1429,7 +1698,9 @@ header a:hover {{ text-decoration: underline; }}
 <div id="globalFlash"></div>
 <div class="dash-wrap">
   <p class="sub" style="color:var(--muted);font-size:0.82rem;margin:0 0 0.75rem">
-    One card per controller from <code>runtime-job.json</code>. Reads and writes use the same profile allowlists as the CLI.
+    One card per controller from <code>runtime-job.json</code>. Each card shows <strong>flow progress</strong> (from
+    <code>state/flows/*.json</code> when <code>init-flow</code> has been run), a live <strong>mode / MSV</strong> read when the profile defines one,
+    and a small <strong>I/O snapshot</strong> from the first point-checkout objects. Manual read/write still use the same allowlists as the CLI.
     Use <strong>Sequential</strong> batch mode if the device rejects ReadPropertyMultiple.
   </p>
   <div class="dash-grid" id="dashGrid"></div>
@@ -1456,6 +1727,24 @@ function persistDashTech() {{
 document.getElementById("dashTech").addEventListener("input", persistDashTech);
 document.getElementById("dashTech").addEventListener("change", persistDashTech);
 loadDashTech();
+
+async function withBusy(btn, label, fn) {{
+  const prev = btn ? btn.textContent : "";
+  try {{
+    if (btn) {{
+      btn.disabled = true;
+      btn.setAttribute("aria-busy", "true");
+      btn.textContent = label || "Working…";
+    }}
+    return await fn();
+  }} finally {{
+    if (btn) {{
+      btn.disabled = false;
+      btn.removeAttribute("aria-busy");
+      btn.textContent = prev;
+    }}
+  }}
+}}
 
 function showGlobal(msg, isErr) {{
   const el = document.getElementById("globalFlash");
@@ -1503,6 +1792,24 @@ function formatBatchSummary(j) {{
   return ok + "/" + rows.length + " OK" + (parts.length ? ": " + parts.join(", ") : "") + more;
 }}
 
+function formatFlowSummary(row) {{
+  if (!row.flow_initialized) {{
+    return "Flow: not initialized — run init-flow for this controller.";
+  }}
+  const n = row.flow_step_count || 0;
+  const c = row.flow_status_counts || {{}};
+  const parts = ["passed", "manual_passed", "failed", "skipped", "pending"]
+    .map(k => (c[k] ? (k + "=" + c[k]) : null)).filter(Boolean);
+  const tail = parts.length ? parts.join(", ") : "no steps";
+  if (row.flow_complete) {{
+    return "Flow: complete (" + n + " steps, " + tail + ").";
+  }}
+  const nid = row.flow_next_step_id || "?";
+  const nl = (row.flow_next_step_label || "").trim();
+  const ns = row.flow_next_step_status || "pending";
+  return "Flow: " + n + " steps — next " + nid + (nl ? " (" + nl + ")" : "") + " [" + ns + "]. " + tail;
+}}
+
 function buildCard(row) {{
   const lab = row.controller_label;
   const card = document.createElement("div");
@@ -1525,6 +1832,87 @@ function buildCard(row) {{
   lg.textContent = "Open in guided →";
   card.appendChild(lg);
 
+  const flowEl = document.createElement("div");
+  flowEl.className = "dash-flow-block";
+  flowEl.textContent = formatFlowSummary(row);
+  card.appendChild(flowEl);
+
+  const modeOid = (row.dashboard_test_mode_object_id || "").trim();
+  const modeLine = document.createElement("div");
+  modeLine.className = "dash-mode-line";
+  modeLine.textContent = modeOid
+    ? ("Mode object: " + modeOid + " (presentValue)")
+    : "Mode object: (no MSV in profile map)";
+  card.appendChild(modeLine);
+  const modeOut = document.createElement("div");
+  modeOut.className = "probe-out";
+  modeOut.textContent = "";
+  const bMode = document.createElement("button");
+  bMode.type = "button";
+  bMode.textContent = "Read mode / MSV";
+  bMode.disabled = !modeOid;
+  bMode.addEventListener("click", async () => {{
+    if (!modeOid) return;
+    try {{
+      const j = await withBusy(bMode, "Reading…", async () => {{
+        return await apiJson("/api/v1/bacnet-quick-read", {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{ controller: lab, object_id: modeOid, property: "presentValue" }}),
+        }});
+      }});
+      const vs = (j.read && j.read.value_str != null) ? j.read.value_str : (j.value_str || "");
+      modeOut.textContent = vs ? ("mode state #" + vs) : (j.status || "?");
+      cardFlash(card, formatReadSummary(j), (j.status || "") !== "read_ok");
+    }} catch (e) {{
+      modeOut.textContent = "";
+      cardFlash(card, String(e.message), true);
+    }}
+  }});
+  card.appendChild(bMode);
+  card.appendChild(modeOut);
+
+  const reads = row.dashboard_io_reads || [];
+  const ioLbl = document.createElement("div");
+  ioLbl.className = "dash-mode-line";
+  ioLbl.textContent = reads.length
+    ? ("I/O snapshot (" + reads.length + " point-checkout reads)")
+    : "I/O snapshot: (no point_checkout in profile)";
+  card.appendChild(ioLbl);
+  const ioSnap = document.createElement("div");
+  ioSnap.className = "dash-io-snap";
+  ioSnap.textContent = "(not loaded)";
+  const bIo = document.createElement("button");
+  bIo.type = "button";
+  bIo.textContent = "Refresh I/O snapshot";
+  bIo.disabled = !reads.length;
+  bIo.addEventListener("click", async () => {{
+    if (!reads.length) return;
+    try {{
+      const j = await withBusy(bIo, "Reading…", async () => {{
+        return await apiJson("/api/v1/bacnet-quick-read-batch", {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{ controller: lab, reads, mode: "multiple" }}),
+        }});
+      }});
+      const lines = [];
+      for (const r of (j.reads || [])) {{
+        const oid = (r.profile_object_id || "").trim();
+        const st = (r.status || "").trim();
+        const vs = (r.read && r.read.value_str != null) ? r.read.value_str : (r.value_str || "");
+        lines.push(oid + ": " + st + (vs ? (" → " + vs) : ""));
+      }}
+      ioSnap.textContent = lines.length ? lines.join(String.fromCharCode(10)) : "(no rows)";
+      cardFlash(card, formatBatchSummary(j), !j.all_read_ok);
+    }} catch (e) {{
+      ioSnap.textContent = "(error)";
+      cardFlash(card, String(e.message), true);
+    }}
+  }});
+  card.appendChild(bIo);
+  card.appendChild(ioSnap);
+
   const bProbe = document.createElement("button");
   bProbe.type = "button";
   bProbe.textContent = "Probe B/IP";
@@ -1532,10 +1920,12 @@ function buildCard(row) {{
   probeOut.className = "probe-out";
   bProbe.addEventListener("click", async () => {{
     try {{
-      const j = await apiJson("/api/v1/dashboard-probe", {{
-        method: "POST",
-        headers: {{ "Content-Type": "application/json" }},
-        body: JSON.stringify({{ controller: lab }}),
+      const j = await withBusy(bProbe, "Probing…", async () => {{
+        return await apiJson("/api/v1/dashboard-probe", {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{ controller: lab }}),
+        }});
       }});
       const st = (j.probe && j.probe.status) || j.status || "?";
       probeOut.textContent = "probe: " + st;
@@ -1566,10 +1956,12 @@ function buildCard(row) {{
     const prop = (inRprop.value || "presentValue").trim();
     if (!oid) {{ cardFlash(card, "Object id required.", true); return; }}
     try {{
-      const j = await apiJson("/api/v1/bacnet-quick-read", {{
-        method: "POST",
-        headers: {{ "Content-Type": "application/json" }},
-        body: JSON.stringify({{ controller: lab, object_id: oid, property: prop }}),
+      const j = await withBusy(bRead, "Reading…", async () => {{
+        return await apiJson("/api/v1/bacnet-quick-read", {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{ controller: lab, object_id: oid, property: prop }}),
+        }});
       }});
       cardFlash(card, formatReadSummary(j), (j.status || "") !== "read_ok");
     }} catch (e) {{ cardFlash(card, String(e.message), true); }}
@@ -1596,10 +1988,12 @@ function buildCard(row) {{
     const reads = (ta.value || "").split(/\\r?\\n/).map(s => s.trim()).filter(Boolean);
     if (!reads.length) {{ cardFlash(card, "Enter at least one line.", true); return; }}
     try {{
-      const j = await apiJson("/api/v1/bacnet-quick-read-batch", {{
-        method: "POST",
-        headers: {{ "Content-Type": "application/json" }},
-        body: JSON.stringify({{ controller: lab, reads, mode: sel.value }}),
+      const j = await withBusy(bBatch, "Batch…", async () => {{
+        return await apiJson("/api/v1/bacnet-quick-read-batch", {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{ controller: lab, reads, mode: sel.value }}),
+        }});
       }});
       const msg = (j.all_read_ok ? "" : "Some failed. ") + formatBatchSummary(j);
       cardFlash(card, msg, !j.all_read_ok);
@@ -1638,13 +2032,15 @@ function buildCard(row) {{
     if (!oid || !raw) {{ cardFlash(card, "Object id and value required.", true); return; }}
     if (!tech) {{ cardFlash(card, "Set technician (toolbar) for writes.", true); return; }}
     try {{
-      const j = await apiJson("/api/v1/bacnet-quick-write", {{
-        method: "POST",
-        headers: {{ "Content-Type": "application/json" }},
-        body: JSON.stringify({{
-          controller: lab, object_id: oid, value: raw, technician_name: tech,
-          note: "dashboard manual", execute: cb.checked,
-        }}),
+      const j = await withBusy(bWr, cb.checked ? "Writing…" : "Dry-run…", async () => {{
+        return await apiJson("/api/v1/bacnet-quick-write", {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{
+            controller: lab, object_id: oid, value: raw, technician_name: tech,
+            note: "dashboard manual", execute: cb.checked,
+          }}),
+        }});
       }});
       const st = j.status || "";
       const line = cb.checked ? ("Write " + st + ": " + oid + "=" + raw) : ("Dry-run " + st + ": " + oid + "=" + raw);
@@ -1666,10 +2062,13 @@ function buildCard(row) {{
 
 async function loadDashboard() {{
   const grid = document.getElementById("dashGrid");
+  const btn = document.getElementById("btnDashReload");
   grid.innerHTML = "";
   document.getElementById("globalFlash").style.display = "none";
   try {{
-    const j = await apiJson("/api/v1/dashboard-controllers");
+    const j = await withBusy(btn, "Loading…", async () => {{
+      return await apiJson("/api/v1/dashboard-controllers");
+    }});
     const rows = j.controllers || [];
     if (!rows.length) {{
       const p = document.createElement("p");
@@ -1790,7 +2189,7 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             self._send_json(
                 200,
-                {"controllers": _dashboard_controller_summaries(job)},
+                {"controllers": _dashboard_controller_summaries(job, run_dir=self.run_dir)},
             )
             return
         if path == "/api/v1/list-flows":

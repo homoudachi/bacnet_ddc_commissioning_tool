@@ -18,13 +18,13 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 _EXPECTED_SHA256 = {
     "operator-guided-ui-wide.png": (
-        "b209f986524c454a3358b3fdb36603151d8779852e726fd1d4967554c33e37a2"
+        "294eb332927e073558592696c562ac5814365714dfc71b36f26514f0479566ec"
     ),
     "operator-guided-ui-mobile.png": (
-        "ae606ffc2222671306016d7b123d2ef11fec8f9b254d571c4fb5a0b641c2805b"
+        "d89ea7bc326a7a1f2c5b16c87a5bea48a1b62874f1c55cc59d9fcd948e41bf6d"
     ),
     "operator-dashboard-wide.png": (
-        "0f0d1cefef4b257c6a95afee3af55650902601a9b7139a7ea55e7d3704eaceca"
+        "7b2d8908e23c2c9bde4d3173efc40ef26e80c1a63298e5c259050377864659d0"
     ),
     "operator-advanced-cli-form.png": (
         "16269a84af08331ff581521fb957d33dd4d705c6e2c8272299207cc740d9104c"

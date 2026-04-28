@@ -14,7 +14,9 @@ The **Quick BACnet** strip uses three cards: **Read one point**, **Read batch** 
 
 **Jump to next:** **Jump to next open step** selects **`next_open_step`** from **`commissioning-guided-next`** and scrolls it into view in the step list.
 
-**`/dashboard`** lists every controller from **`runtime-job.json`** in a responsive grid. Each card has **Probe B/IP** (`probe-bip`), the same **read / read batch / write** controls as guided (toolbar **Technician** is required for writes), per-card result toasts, and **Open in guided →** (`/guided?controller=…`).
+**`/dashboard`** lists every controller from **`runtime-job.json`** in a responsive grid. Each card shows **flow progress** (from **`state/flows/<label>.json`** after **`init-flow`**), **Read mode / MSV** (uses profile **`msv_test_mode`** or the first **multiStateValue** in **`objects_by_id`**), and **Refresh I/O snapshot** (batch read of the first few **`point_checkout`** objects — on demand, no background polling). Cards also have **Probe B/IP** (`probe-bip`), the same manual **read / read batch / write** controls as guided (toolbar **Technician** is required for writes), per-card result toasts, and **Open in guided →** (`/guided?controller=…`). Long BACnet calls disable the clicked button and show a short **Working…** label.
+
+**Guided step list:** **Filter steps** narrows the list by step id or label substring. **`j`** / **`k`** move among **visible** steps when focus is not in an input. BACnet and other slow actions show **busy** button state.
 
 ## Screenshots in this repo
 

@@ -39,13 +39,18 @@ Make the local operator UI **faster for repeat field use**, **easier to navigate
 
 ### Phase 2 — Feedback and resilience
 
-- [ ] Disable primary buttons and show **“Working…”** (or `aria-busy`) during **`fetch`** for BACnet and long-running actions; re-enable on settle.
+- [x] Disable primary buttons and show **“Working…”** (or `aria-busy`) during **`fetch`** for BACnet and long-running actions; re-enable on settle (**/guided** + **/dashboard**).
 - [ ] Optional **last BACnet result** strip (collapsed by default) storing the last JSON **status** line per page for support screenshots.
 
 ### Phase 3 — Navigation and power use
 
-- [ ] **Search / filter** step list by id or label substring when flows have many steps.
-- [ ] **Keyboard**: `j` / `k` for next/previous step in the focused controller (when focus is not in an input).
+- [x] **Search / filter** step list by id or label substring when flows have many steps.
+- [x] **Keyboard**: `j` / `k` for next/previous **visible** step (when focus is not in an input).
+
+### Phase 2b — Dashboard situational awareness (2026-04-24)
+
+- [x] **`GET /api/v1/dashboard-controllers`** enriched per controller: **flow** summary from `state/flows/<label>.json` (step counts, status histogram, next open step, complete flag), **`dashboard_io_reads`** (first N `point_checkout` object ids), **`dashboard_test_mode_object_id`** (`msv_test_mode` or first MSV in `objects_by_id`).
+- [x] Dashboard cards: **Read mode / MSV** and **Refresh I/O snapshot** (on-demand BACnet; no auto-poll).
 
 ### Phase 4 — Theming (optional)
 
@@ -70,3 +75,4 @@ Pass: all tests green; manually open **`/guided?controller=…`**, **`/dashboard
 ## Revision
 
 - **2026-04-24:** Initial plan (post-dashboard assessment).
+- **2026-04-24:** Phase 2 busy states, Phase 3 step filter + `j`/`k`, dashboard flow + mode + I/O snapshot API/UI.
